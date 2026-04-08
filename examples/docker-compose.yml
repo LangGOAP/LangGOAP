@@ -1,0 +1,15 @@
+name: langgoap-notebooks
+services:
+  jupyter:
+    build:
+      context: .
+      dockerfile: Dockerfile.jupyter
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./:/home/jupyter/workspace/examples
+      - ../:/home/jupyter/workspace/langgoap
+    environment:
+      - USER_AGENT=LangGoapJupyterNotebooks/0.1.0
+    user: jupyter
+    working_dir: /home/jupyter/workspace/examples

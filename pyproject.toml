@@ -1,0 +1,128 @@
+[project]
+name = "langgoap"
+version = "0.1.0"
+description = "Goal-Oriented Action Planning framework for LangGraph with constraint optimization."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10,<3.15"
+authors = [
+    { name = "Brian Sam-Bodden", email = "bsb@integrallis.com" },
+    { name = "Integrallis Software", email = "info@integrallis.com" },
+]
+keywords = ["ai", "goap", "planning", "agents", "langgraph", "langchain", "constraint-satisfaction"]
+classifiers = [
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "License :: OSI Approved :: MIT License",
+]
+
+dependencies = [
+    "langgraph>=1.0.0,<2.0.0",
+    "langgraph-checkpoint>=4.0.0,<5.0.0",
+    "ortools>=9.8",
+]
+
+[project.urls]
+Repository = "https://github.com/integrallis/langgoap"
+Documentation = "https://integrallis.github.io/langgoap"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["langgoap"]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.4",
+    "pytest-asyncio>=1.1.0",
+    "pytest-xdist[psutil]>=3.8.0",
+    "pytest-mock>=3.14",
+    "pytest-cov>=6.2",
+    "testcontainers>=4.12.0",
+    "black>=25.1.0",
+    "isort>=6.0.1",
+    "mypy>=1.11.0,<2",
+    "coverage>=7.10",
+    "vulture>=2.14",
+    "langchain-openai>=0.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers --strict-config --durations=5 -vv"
+asyncio_mode = "auto"
+filterwarnings = [
+    "ignore::DeprecationWarning:testcontainers.core.waiting_utils",
+]
+
+[tool.black]
+target-version = ['py310', 'py312']
+exclude = '''
+(
+  | \.egg
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.nox
+  | \.tox
+  | \.venv
+  | _build
+  | build
+  | dist
+  | setup.py
+)
+'''
+
+[tool.mypy]
+disallow_untyped_defs = true
+explicit_package_bases = true
+warn_no_return = false
+warn_unused_ignores = false
+warn_redundant_casts = true
+allow_redefinition = true
+ignore_missing_imports = true
+disable_error_code = "typeddict-item, return-value, union-attr, operator, assignment"
+
+[tool.coverage.run]
+source = ["langgoap"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "*/__pycache__/*",
+    "*/scripts.py",
+    "*/examples/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+show_missing = true
+skip_covered = false
+skip_empty = true
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+[tool.vulture]
+paths = ["langgoap"]
+exclude = ["*test*", "*example*"]
+min_confidence = 80
+sort_by_size = true
+
+[tool.isort]
+profile = "black"

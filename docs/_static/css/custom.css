@@ -1,0 +1,122 @@
+.logo__image {
+    transform: scale(.7);
+}
+
+/* Show the primary sidebar on the landing page (override hide-on-wide) */
+.bd-sidebar-primary.hide-on-wide {
+    display: flex !important;
+}
+
+/* Sidebar navigation hover styles - gray background only (light mode) */
+html[data-theme="light"] .bd-sidebar-primary .toctree-l1 > a:hover,
+html[data-theme="light"] .bd-sidebar-primary .toctree-l2 > a:hover,
+html[data-theme="light"] .bd-sidebar-primary .toctree-l3 > a:hover,
+html[data-theme="light"] .bd-sidebar-primary nav.bd-links a:hover {
+    background-color: rgba(0, 0, 0, 0.04) !important;
+    border-radius: 8px !important;
+    color: inherit !important;
+    text-decoration: none !important;
+}
+
+/* Sidebar navigation hover styles (dark mode) */
+html[data-theme="dark"] .bd-sidebar-primary .toctree-l1 > a:hover,
+html[data-theme="dark"] .bd-sidebar-primary .toctree-l2 > a:hover,
+html[data-theme="dark"] .bd-sidebar-primary .toctree-l3 > a:hover,
+html[data-theme="dark"] .bd-sidebar-primary nav.bd-links a:hover {
+    background-color: rgba(255, 255, 255, 0.08) !important;
+    border-radius: 8px !important;
+    color: inherit !important;
+    text-decoration: none !important;
+}
+
+/* Active/current page styling (light mode) */
+html[data-theme="light"] .bd-sidebar-primary .toctree-l1.current.active > a,
+html[data-theme="light"] .bd-sidebar-primary .toctree-l2.current > a,
+html[data-theme="light"] .bd-sidebar-primary li.current.active > a.reference.internal {
+    background-color: rgba(0, 0, 0, 0.06) !important;
+    border-radius: 8px !important;
+    border-left: none !important;
+    color: inherit !important;
+}
+
+/* Active/current page styling (dark mode) */
+html[data-theme="dark"] .bd-sidebar-primary .toctree-l1.current.active > a,
+html[data-theme="dark"] .bd-sidebar-primary .toctree-l2.current > a,
+html[data-theme="dark"] .bd-sidebar-primary li.current.active > a.reference.internal {
+    background-color: rgba(255, 255, 255, 0.1) !important;
+    border-radius: 8px !important;
+    border-left: none !important;
+    color: inherit !important;
+}
+
+/* Override default link colors in sidebar */
+.bd-sidebar-primary nav.bd-links a,
+.bd-sidebar-primary nav.bd-links a:visited,
+.bd-sidebar-primary nav.bd-links a:active,
+.bd-sidebar-primary nav.bd-links a:focus {
+    color: var(--pst-color-text-base) !important;
+    text-decoration: none !important;
+    border-left: none !important;
+}
+
+.bd-sidebar-primary nav.bd-links a:hover {
+    color: var(--pst-color-text-base) !important;
+    text-decoration: none !important;
+}
+
+/* Remove blue left border (box-shadow) from expanded/active sections */
+nav.bd-links .current > a,
+nav.bd-links .current > a:focus-visible {
+    box-shadow: none !important;
+    border-left: none !important;
+    color: inherit !important;
+    font-weight: inherit !important;
+}
+
+/* Code block border radius */
+div.literal-block-wrapper,
+div.highlight,
+div[class*=highlight-] {
+    border-radius: 8px !important;
+}
+
+div.literal-block-wrapper div[class*=highlight-] pre,
+pre {
+    border-radius: 8px !important;
+}
+
+/* -- Version switcher ------------------------------------------------------ */
+.version-switcher {
+    padding: 0.5rem 1rem 1rem;
+    border-top: 1px solid var(--pst-color-border);
+    margin-top: 0.5rem;
+}
+
+.version-switcher h4 {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--pst-color-text-muted);
+    margin: 0.5rem 0 0.4rem;
+}
+
+.version-switcher select {
+    width: 100%;
+    padding: 0.35rem 0.5rem;
+    font-size: 0.85rem;
+    border: 1px solid var(--pst-color-border);
+    border-radius: 6px;
+    background-color: var(--pst-color-surface);
+    color: var(--pst-color-text-base);
+    cursor: pointer;
+    appearance: auto;
+}
+
+.version-switcher select:hover {
+    border-color: var(--pst-color-text-muted);
+}
+
+.version-switcher select:focus {
+    outline: 2px solid var(--pst-color-primary);
+    outline-offset: 1px;
+}
