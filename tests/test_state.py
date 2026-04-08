@@ -1,0 +1,129 @@
+"""Tests for PlanningState — immutable, hashable world state representation."""
+
+from __future__ import annotations
+
+import pytest
+
+from langgoap.state import PlanningState
+
+
+class TestPlanningStateCreation:
+    def test_from_dict_creates_state(self) -> None:
+        state = PlanningState.from_dict({"a": 1, "b": True})
+        assert state.to_dict() == {"a": 1, "b": True}
+
+    def test_from_empty_dict(self) -> None:
+        state = PlanningState.from_dict({})
+        assert state.to_dict() == {}
+        assert len(state) == 0
+
+    def test_to_dict_returns_mutable_copy(self) -> None:
+        state = PlanningState.from_dict({"x": 1})
+        d = state.to_dict()
+        d["x"] = 999
+        assert state.to_dict() == {"x": 1}
+
+
+class TestPlanningStateImmutability:
+    def test_frozen_raises_on_attribute_set(self) -> None:
+        state = PlanningState.from_dict({"a": 1})
+        with pytest.raises(AttributeError):
+            state._items = frozenset()  # type: ignore[misc]
+
+    def test_hashable(self) -> None:
+        s1 = PlanningState.from_dict({"a": 1, "b": 2})
+        s2 = PlanningState.from_dict({"a": 1, "b": 2})
+        assert hash(s1) == hash(s2)
+        assert {s1, s2} == {s1}
+
+    def test_usable_as_dict_key(self) -> None:
+        state = PlanningState.from_dict({"x": 10})
+        d = {state: "value"}
+        assert d[state] == "value"
+
+
+class TestPlanningStateEquality:
+    def test_equal_states(self) -> None:
+        s1 = PlanningState.from_dict({"a": 1, "b": 2})
+        s2 = PlanningState.from_dict({"b": 2, "a": 1})
+        assert s1 == s2
+
+    def test_unequal_states(self) -> None:
+        s1 = PlanningState.from_dict({"a": 1})
+        s2 = PlanningState.from_dict({"a": 2})
+        assert s1 != s2
+
+    def test_different_keys(self) -> None:
+        s1 = PlanningState.from_dict({"a": 1})
+        s2 = PlanningState.from_dict({"b": 1})
+        assert s1 != s2
+
+
+class TestPlanningStateSatisfies:
+    def test_satisfies_all_conditions(self) -> None:
+        state = PlanningState.from_dict({"a": 1, "b": True, "c": "yes"})
+        assert state.satisfies({"a": 1, "b": True})
+
+    def test_fails_on_wrong_value(self) -> None:
+        state = PlanningState.from_dict({"a": 1, "b": False})
+        assert not state.satisfies({"b": True})
+
+    def test_fails_on_missing_key(self) -> None:
+        state = PlanningState.from_dict({"a": 1})
+        assert not state.satisfies({"missing": True})
+
+    def test_empty_conditions_always_satisfied(self) -> None:
+        state = PlanningState.from_dict({"a": 1})
+        assert state.satisfies({})
+
+    def test_empty_state_fails_nonempty_conditions(self) -> None:
+        state = PlanningState.from_dict({})
+        assert not state.satisfies({"a": 1})
+
+
+class TestPlanningStateApply:
+    def test_apply_adds_new_keys(self) -> None:
+        state = PlanningState.from_dict({"a": 1})
+        new = state.apply({"b": 2})
+        assert new.to_dict() == {"a": 1, "b": 2}
+
+    def test_apply_overwrites_existing_keys(self) -> None:
+        state = PlanningState.from_dict({"a": 1, "b": 2})
+        new = state.apply({"b": 99})
+        assert new.to_dict() == {"a": 1, "b": 99}
+
+    def test_apply_does_not_mutate_original(self) -> None:
+        state = PlanningState.from_dict({"a": 1})
+        state.apply({"a": 999, "b": 2})
+        assert state.to_dict() == {"a": 1}
+
+    def test_apply_empty_effects_returns_equal_state(self) -> None:
+        state = PlanningState.from_dict({"a": 1})
+        new = state.apply({})
+        assert new == state
+
+
+class TestPlanningStateAccessors:
+    def test_get_existing_key(self) -> None:
+        state = PlanningState.from_dict({"x": 42})
+        assert state.get("x") == 42
+
+    def test_get_missing_key_returns_default(self) -> None:
+        state = PlanningState.from_dict({})
+        assert state.get("x") is None
+        assert state.get("x", "fallback") == "fallback"
+
+    def test_contains(self) -> None:
+        state = PlanningState.from_dict({"a": 1})
+        assert "a" in state
+        assert "b" not in state
+
+    def test_len(self) -> None:
+        state = PlanningState.from_dict({"a": 1, "b": 2, "c": 3})
+        assert len(state) == 3
+
+    def test_repr(self) -> None:
+        state = PlanningState.from_dict({"a": 1})
+        r = repr(state)
+        assert "PlanningState" in r
+        assert "'a'" in r

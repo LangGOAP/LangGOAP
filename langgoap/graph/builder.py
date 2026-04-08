@@ -1,0 +1,114 @@
+"""Convenience builder for GOAP execution graphs.
+
+GoapGraph assembles a LangGraph StateGraph with planner, executor,
+and observer nodes wired together for the GOAP execution loop.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from langchain_core.runnables import RunnableConfig
+from langgraph.graph import START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Checkpointer
+
+from langgoap.actions import ActionSpec
+from langgoap.goals import GoalSpec
+from langgoap.graph.nodes import GoapExecutor, GoapObserver, GoapPlanner
+from langgoap.graph.state import GoapState
+
+
+class GoapGraph:
+    """Builder that produces a compiled LangGraph for GOAP execution.
+
+    Supports two usage styles:
+
+    **Explicit compile + invoke** (for power users who need the compiled graph)::
+
+        graph = GoapGraph(actions=[action1, action2, ...])
+        compiled = graph.compile(checkpointer=saver)
+        result = compiled.invoke({
+            "goal": GoalSpec(conditions={"done": True}),
+            "world_state": {"a": True},
+        })
+
+    **Convenience invoke** (single-shot, no persistence)::
+
+        graph = GoapGraph(actions=[action1, action2, ...])
+        result = graph.invoke(
+            goal=GoalSpec(conditions={"done": True}),
+            world_state={"a": True},
+        )
+
+    The graph structure is::
+
+        START → planner → executor → observer ──→ END
+                  ↑                     │
+                  └─────────────────────┘
+    """
+
+    def __init__(self, actions: list[ActionSpec]) -> None:
+        self.actions = actions
+
+    def compile(
+        self,
+        checkpointer: Checkpointer | None = None,
+        store: Any = None,
+    ) -> CompiledStateGraph:
+        """Build and compile the GOAP StateGraph.
+
+        Args:
+            checkpointer: Optional LangGraph checkpointer for persistence.
+            store: Optional LangGraph store for shared state.
+
+        Returns:
+            A compiled StateGraph ready for invocation.
+        """
+        builder = StateGraph(GoapState)
+
+        # Add nodes
+        builder.add_node("planner", GoapPlanner(self.actions))
+        builder.add_node("executor", GoapExecutor())
+        builder.add_node("observer", GoapObserver())
+
+        # Wire edges
+        builder.add_edge(START, "planner")
+        builder.add_edge("planner", "executor")
+        builder.add_edge("executor", "observer")
+        # Observer uses Command(goto=...) for routing — no explicit edges needed
+
+        return builder.compile(
+            checkpointer=checkpointer,
+            store=store,
+        )
+
+    def invoke(
+        self,
+        goal: GoalSpec,
+        world_state: dict[str, Any] | None = None,
+        config: RunnableConfig | None = None,
+    ) -> GoapState:
+        """Convenience method: compile and invoke the graph in one call.
+
+        Suitable for single-shot executions that don't need persistence or
+        time-travel.  For repeated invocations with the same compiled graph,
+        use :meth:`compile` directly.
+
+        Args:
+            goal: The goal to achieve.
+            world_state: Initial world state (defaults to an empty dict).
+            config: Optional LangGraph run configuration
+                (e.g. ``{"configurable": {"thread_id": "..."}}``)
+
+        Returns:
+            The final :class:`~langgoap.graph.state.GoapState` after the
+            GOAP loop completes.
+        """
+        compiled = self.compile()
+        input_state: GoapState = {
+            "goal": goal,
+            "world_state": world_state or {},
+        }
+        # compiled.invoke returns dict[str, Any]; cast to GoapState for callers.
+        return compiled.invoke(input_state, config=config)  # type: ignore[return-value]
