@@ -28,7 +28,7 @@ class TestPlanningStateImmutability:
     def test_frozen_raises_on_attribute_set(self) -> None:
         state = PlanningState.from_dict({"a": 1})
         with pytest.raises(AttributeError):
-            state._items = frozenset()  # type: ignore[misc]
+            state.conditions = frozenset()  # type: ignore[misc]
 
     def test_hashable(self) -> None:
         s1 = PlanningState.from_dict({"a": 1, "b": 2})
@@ -101,6 +101,49 @@ class TestPlanningStateApply:
         state = PlanningState.from_dict({"a": 1})
         new = state.apply({})
         assert new == state
+
+
+class TestPlanningStateKeyFiltering:
+    def test_from_dict_filters_by_keys(self) -> None:
+        state = PlanningState.from_dict(
+            {"a": True, "b": False, "c": 42},
+            keys={"a", "c"},
+        )
+        d = state.to_dict()
+        assert d == {"a": True, "c": 42}
+        assert "b" not in d
+
+    def test_from_dict_filters_out_unhashable_values(self) -> None:
+        """Lists and dicts are silently skipped."""
+        state = PlanningState.from_dict(
+            {"flag": True, "documents": [1, 2, 3], "meta": {"nested": True}},
+        )
+        d = state.to_dict()
+        assert d == {"flag": True}
+
+    def test_from_dict_key_filter_plus_unhashable(self) -> None:
+        """Key filtering and unhashable skipping compose correctly."""
+        state = PlanningState.from_dict(
+            {"flag": True, "data": [1, 2], "score": 0.9, "extra": "ignored"},
+            keys={"flag", "data", "score"},
+        )
+        d = state.to_dict()
+        # data is filtered by keys but still unhashable → skipped
+        assert d == {"flag": True, "score": 0.9}
+
+    def test_from_dict_no_keys_preserves_all_hashable(self) -> None:
+        """Without keys filter, all hashable values are included."""
+        state = PlanningState.from_dict({"a": 1, "b": "two", "c": True})
+        assert state.to_dict() == {"a": 1, "b": "two", "c": True}
+
+    def test_satisfies_works_after_filtering(self) -> None:
+        state = PlanningState.from_dict(
+            {"has_data": True, "question": "what?", "docs": [1, 2]},
+            keys={"has_data"},
+        )
+        assert state.satisfies({"has_data": True})
+        assert not state.satisfies({"has_data": False})
+        assert not state.satisfies({"question": "what?"})  # filtered out
 
 
 class TestPlanningStateAccessors:

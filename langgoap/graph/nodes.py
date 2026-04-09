@@ -13,14 +13,29 @@ from langgraph.graph import END
 from langgraph.types import Command
 
 from langgoap.actions import ActionSpec
-
-logger = logging.getLogger(__name__)
 from langgoap.goals import GoalSpec
 from langgoap.graph.state import ActionResult, GoapState
 from langgoap.planner.astar import plan as astar_plan
 from langgoap.planner.types import Plan
 from langgoap.state import PlanningState
 from langgoap.types import ReplanStrategy
+
+logger = logging.getLogger(__name__)
+
+
+def _planning_keys(actions: list[ActionSpec], goal: GoalSpec) -> set[str]:
+    """Compute the set of world-state keys relevant to A* planning.
+
+    Returns the union of all keys appearing in action preconditions,
+    action effects, and goal conditions.  Used to filter a rich
+    ``world_state`` dict down to the hashable boolean flags that
+    the planner operates on.
+    """
+    keys: set[str] = set(goal.conditions.keys())
+    for action in actions:
+        keys.update(action.preconditions.keys())
+        keys.update(action.effects.keys())
+    return keys
 
 
 class GoapPlanner:
@@ -59,7 +74,8 @@ class GoapPlanner:
         else:
             logger.info("Planning for goal %s", dict(goal.conditions))
 
-        start = PlanningState.from_dict(world_state)
+        pkeys = _planning_keys(self.actions, goal)
+        start = PlanningState.from_dict(world_state, keys=pkeys)
         result = astar_plan(start, goal, self.actions)
 
         if result is None:
@@ -136,6 +152,29 @@ class GoapExecutor:
                 # No execute function: apply declared effects
                 world_state.update(action.effects)
 
+            state_after = dict(world_state)
+
+            # Runtime postcondition check — only when a custom validator
+            # was explicitly provided (the default None means "trust the
+            # declared effects").
+            if action.effect_validator is not None and not action.validate_effects(
+                state_before, state_after
+            ):
+                logger.warning("Action %r effect validation failed", action.name)
+                return {
+                    "status": "action_failed",
+                    "world_state": world_state,
+                    "execution_history": [
+                        ActionResult(
+                            action_name=action.name,
+                            success=False,
+                            state_before=state_before,
+                            state_after=state_after,
+                            error="Effect validation failed",
+                        )
+                    ],
+                }
+
             logger.debug(
                 "Action %r succeeded, world_state=%s", action.name, world_state
             )
@@ -147,7 +186,7 @@ class GoapExecutor:
                         action_name=action.name,
                         success=True,
                         state_before=state_before,
-                        state_after=dict(world_state),
+                        state_after=state_after,
                     )
                 ],
             }
@@ -177,11 +216,22 @@ class GoapObserver:
     4. State deviation from expected → replan
     5. More actions remain → continue executing
     6. Plan exhausted but goal not met → replan
+
+    Args:
+        actions: The available action specs.  When provided, deviation
+            detection compares only planning-relevant keys (those
+            appearing in action preconditions/effects and goal
+            conditions) rather than the entire world state.  This
+            prevents non-planning data (document lists, LLM responses)
+            from triggering spurious replanning.
     """
+
+    def __init__(self, actions: list[ActionSpec] | None = None) -> None:
+        self._actions = actions or []
 
     def __call__(self, state: GoapState) -> Command[str]:
         goal: GoalSpec | None = state.get("goal")
-        world_state = state.get("world_state", {})
+        world_state: dict[str, Any] = state.get("world_state", {})
         plan_obj: Plan | None = state.get("plan")
         current_step: int = state.get("current_step", 0)
         status: str = state.get("status", "")
@@ -192,10 +242,15 @@ class GoapObserver:
                 update={"status": "error", "replan_reason": "no goal specified"},
             )
 
-        planning_state = PlanningState.from_dict(world_state)
-
-        # Goal achieved
-        if planning_state.satisfies(goal.conditions):
+        # Goal achieved — check directly on the world_state dict to
+        # avoid creating a PlanningState (which would choke on
+        # non-hashable values like document lists).
+        # NOTE: must check `k in world_state` first; dict.get(k) returns None
+        # for missing keys, which would incorrectly satisfy a None-valued goal
+        # condition when the key is simply absent.
+        if all(
+            k in world_state and world_state[k] == v for k, v in goal.conditions.items()
+        ):
             return Command(
                 goto=END,
                 update={"status": "goal_achieved"},
@@ -241,7 +296,9 @@ class GoapObserver:
                 update={"replan_reason": "every_action_replan"},
             )
 
-        # Check for state deviation from expected plan (ON_DEVIATION only)
+        # Check for state deviation from expected plan (ON_DEVIATION only).
+        # Compare only planning-relevant keys so that changes to execution
+        # context (documents, generations, etc.) don't trigger replanning.
         if (
             not never
             and plan_obj is not None
@@ -249,7 +306,13 @@ class GoapObserver:
             and current_step <= len(plan_obj.expected_states)
             and goal.replan_strategy == ReplanStrategy.ON_DEVIATION
         ):
-            expected = plan_obj.expected_states[current_step - 1]
+            pkeys = _planning_keys(self._actions, goal)
+            planning_state = PlanningState.from_dict(world_state, keys=pkeys)
+            expected_raw = plan_obj.expected_states[current_step - 1]
+            # Filter expected state to the same planning keys so
+            # manually-constructed plans (e.g. in tests) don't cause
+            # false deviations from non-planning keys.
+            expected = PlanningState.from_dict(expected_raw.to_dict(), keys=pkeys)
             if planning_state != expected:
                 return Command(
                     goto="planner",

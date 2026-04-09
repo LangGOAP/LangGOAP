@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from langgraph.graph import END
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
@@ -184,7 +185,7 @@ class TestGoapObserver:
         }
         cmd = observer(state)
 
-        assert cmd.goto == "__end__"
+        assert cmd.goto == END
         assert cmd.update["status"] == "goal_achieved"
 
     def test_continue_executing(self) -> None:
@@ -206,13 +207,17 @@ class TestGoapObserver:
 
     def test_deviation_replan(self) -> None:
         a1 = _action("step1", eff={"a": True, "b": True})
+        a2 = _action("step2", pre={"a": True, "b": True}, eff={"c": True})
         plan_obj = Plan(
-            actions=(a1,),
-            expected_states=(PlanningState.from_dict({"a": True, "b": True}),),
-            total_cost=1.0,
+            actions=(a1, a2),
+            expected_states=(
+                PlanningState.from_dict({"a": True, "b": True}),
+                PlanningState.from_dict({"a": True, "b": True, "c": True}),
+            ),
+            total_cost=2.0,
         )
 
-        observer = GoapObserver()
+        observer = GoapObserver(actions=[a1, a2])
         state: GoapState = {
             "world_state": {"a": True, "b": False},  # b deviated!
             "goal": GoalSpec(
@@ -290,12 +295,10 @@ class TestGoapObserver:
         }
         cmd = observer(state)
 
-        assert cmd.goto == "__end__"
+        assert cmd.goto == END
         assert cmd.update["status"] == "no_plan"
 
     def test_no_goal_routes_to_end(self) -> None:
-        from langgraph.graph import END
-
         observer = GoapObserver()
         state: GoapState = {
             "world_state": {},
@@ -337,8 +340,6 @@ class TestGoapObserver:
 
     def test_never_strategy_stops_on_action_failure(self) -> None:
         """With NEVER strategy, action failure routes to END (not planner)."""
-        from langgraph.graph import END
-
         a1 = _action("step1", eff={"a": True})
         plan_obj = _make_plan(a1)
         observer = GoapObserver()
@@ -360,8 +361,6 @@ class TestGoapObserver:
 
     def test_max_replans_stops_loop(self) -> None:
         """When replan_count reaches max_replans, observer gives up."""
-        from langgraph.graph import END
-
         a1 = _action("step1", eff={"a": True})
         plan_obj = _make_plan(a1)
         observer = GoapObserver()
@@ -396,3 +395,185 @@ class TestGoapObserver:
 
         # Should still try to replan, not stop
         assert cmd.goto == "planner"
+
+
+# ---------------------------------------------------------------------------
+# Executor: validate_effects
+# ---------------------------------------------------------------------------
+
+
+class TestGoapExecutorValidation:
+    def test_effect_validation_called_when_validator_provided(self) -> None:
+        """Executor calls validate_effects when effect_validator is set."""
+
+        def always_fail(pre: dict[str, Any], post: dict[str, Any]) -> bool:
+            return False
+
+        action = ActionSpec(
+            name="validated",
+            effects={"done": True},
+            execute=lambda ws: {"done": True},
+            effect_validator=always_fail,
+        )
+        plan_obj = _make_plan(action)
+        executor = GoapExecutor()
+        state: GoapState = {
+            "world_state": {},
+            "plan": plan_obj,
+            "current_step": 0,
+        }
+        result = executor(state)
+
+        assert result["status"] == "action_failed"
+        assert result["execution_history"][0].success is False
+        assert "validation failed" in (result["execution_history"][0].error or "")
+
+    def test_no_validation_when_no_validator(self) -> None:
+        """Without effect_validator, executor skips validation entirely."""
+
+        def custom_fn(ws: dict[str, Any]) -> dict[str, Any]:
+            return {"computed": ws.get("input", 0) * 2}
+
+        # effects say computed=0 but execute returns computed=10
+        # This mismatch is fine because no effect_validator is set.
+        action = _action("compute", eff={"computed": 0}, execute=custom_fn)
+        plan_obj = _make_plan(action)
+        executor = GoapExecutor()
+        state: GoapState = {
+            "world_state": {"input": 5},
+            "plan": plan_obj,
+            "current_step": 0,
+        }
+        result = executor(state)
+
+        assert result["current_step"] == 1  # success, not action_failed
+        assert result["world_state"]["computed"] == 10
+
+    def test_validation_passes_with_correct_effects(self) -> None:
+        """When validator passes, execution proceeds normally."""
+
+        def check_done(pre: dict[str, Any], post: dict[str, Any]) -> bool:
+            return post.get("done") is True
+
+        action = ActionSpec(
+            name="good",
+            effects={"done": True},
+            execute=lambda ws: {"done": True},
+            effect_validator=check_done,
+        )
+        plan_obj = _make_plan(action)
+        executor = GoapExecutor()
+        state: GoapState = {
+            "world_state": {},
+            "plan": plan_obj,
+            "current_step": 0,
+        }
+        result = executor(state)
+
+        assert result["current_step"] == 1
+        assert result["execution_history"][0].success is True
+
+
+# ---------------------------------------------------------------------------
+# Planner: rich world_state
+# ---------------------------------------------------------------------------
+
+
+class TestGoapPlannerRichState:
+    def test_planner_handles_unhashable_world_state(self) -> None:
+        """Planner works when world_state contains lists and dicts."""
+        actions = [_action("process", pre={"has_data": True}, eff={"done": True})]
+        planner = GoapPlanner(actions)
+
+        state: GoapState = {
+            "world_state": {
+                "has_data": True,
+                "documents": [{"id": 1}, {"id": 2}],
+                "question": "what is GOAP?",
+            },
+            "goal": GoalSpec(conditions={"done": True}),
+        }
+        result = planner(state)
+
+        assert result["status"] == "executing"
+        assert result["plan"] is not None
+        assert len(result["plan"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# Observer: rich world_state
+# ---------------------------------------------------------------------------
+
+
+class TestGoapObserverRichState:
+    def test_goal_not_satisfied_when_key_absent_and_value_is_none(self) -> None:
+        """Regression: world_state.get(k)==None must NOT satisfy goal when key
+        is absent. dict.get returns None for missing keys, which would
+        incorrectly match a goal condition whose value happens to be None."""
+        observer = GoapObserver()
+        a1 = _action("act", eff={"result": None})
+        state: GoapState = {
+            # "result" is absent — goal should NOT be satisfied
+            "world_state": {},
+            "goal": GoalSpec(conditions={"result": None}),
+            "plan": _make_plan(a1),
+            "current_step": 0,
+            "status": "executing",
+        }
+        cmd = observer(state)
+
+        # Goal not satisfied (key absent) → should continue to executor
+        assert cmd.goto == "executor"
+        # Must NOT terminate as goal_achieved
+        update_status = (cmd.update or {}).get("status")
+        assert update_status != "goal_achieved"
+
+    def test_goal_check_with_unhashable_world_state(self) -> None:
+        """Observer checks goal directly on dict, not via PlanningState."""
+        observer = GoapObserver()
+        state: GoapState = {
+            "world_state": {
+                "done": True,
+                "documents": [1, 2, 3],  # unhashable
+            },
+            "goal": GoalSpec(conditions={"done": True}),
+            "plan": _make_plan(_action("act", eff={"done": True})),
+            "current_step": 1,
+            "status": "executing",
+        }
+        cmd = observer(state)
+
+        assert cmd.goto == END
+        assert cmd.update["status"] == "goal_achieved"
+
+    def test_deviation_ignores_non_planning_keys(self) -> None:
+        """Deviation detection only compares planning-relevant keys."""
+        a1 = _action("step1", eff={"a": True})
+        a2 = _action("step2", pre={"a": True}, eff={"b": True})
+        plan_obj = Plan(
+            actions=(a1, a2),
+            expected_states=(
+                PlanningState.from_dict({"a": True}),
+                PlanningState.from_dict({"a": True, "b": True}),
+            ),
+            total_cost=2.0,
+        )
+
+        # Observer with actions → knows planning keys = {"a", "b"}
+        observer = GoapObserver(actions=[a1, a2])
+        state: GoapState = {
+            # Planning key "a" matches expected. Extra key "extra" is
+            # non-planning and should not trigger deviation.
+            "world_state": {"a": True, "extra": "irrelevant_data"},
+            "goal": GoalSpec(
+                conditions={"b": True},
+                replan_strategy=ReplanStrategy.ON_DEVIATION,
+            ),
+            "plan": plan_obj,
+            "current_step": 1,  # after step1, before step2
+            "status": "executing",
+        }
+        cmd = observer(state)
+
+        # Should continue executing, NOT trigger deviation replan
+        assert cmd.goto == "executor"

@@ -85,7 +85,7 @@ class TestFullGoapLoop:
         manual = StateGraph(GoapState)
         manual.add_node("planner", GoapPlanner(actions))
         manual.add_node("executor", GoapExecutor())
-        manual.add_node("observer", GoapObserver())
+        manual.add_node("observer", GoapObserver(actions))
         manual.add_edge(START, "planner")
         manual.add_edge("planner", "executor")
         manual.add_edge("executor", "observer")
@@ -279,6 +279,52 @@ class TestFullGoapLoop:
         assert result["status"] == "failed"
         # NEVER strategy: action executed exactly once, no retries
         assert call_count == 1
+
+    def test_full_loop_with_rich_world_state(self) -> None:
+        """End-to-end: world_state with unhashable values (lists, dicts)."""
+
+        def retrieve_docs(ws: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "has_documents": True,
+                "documents": [{"title": "doc1"}, {"title": "doc2"}],
+            }
+
+        def generate_answer(ws: dict[str, Any]) -> dict[str, Any]:
+            docs = ws.get("documents", [])
+            return {
+                "answer_ready": True,
+                "answer": f"Based on {len(docs)} documents",
+            }
+
+        actions = [
+            ActionSpec(
+                name="retrieve",
+                preconditions={"has_question": True},
+                effects={"has_documents": True},
+                execute=retrieve_docs,
+            ),
+            ActionSpec(
+                name="generate",
+                preconditions={"has_documents": True},
+                effects={"answer_ready": True},
+                execute=generate_answer,
+            ),
+        ]
+        result = GoapGraph(actions=actions).invoke(
+            goal=GoalSpec(conditions={"answer_ready": True}),
+            world_state={
+                "has_question": True,
+                "question": "What is GOAP?",
+            },
+        )
+
+        assert result["status"] == "goal_achieved"
+        assert result["world_state"]["answer_ready"] is True
+        assert result["world_state"]["documents"] == [
+            {"title": "doc1"},
+            {"title": "doc2"},
+        ]
+        assert "Based on 2 documents" in result["world_state"]["answer"]
 
     def test_max_replans_prevents_infinite_loop(self) -> None:
         """max_replans guard terminates a persistently-failing replan cycle."""

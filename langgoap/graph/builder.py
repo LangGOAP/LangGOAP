@@ -70,7 +70,7 @@ class GoapGraph:
         # Add nodes
         builder.add_node("planner", GoapPlanner(self.actions))
         builder.add_node("executor", GoapExecutor())
-        builder.add_node("observer", GoapObserver())
+        builder.add_node("observer", GoapObserver(self.actions))
 
         # Wire edges
         builder.add_edge(START, "planner")

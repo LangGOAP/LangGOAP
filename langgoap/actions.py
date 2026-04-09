@@ -202,12 +202,23 @@ class GoapAction:
         return all(post_state.get(k) == v for k, v in self.effects.items())
 
     def to_spec(self) -> ActionSpec:
-        """Convert this action instance to an ActionSpec."""
+        """Convert this action instance to an ActionSpec.
+
+        Only sets ``effect_validator`` when the subclass overrides
+        :meth:`validate_effects`.  This keeps runtime postcondition
+        checking opt-in — subclasses that don't override get no
+        validation overhead in the executor.
+        """
+        # Detect whether the subclass provides a custom validator.
+        custom_validator = None
+        if type(self).validate_effects is not GoapAction.validate_effects:
+            custom_validator = self.validate_effects
+
         return ActionSpec(
             name=type(self).__name__,
             preconditions=dict(self.preconditions),
             effects=dict(self.effects),
             cost=self.cost,
             execute=self.execute,
-            effect_validator=self.validate_effects,
+            effect_validator=custom_validator,
         )
