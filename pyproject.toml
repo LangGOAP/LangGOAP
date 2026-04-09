@@ -52,6 +52,7 @@ dev-dependencies = [
     "coverage>=7.10",
     "vulture>=2.14",
     "langchain-openai>=0.3",
+    "ipykernel>=7.2.0",
 ]
 
 [tool.pytest.ini_options]
