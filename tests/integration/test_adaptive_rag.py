@@ -62,16 +62,6 @@ def _generate_answer(ws: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _transform_query(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate question rewriting for better retrieval."""
-    question = ws.get("question", "")
-    return {
-        "has_question": True,
-        "question": f"[rewritten] {question}",
-        "query_transformed": True,
-    }
-
-
 # ---------------------------------------------------------------------------
 # Action factories
 # ---------------------------------------------------------------------------
@@ -83,7 +73,15 @@ def _adaptive_rag_actions(
     retrieve_cost: float = 1.0,
     web_cost: float = 2.0,
 ) -> list[ActionSpec]:
-    """Build the standard set of Adaptive RAG GOAP actions."""
+    """Build the standard set of Adaptive RAG GOAP actions.
+
+    Note: The original Adaptive RAG also includes a transform_query step that
+    rewrites the question after retrieval failure.  Full query-transform
+    routing requires action blacklisting (so the planner stops re-selecting
+    the same failing retrieval path), which is planned for a future phase.
+    The current action set demonstrates cost-based retrieval routing and
+    failure recovery via replanning.
+    """
     return [
         ActionSpec(
             name="retrieve_documents",
@@ -112,13 +110,6 @@ def _adaptive_rag_actions(
             effects={"answer_ready": True},
             cost=1.0,
             execute=_generate_answer,
-        ),
-        ActionSpec(
-            name="transform_query",
-            preconditions={"has_question": True},
-            effects={"query_transformed": True},
-            cost=1.5,
-            execute=_transform_query,
         ),
     ]
 
@@ -202,7 +193,8 @@ class TestAdaptiveRagGoapified:
         The grade_documents action sets has_relevant_documents=False,
         deviating from the planner's expected has_relevant_documents=True.
         The observer detects this deviation and routes back to the planner,
-        which finds an alternative path.
+        which re-plans from the current partial state.  On the second attempt
+        the grade function succeeds, allowing the pipeline to complete.
         """
         call_count = {"grade": 0}
 

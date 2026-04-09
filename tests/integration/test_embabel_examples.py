@@ -307,7 +307,12 @@ class TestMealPreparation:
 #   If rejected: revise(Story, Feedback) → Story (loop back)
 #   If accepted: review(Story) → ReviewedStory  @AchievesGoal
 #
-# In GOAP: iterative refinement via replanning when assess fails.
+# In GOAP: each phase is a separate action with honest declared effects.
+# The assess action writes story_approved (distinct key, never undoes
+# has_story). On rejection it also sets needs_revision=True, enabling
+# revise_story whose extra precondition wins on A* specificity tie-break.
+# The observer detects the deviation (story_approved=False vs declared
+# True) and triggers replanning.
 # ===========================================================================
 
 
@@ -320,8 +325,13 @@ def _craft_story(ws: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _review_story(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate a book reviewer critiquing the story."""
+def _assess_story(ws: dict[str, Any]) -> dict[str, Any]:
+    """Simulate story assessment — always approves."""
+    return {"story_approved": True}
+
+
+def _finalize_review(ws: dict[str, Any]) -> dict[str, Any]:
+    """Simulate producing the final reviewed story."""
     story = ws.get("story", "")
     return {
         "review_complete": True,
@@ -333,26 +343,58 @@ def _review_story(ws: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _write_review_actions(
+    *,
+    assess_fn: Any = _assess_story,
+    include_revise: bool = False,
+    revise_fn: Any | None = None,
+) -> list[ActionSpec]:
+    """Build Write-and-Review action set."""
+    actions = [
+        ActionSpec(
+            name="craft_story",
+            preconditions={"has_user_input": True},
+            effects={"has_story": True},
+            execute=_craft_story,
+        ),
+        ActionSpec(
+            name="assess_story",
+            preconditions={"has_story": True},
+            effects={"story_approved": True},
+            execute=assess_fn,
+        ),
+        ActionSpec(
+            name="finalize_review",
+            preconditions={"story_approved": True},
+            effects={"review_complete": True},
+            execute=_finalize_review,
+        ),
+    ]
+    if include_revise and revise_fn is not None:
+        actions.append(
+            ActionSpec(
+                name="revise_story",
+                # More preconditions → higher specificity → preferred by A*
+                preconditions={"has_story": True, "needs_revision": True},
+                effects={"story_approved": True},
+                execute=revise_fn,
+            ),
+        )
+    return actions
+
+
 class TestWriteAndReview:
-    """Embabel Write and Review: creative content pipeline."""
+    """Embabel Write and Review: creative content pipeline.
+
+    Uses a three-action pipeline — craft → assess → finalize — where the
+    assess action writes to story_approved (a distinct key) without undoing
+    has_story.  On rejection, needs_revision=True enables a revise_story
+    action that the replanner discovers via specificity tie-breaking.
+    """
 
     def test_write_and_review_happy_path(self) -> None:
-        """Planner discovers craft_story → review_story path."""
-        actions = [
-            ActionSpec(
-                name="craft_story",
-                preconditions={"has_user_input": True},
-                effects={"has_story": True},
-                execute=_craft_story,
-            ),
-            ActionSpec(
-                name="review_story",
-                preconditions={"has_story": True},
-                effects={"review_complete": True},
-                execute=_review_story,
-            ),
-        ]
-
+        """Planner discovers craft → assess → finalize path."""
+        actions = _write_review_actions()
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(conditions={"review_complete": True}),
             world_state={
@@ -368,63 +410,39 @@ class TestWriteAndReview:
         assert "NYT Book Review" in ws["reviewed_story"]["reviewer"]
 
         successful = [h.action_name for h in result["execution_history"] if h.success]
-        assert successful == ["craft_story", "review_story"]
+        assert successful == ["craft_story", "assess_story", "finalize_review"]
 
     def test_revision_via_replanning(self) -> None:
         """Story rejected on first pass, revised via replanning.
 
-        Replicates the Embabel assess → revise loop. The craft_story
-        action produces a story that initially fails review (reviewer
-        returns review_complete=False, deviating from expectation).
-        Observer detects deviation, replanner creates new plan.
-        Second attempt succeeds.
+        Replicates the Embabel assess → revise loop.  assess_story returns
+        story_approved=False (deviating from declared True) and sets
+        needs_revision=True.  The observer triggers replanning.  In the
+        new state, revise_story is preferred over assess_story via A*
+        specificity tie-breaking (2 preconditions vs 1).  revise_story
+        rewrites the story and produces story_approved=True, after which
+        finalize_review completes the goal.
         """
-        call_count = {"craft": 0}
 
-        def craft_with_revision(ws: dict[str, Any]) -> dict[str, Any]:
-            call_count["craft"] += 1
+        def assess_with_standards(ws: dict[str, Any]) -> dict[str, Any]:
+            story = ws.get("story", "")
+            if "REVISED" not in story:
+                return {"story_approved": False, "needs_revision": True}
+            return {"story_approved": True}
+
+        def revise_story(ws: dict[str, Any]) -> dict[str, Any]:
             user_input = ws.get("user_input", "")
-            if call_count["craft"] == 1:
-                return {
-                    "has_story": True,
-                    "story": "A very short and unimaginative tale.",
-                }
             return {
                 "has_story": True,
                 "story": f"[REVISED] An epic saga: {user_input}",
+                "story_approved": True,
             }
 
-        review_count = {"count": 0}
-
-        def review_with_standards(ws: dict[str, Any]) -> dict[str, Any]:
-            review_count["count"] += 1
-            story = ws.get("story", "")
-            if "REVISED" not in story:
-                # Reject: clear has_story so replanner re-includes craft_story
-                return {"review_complete": False, "has_story": False}
-            return {
-                "review_complete": True,
-                "reviewed_story": {
-                    "story": story,
-                    "review": "Much improved! Compelling narrative.",
-                    "reviewer": "NYT Book Review",
-                },
-            }
-
-        actions = [
-            ActionSpec(
-                name="craft_story",
-                preconditions={"has_user_input": True},
-                effects={"has_story": True},
-                execute=craft_with_revision,
-            ),
-            ActionSpec(
-                name="review_story",
-                preconditions={"has_story": True},
-                effects={"review_complete": True},
-                execute=review_with_standards,
-            ),
-        ]
+        actions = _write_review_actions(
+            assess_fn=assess_with_standards,
+            include_revise=True,
+            revise_fn=revise_story,
+        )
 
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(
@@ -436,27 +454,18 @@ class TestWriteAndReview:
 
         assert result["status"] == "goal_achieved"
         assert result["replan_count"] >= 1
-        assert call_count["craft"] >= 2
         ws = result["world_state"]
         assert "REVISED" in ws["story"]
+        # has_story was never undone — it stays True throughout
+        assert ws["has_story"] is True
+
+        successful = [h.action_name for h in result["execution_history"] if h.success]
+        assert "revise_story" in successful
+        assert "finalize_review" in successful
 
     def test_never_strategy_accepts_first_draft(self) -> None:
-        """With NEVER strategy, story is written once and reviewed."""
-        actions = [
-            ActionSpec(
-                name="craft_story",
-                preconditions={"has_user_input": True},
-                effects={"has_story": True},
-                execute=_craft_story,
-            ),
-            ActionSpec(
-                name="review_story",
-                preconditions={"has_story": True},
-                effects={"review_complete": True},
-                execute=_review_story,
-            ),
-        ]
-
+        """With NEVER strategy, story is assessed once and finalized."""
+        actions = _write_review_actions()
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(
                 conditions={"review_complete": True},
@@ -467,6 +476,8 @@ class TestWriteAndReview:
 
         assert result["status"] == "goal_achieved"
         assert result["replan_count"] == 0
+        successful = [h.action_name for h in result["execution_history"] if h.success]
+        assert successful == ["craft_story", "assess_story", "finalize_review"]
 
 
 # ===========================================================================
