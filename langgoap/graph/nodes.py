@@ -6,6 +6,8 @@ These nodes form the core GOAP loop:
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import logging
 from typing import Any
 
@@ -101,37 +103,136 @@ class GoapPlanner:
         }
 
 
+def _apply_result(
+    raw_result: Any,
+    action: ActionSpec,
+    world_state: dict[str, Any],
+) -> None:
+    """Merge an action's return value into world_state in place.
+
+    If the callable returned a dict, its contents overwrite matching keys.
+    Otherwise (None or any other type), the action's declared effects are
+    applied — this covers the "no execute callable" path as well as callables
+    that return non-dict sentinels.
+    """
+    if isinstance(raw_result, dict):
+        world_state.update(raw_result)
+    else:
+        world_state.update(action.effects)
+
+
+def _build_success(
+    action: ActionSpec,
+    current_step: int,
+    state_before: dict[str, Any],
+    world_state: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the success return dict for the executor."""
+    state_after = dict(world_state)
+    if action.effect_validator is not None and not action.validate_effects(
+        state_before, state_after
+    ):
+        logger.warning("Action %r effect validation failed", action.name)
+        return {
+            "status": "action_failed",
+            "world_state": world_state,
+            "execution_history": [
+                ActionResult(
+                    action_name=action.name,
+                    success=False,
+                    state_before=state_before,
+                    state_after=state_after,
+                    error="Effect validation failed",
+                )
+            ],
+        }
+    logger.debug("Action %r succeeded, world_state=%s", action.name, world_state)
+    return {
+        "world_state": world_state,
+        "current_step": current_step + 1,
+        "execution_history": [
+            ActionResult(
+                action_name=action.name,
+                success=True,
+                state_before=state_before,
+                state_after=state_after,
+            )
+        ],
+    }
+
+
+def _build_failure(
+    action: ActionSpec,
+    exc: Exception,
+    state_before: dict[str, Any],
+    world_state: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the failure return dict for the executor."""
+    logger.warning("Action %r failed: %s", action.name, exc)
+    return {
+        "status": "action_failed",
+        "execution_history": [
+            ActionResult(
+                action_name=action.name,
+                success=False,
+                state_before=state_before,
+                state_after=dict(world_state),
+                error=str(exc),
+            )
+        ],
+    }
+
+
+def _prepare_execution(
+    state: GoapState,
+) -> tuple[dict[str, Any], Plan, int, ActionSpec] | dict[str, Any]:
+    """Validate executor pre-conditions and extract execution context.
+
+    Returns either a ``(world_state, plan, step, action)`` tuple for the
+    normal execution path, or a short-circuit result dict when the executor
+    should return early without running any action.
+    """
+    status: str = state.get("status", "")
+    plan_obj: Plan | None = state.get("plan")
+    current_step: int = state.get("current_step", 0)
+    world_state: dict[str, Any] = dict(state.get("world_state", {}))
+
+    if status == "no_plan":
+        return {}
+
+    if plan_obj is None or current_step >= len(plan_obj):
+        return {
+            "status": "error",
+            "execution_history": [
+                ActionResult(
+                    action_name="<none>",
+                    success=False,
+                    error="No action to execute",
+                )
+            ],
+        }
+
+    action = plan_obj.actions[current_step]
+    return world_state, plan_obj, current_step, action
+
+
 class GoapExecutor:
     """LangGraph node that executes the current action in the plan.
 
-    Runs ``plan.actions[current_step]``, updates world_state with
-    the action's effects, and appends to execution_history.
+    Runs ``plan.actions[current_step]``, updates world_state with the
+    action's effects, and appends to execution_history.
+
+    Both sync (:meth:`__call__`) and async (:meth:`acall`) paths share the
+    same pre-condition checks, result building, and failure handling via the
+    module-level helpers :func:`_prepare_execution`, :func:`_apply_result`,
+    :func:`_build_success`, and :func:`_build_failure`.
     """
 
     def __call__(self, state: GoapState) -> dict[str, Any]:
-        status: str = state.get("status", "")
-        plan_obj: Plan | None = state.get("plan")
-        current_step: int = state.get("current_step", 0)
-        world_state: dict[str, Any] = dict(state.get("world_state", {}))
-
-        # Short-circuit: planner found no plan, pass through to observer
-        if status == "no_plan":
-            return {}
-
-        if plan_obj is None or current_step >= len(plan_obj):
-            return {
-                "status": "error",
-                "execution_history": [
-                    ActionResult(
-                        action_name="<none>",
-                        success=False,
-                        error="No action to execute",
-                    )
-                ],
-            }
-
-        action = plan_obj.actions[current_step]
-        state_before = dict(world_state)
+        prep = _prepare_execution(state)
+        if isinstance(prep, dict):
+            return prep
+        world_state, plan_obj, current_step, action = prep
 
         logger.info(
             "Executing action %r (step %d/%d)",
@@ -140,70 +241,86 @@ class GoapExecutor:
             len(plan_obj),
         )
 
+        state_before = dict(world_state)
         try:
+            if action.aexecute is not None and action.execute is None:
+                # Action is async-only — fail fast with an actionable message
+                # instead of silently applying declared effects.
+                raise RuntimeError(
+                    f"Action {action.name!r} is async-only (aexecute is set, "
+                    "execute is None). Use GoapGraph.ainvoke() or "
+                    "compiled.ainvoke() to run async actions."
+                )
             if action.execute is not None:
-                result = action.execute(world_state)
-                if isinstance(result, dict):
-                    world_state.update(result)
-                else:
-                    # If execute doesn't return a dict, apply declared effects
-                    world_state.update(action.effects)
+                if inspect.iscoroutinefunction(action.execute):
+                    # Defensive guard for manually-constructed ActionSpec where
+                    # execute was set to a coroutine function by the caller.
+                    raise RuntimeError(
+                        f"Action {action.name!r} has an async execute callable. "
+                        "Use GoapGraph.ainvoke() or compiled.ainvoke() instead."
+                    )
+                raw = action.execute(world_state)
             else:
-                # No execute function: apply declared effects
-                world_state.update(action.effects)
-
-            state_after = dict(world_state)
-
-            # Runtime postcondition check — only when a custom validator
-            # was explicitly provided (the default None means "trust the
-            # declared effects").
-            if action.effect_validator is not None and not action.validate_effects(
-                state_before, state_after
-            ):
-                logger.warning("Action %r effect validation failed", action.name)
-                return {
-                    "status": "action_failed",
-                    "world_state": world_state,
-                    "execution_history": [
-                        ActionResult(
-                            action_name=action.name,
-                            success=False,
-                            state_before=state_before,
-                            state_after=state_after,
-                            error="Effect validation failed",
-                        )
-                    ],
-                }
-
-            logger.debug(
-                "Action %r succeeded, world_state=%s", action.name, world_state
-            )
-            return {
-                "world_state": world_state,
-                "current_step": current_step + 1,
-                "execution_history": [
-                    ActionResult(
-                        action_name=action.name,
-                        success=True,
-                        state_before=state_before,
-                        state_after=state_after,
-                    )
-                ],
-            }
+                raw = None  # no callable — _apply_result will use declared effects
+            _apply_result(raw, action, world_state)
+            return _build_success(action, current_step, state_before, world_state)
         except Exception as e:
-            logger.warning("Action %r failed: %s", action.name, e)
-            return {
-                "status": "action_failed",
-                "execution_history": [
-                    ActionResult(
-                        action_name=action.name,
-                        success=False,
-                        state_before=state_before,
-                        state_after=dict(world_state),
-                        error=str(e),
-                    )
-                ],
-            }
+            return _build_failure(action, e, state_before, world_state)
+
+    async def acall(self, state: GoapState) -> dict[str, Any]:
+        """Async variant of the executor node.
+
+        Uses :func:`_async_execute_action` to resolve the best callable:
+        1. ``action.aexecute`` (explicit async callable)
+        2. ``action.execute`` if it is a coroutine function
+        3. ``action.execute`` via ``loop.run_in_executor`` (sync in thread)
+        4. No callable — declared effects applied
+        """
+        prep = _prepare_execution(state)
+        if isinstance(prep, dict):
+            return prep
+        world_state, plan_obj, current_step, action = prep
+
+        logger.info(
+            "Executing action %r async (step %d/%d)",
+            action.name,
+            current_step + 1,
+            len(plan_obj),
+        )
+
+        state_before = dict(world_state)
+        try:
+            raw = await async_execute_action(action, world_state)
+            _apply_result(raw, action, world_state)
+            return _build_success(action, current_step, state_before, world_state)
+        except Exception as e:
+            return _build_failure(action, e, state_before, world_state)
+
+
+async def async_execute_action(action: ActionSpec, world_state: dict[str, Any]) -> Any:
+    """Resolve and await the best async callable for *action*.
+
+    Resolution priority:
+    1. ``action.aexecute`` — explicit async callable (highest priority)
+    2. ``action.execute`` if it is a coroutine function
+    3. ``action.execute`` run in the default thread-pool executor (sync → async)
+    4. No callable — returns ``None``; caller applies declared effects
+
+    This is a public helper so that advanced callers (e.g. custom executors,
+    test utilities) can reuse the resolution logic without duplicating it.
+    """
+    if action.aexecute is not None:
+        return await action.aexecute(world_state)
+    if action.execute is not None:
+        if inspect.iscoroutinefunction(action.execute):
+            return await action.execute(world_state)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, action.execute, world_state)
+    return None
+
+
+# Back-compat alias; prefer async_execute_action in new code.
+_async_execute_action = async_execute_action
 
 
 class GoapObserver:

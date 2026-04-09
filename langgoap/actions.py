@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -23,7 +25,9 @@ class ActionSpec:
         effects: World state changes produced by execution.
             Stored as an immutable MappingProxyType.
         cost: Static cost or callable that computes cost from world state.
-        execute: The function to call when the action is executed.
+        execute: The function to call when the action is executed (sync).
+        aexecute: Optional async execute callable. When set, the async
+            executor will ``await`` this instead of calling ``execute``.
         effect_validator: Optional runtime postcondition checker.
             Signature: ``(pre_state: dict, post_state: dict) -> bool``.
             Called by the executor after execution to verify actual effects.
@@ -46,6 +50,7 @@ class ActionSpec:
     effects: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
     cost: float | CostFunction = 1.0
     execute: Callable[..., Any] | None = None
+    aexecute: Callable[..., Any] | None = None
     effect_validator: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
     # CSP optimizer inputs (ignored by the A* planner)
     resources: Mapping[str, float] | None = None
@@ -72,6 +77,18 @@ class ActionSpec:
     def has_effects(self) -> bool:
         """Return True if this action declares at least one effect."""
         return len(self.effects) > 0
+
+    def is_async_execute(self) -> bool:
+        """Return True if this action has an async execute path.
+
+        Checks ``aexecute`` first, then falls back to inspecting
+        ``execute`` for coroutine functions.
+        """
+        if self.aexecute is not None:
+            return True
+        if self.execute is not None:
+            return inspect.iscoroutinefunction(self.execute)
+        return False
 
     def __repr__(self) -> str:
         parts = [f"name={self.name!r}"]
@@ -118,7 +135,12 @@ def goap_action(
 ) -> Callable[[Callable[..., Any]], ActionSpec]:
     """Decorator that converts a function into an ActionSpec.
 
-    Usage::
+    Works with both sync and async functions.  Async functions are stored
+    in ``aexecute`` and must be invoked via :meth:`~GoapGraph.ainvoke` —
+    the sync executor will raise a clear error if you accidentally call
+    :meth:`~GoapGraph.invoke` with an async-only action.
+
+    **Sync usage**::
 
         @goap_action(
             preconditions={"has_data": True},
@@ -127,17 +149,35 @@ def goap_action(
             resources={"tokens": 500, "cost_usd": 0.02},
             duration=timedelta(seconds=2),
         )
-        def generate_report(state):
+        def generate_report(state: dict) -> dict:
             return {"report_ready": True}
+
+    **Async usage** — requires ``GoapGraph.ainvoke()``::
+
+        @goap_action(
+            preconditions={"has_question": True},
+            effects={"answer_ready": True},
+            cost=3.0,
+        )
+        async def ask_llm(state: dict) -> dict:
+            response = await llm.ainvoke(state["question"])
+            return {"answer_ready": True, "answer": response.content}
     """
 
     def wrapper(func: Callable[..., Any]) -> ActionSpec:
+        is_async = inspect.iscoroutinefunction(func)
         return ActionSpec(
             name=name or func.__name__,
             preconditions=preconditions or {},
             effects=effects or {},
             cost=cost,
-            execute=func,
+            # Async functions must NOT be stored in `execute` — the sync
+            # executor would call them and receive a coroutine object that
+            # is never awaited, silently losing runtime results and leaking
+            # the coroutine.  Store async callables only in `aexecute` so
+            # the sync executor can detect and reject them at call time.
+            execute=None if is_async else func,
+            aexecute=func if is_async else None,
             resources=resources,
             duration=duration,
             metadata=metadata,
@@ -190,6 +230,14 @@ class GoapAction:
         """Execute the action. Override with actual logic."""
         return {}
 
+    async def aexecute(self, state: dict[str, Any]) -> dict[str, Any]:
+        """Async execute. Override for native async actions.
+
+        The default delegates to :meth:`execute` via ``run_in_executor``.
+        """
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.execute, state)
+
     def validate_effects(
         self, pre_state: dict[str, Any], post_state: dict[str, Any]
     ) -> bool:
@@ -208,11 +256,19 @@ class GoapAction:
         :meth:`validate_effects`.  This keeps runtime postcondition
         checking opt-in — subclasses that don't override get no
         validation overhead in the executor.
+
+        Sets ``aexecute`` when the subclass overrides :meth:`aexecute`,
+        enabling native async execution in the async GOAP loop.
         """
         # Detect whether the subclass provides a custom validator.
         custom_validator = None
         if type(self).validate_effects is not GoapAction.validate_effects:
             custom_validator = self.validate_effects
+
+        # Detect whether the subclass provides a custom async executor.
+        custom_aexecute = None
+        if type(self).aexecute is not GoapAction.aexecute:
+            custom_aexecute = self.aexecute
 
         return ActionSpec(
             name=type(self).__name__,
@@ -220,5 +276,6 @@ class GoapAction:
             effects=dict(self.effects),
             cost=self.cost,
             execute=self.execute,
+            aexecute=custom_aexecute,
             effect_validator=custom_validator,
         )

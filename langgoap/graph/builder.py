@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from langchain_core.runnables import RunnableConfig
+from langchain_core.runnables import RunnableConfig, RunnableLambda
 from langgraph.graph import START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Checkpointer
@@ -67,9 +67,15 @@ class GoapGraph:
         """
         builder = StateGraph(GoapState)
 
-        # Add nodes
+        # Add nodes — executor is wrapped with RunnableLambda to provide
+        # both sync (__call__) and async (acall) paths.  LangGraph will
+        # call the appropriate variant depending on invoke() vs ainvoke().
+        executor = GoapExecutor()
         builder.add_node("planner", GoapPlanner(self.actions))
-        builder.add_node("executor", GoapExecutor())
+        builder.add_node(
+            "executor",
+            RunnableLambda(func=executor.__call__, afunc=executor.acall),
+        )
         builder.add_node("observer", GoapObserver(self.actions))
 
         # Wire edges
@@ -112,3 +118,30 @@ class GoapGraph:
         }
         # compiled.invoke returns dict[str, Any]; cast to GoapState for callers.
         return compiled.invoke(input_state, config=config)  # type: ignore[return-value]
+
+    async def ainvoke(
+        self,
+        goal: GoalSpec,
+        world_state: dict[str, Any] | None = None,
+        config: RunnableConfig | None = None,
+    ) -> GoapState:
+        """Async convenience method: compile and invoke the graph.
+
+        Identical to :meth:`invoke` but uses ``ainvoke`` on the compiled
+        graph, enabling native async execution of action callables.
+
+        Args:
+            goal: The goal to achieve.
+            world_state: Initial world state (defaults to an empty dict).
+            config: Optional LangGraph run configuration.
+
+        Returns:
+            The final :class:`~langgoap.graph.state.GoapState` after the
+            GOAP loop completes.
+        """
+        compiled = self.compile()
+        input_state: GoapState = {
+            "goal": goal,
+            "world_state": world_state or {},
+        }
+        return await compiled.ainvoke(input_state, config=config)  # type: ignore[return-value]
