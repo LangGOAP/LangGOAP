@@ -20,125 +20,15 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from tutorial_examples.hierarchical_teams import (
+    doc_writer_agent,
+    full_team_actions,
+    note_taker_agent,
+    search_agent,
+    web_scraper_agent,
+)
 
 from langgoap import ActionSpec, GoalSpec, GoapGraph, ReplanStrategy
-
-# ---------------------------------------------------------------------------
-# Mock agents as GOAP actions
-#
-# In the original, each agent is a ReAct agent with tools, coordinated by
-# supervisor LLMs. Here, each agent becomes a GOAP action whose preconditions
-# encode capabilities and effects encode deliverables.
-# ---------------------------------------------------------------------------
-
-# --- Research Team ---
-
-
-def _search_agent(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate the search agent (TavilySearch tool)."""
-    topic = ws.get("topic", ws.get("task", "AI agents"))
-    return {
-        "has_search_results": True,
-        "search_results": [
-            f"Key finding about {topic}: autonomous agent systems use planning.",
-            f"Recent development in {topic}: LLM-based planning is emerging.",
-        ],
-    }
-
-
-def _web_scraper_agent(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate the web scraper agent (WebBaseLoader tool)."""
-    results = ws.get("search_results", [])
-    return {
-        "has_detailed_content": True,
-        "detailed_content": f"Detailed analysis based on {len(results)} search results. "
-        "AI agents combine planning, memory, and tool use for autonomous task completion.",
-    }
-
-
-# --- Writing Team ---
-
-
-def _note_taker_agent(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate the note taker agent (create_outline tool)."""
-    content = ws.get("detailed_content", ws.get("search_results", []))
-    return {
-        "has_outline": True,
-        "outline": [
-            "1. Introduction to AI Agents",
-            "2. Planning and Memory Systems",
-            "3. Tool Use and Integration",
-            "4. Current Challenges",
-            "5. Future Directions",
-        ],
-    }
-
-
-def _doc_writer_agent(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate the doc writer agent (write_document tool)."""
-    outline = ws.get("outline", [])
-    return {
-        "has_document": True,
-        "document": f"Report based on {len(outline)}-point outline.\n"
-        "AI agents are systems that combine LLM capabilities with planning, "
-        "memory, and tool use to autonomously complete complex tasks.",
-    }
-
-
-def _chart_generator_agent(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate the chart generator agent (Python REPL tool)."""
-    return {
-        "has_visualization": True,
-        "visualization": "chart_ai_agents_timeline.png",
-    }
-
-
-# ---------------------------------------------------------------------------
-# Action sets
-# ---------------------------------------------------------------------------
-
-
-def _full_team_actions() -> list[ActionSpec]:
-    """All agents from both research and writing teams."""
-    return [
-        # Research team
-        ActionSpec(
-            name="search_agent",
-            preconditions={"has_topic": True},
-            effects={"has_search_results": True},
-            cost=1.0,
-            execute=_search_agent,
-        ),
-        ActionSpec(
-            name="web_scraper_agent",
-            preconditions={"has_search_results": True},
-            effects={"has_detailed_content": True},
-            cost=2.0,
-            execute=_web_scraper_agent,
-        ),
-        # Writing team
-        ActionSpec(
-            name="note_taker_agent",
-            preconditions={"has_detailed_content": True},
-            effects={"has_outline": True},
-            cost=1.0,
-            execute=_note_taker_agent,
-        ),
-        ActionSpec(
-            name="doc_writer_agent",
-            preconditions={"has_outline": True},
-            effects={"has_document": True},
-            cost=2.0,
-            execute=_doc_writer_agent,
-        ),
-        ActionSpec(
-            name="chart_generator_agent",
-            preconditions={"has_detailed_content": True},
-            effects={"has_visualization": True},
-            cost=1.5,
-            execute=_chart_generator_agent,
-        ),
-    ]
 
 
 class TestHierarchicalTeamsGoapified:
@@ -146,7 +36,7 @@ class TestHierarchicalTeamsGoapified:
 
     def test_full_research_and_writing_pipeline(self) -> None:
         """Planner discovers: search → scrape → notes → write (optimal path)."""
-        actions = _full_team_actions()
+        actions = full_team_actions()
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(conditions={"has_document": True}),
             world_state={"has_topic": True, "topic": "AI agents"},
@@ -168,7 +58,7 @@ class TestHierarchicalTeamsGoapified:
 
     def test_research_only_goal(self) -> None:
         """When goal only requires research, writing team is not invoked."""
-        actions = _full_team_actions()
+        actions = full_team_actions()
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(conditions={"has_detailed_content": True}),
             world_state={"has_topic": True, "topic": "LLM planning"},
@@ -183,7 +73,7 @@ class TestHierarchicalTeamsGoapified:
 
     def test_visualization_requires_research_not_writing(self) -> None:
         """Chart generation requires detailed_content but not outline/document."""
-        actions = _full_team_actions()
+        actions = full_team_actions()
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(conditions={"has_visualization": True}),
             world_state={"has_topic": True, "topic": "agent architectures"},
@@ -207,7 +97,7 @@ class TestHierarchicalTeamsGoapified:
         one goal with both conditions. The planner must find a path that
         satisfies both.
         """
-        actions = _full_team_actions()
+        actions = full_team_actions()
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(
                 conditions={
@@ -239,13 +129,13 @@ class TestHierarchicalTeamsGoapified:
                 name="note_taker_agent",
                 preconditions={"has_detailed_content": True},
                 effects={"has_outline": True},
-                execute=_note_taker_agent,
+                execute=note_taker_agent,
             ),
             ActionSpec(
                 name="doc_writer_agent",
                 preconditions={"has_outline": True},
                 effects={"has_document": True},
-                execute=_doc_writer_agent,
+                execute=doc_writer_agent,
             ),
         ]
 
@@ -265,14 +155,14 @@ class TestHierarchicalTeamsGoapified:
             call_count["scraper"] += 1
             if call_count["scraper"] == 1:
                 raise RuntimeError("Page load timeout")
-            return _web_scraper_agent(ws)
+            return web_scraper_agent(ws)
 
         actions = [
             ActionSpec(
                 name="search_agent",
                 preconditions={"has_topic": True},
                 effects={"has_search_results": True},
-                execute=_search_agent,
+                execute=search_agent,
             ),
             ActionSpec(
                 name="web_scraper_agent",
@@ -284,13 +174,13 @@ class TestHierarchicalTeamsGoapified:
                 name="note_taker_agent",
                 preconditions={"has_detailed_content": True},
                 effects={"has_outline": True},
-                execute=_note_taker_agent,
+                execute=note_taker_agent,
             ),
             ActionSpec(
                 name="doc_writer_agent",
                 preconditions={"has_outline": True},
                 effects={"has_document": True},
-                execute=_doc_writer_agent,
+                execute=doc_writer_agent,
             ),
         ]
 
@@ -344,7 +234,7 @@ class TestHierarchicalTeamsGoapified:
 
     def test_rich_data_flows_between_teams(self) -> None:
         """Rich execution data (lists, strings) flows correctly between agents."""
-        actions = _full_team_actions()
+        actions = full_team_actions()
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(conditions={"has_document": True}),
             world_state={"has_topic": True, "topic": "AI agents"},

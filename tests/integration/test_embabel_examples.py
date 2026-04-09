@@ -12,113 +12,29 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from tutorial_examples.embabel_examples import (
+    assess_story,
+    assess_story_strict,
+    check_facts,
+    choose_cook,
+    craft_story,
+    extract_assertions,
+    extract_person,
+    extract_star_sign,
+    finalize_review,
+    find_news_stories,
+    meal_prep_actions,
+    prepare_meal,
+    rationalize_assertions,
+    retrieve_horoscope,
+    revise_story,
+    star_news_actions,
+    star_news_writeup,
+    take_order,
+    write_review_actions,
+)
 
 from langgoap import ActionSpec, GoalSpec, GoapGraph, ReplanStrategy
-
-# ===========================================================================
-# Example 1: Star News Finder (Horoscope)
-#
-# Original Embabel pattern:
-#   extractPerson(UserInput) → Person
-#   extractStarPerson(Person) → StarPerson
-#   retrieveHoroscope(StarPerson) → Horoscope
-#   findNewsStories(StarPerson, Horoscope) → RelevantNewsStories
-#   starNewsWriteup(StarPerson, Horoscope, News) → Writeup  @AchievesGoal
-#
-# In LangGoap: preconditions/effects as boolean flags + rich execution data.
-# ===========================================================================
-
-
-def _extract_person(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate LLM extracting a person from user input."""
-    user_input = ws.get("user_input", "")
-    return {
-        "has_person": True,
-        "person": {"name": "Alice", "extracted_from": user_input},
-    }
-
-
-def _extract_star_sign(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate LLM extracting star sign from person context."""
-    person = ws.get("person", {})
-    return {
-        "has_star_person": True,
-        "star_person": {**person, "sign": "Aries"},
-    }
-
-
-def _retrieve_horoscope(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate calling horoscope service."""
-    star_person = ws.get("star_person", {})
-    sign = star_person.get("sign", "Unknown")
-    return {
-        "has_horoscope": True,
-        "horoscope": f"Today {sign} will experience great fortune in technology.",
-    }
-
-
-def _find_news_stories(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate web search for news related to person and horoscope."""
-    person = ws.get("star_person", {})
-    name = person.get("name", "")
-    return {
-        "has_news": True,
-        "news_stories": [
-            f"{name} featured in AI conference keynote",
-            f"New developments in {person.get('sign', '')} season",
-        ],
-    }
-
-
-def _star_news_writeup(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate generating the final amusing writeup."""
-    person = ws.get("star_person", {})
-    horoscope = ws.get("horoscope", "")
-    news = ws.get("news_stories", [])
-    return {
-        "writeup_complete": True,
-        "writeup": (
-            f"Star News for {person.get('name', '')}: "
-            f"{horoscope} "
-            f"In the news: {'; '.join(news)}"
-        ),
-    }
-
-
-def _star_news_actions() -> list[ActionSpec]:
-    return [
-        ActionSpec(
-            name="extract_person",
-            preconditions={"has_user_input": True},
-            effects={"has_person": True},
-            execute=_extract_person,
-        ),
-        ActionSpec(
-            name="extract_star_sign",
-            preconditions={"has_person": True},
-            effects={"has_star_person": True},
-            execute=_extract_star_sign,
-        ),
-        ActionSpec(
-            name="retrieve_horoscope",
-            preconditions={"has_star_person": True},
-            effects={"has_horoscope": True},
-            execute=_retrieve_horoscope,
-        ),
-        ActionSpec(
-            name="find_news_stories",
-            preconditions={"has_star_person": True},
-            effects={"has_news": True},
-            cost=2.0,  # Higher cost: web search
-            execute=_find_news_stories,
-        ),
-        ActionSpec(
-            name="star_news_writeup",
-            preconditions={"has_horoscope": True, "has_news": True},
-            effects={"writeup_complete": True},
-            execute=_star_news_writeup,
-        ),
-    ]
 
 
 class TestStarNewsFinder:
@@ -126,7 +42,7 @@ class TestStarNewsFinder:
 
     def test_full_pipeline(self) -> None:
         """Planner discovers full extraction → retrieval → writeup path."""
-        actions = _star_news_actions()
+        actions = star_news_actions()
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(conditions={"writeup_complete": True}),
             world_state={
@@ -150,7 +66,7 @@ class TestStarNewsFinder:
 
     def test_extraction_chain_order(self) -> None:
         """Person extraction must precede star sign extraction."""
-        actions = _star_news_actions()
+        actions = star_news_actions()
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(conditions={"has_star_person": True}),
             world_state={"has_user_input": True, "user_input": "Bob, Sagittarius"},
@@ -162,7 +78,7 @@ class TestStarNewsFinder:
 
     def test_horoscope_only_goal(self) -> None:
         """Partial goal: only retrieve horoscope, skip news and writeup."""
-        actions = _star_news_actions()
+        actions = star_news_actions()
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(conditions={"has_horoscope": True}),
             world_state={"has_user_input": True},
@@ -177,67 +93,7 @@ class TestStarNewsFinder:
 
 # ===========================================================================
 # Example 2: Meal Preparation
-#
-# Original Embabel pattern:
-#   chooseCook(UserInput) → Cook
-#   takeOrder(UserInput) → Order
-#   prepareMeal(Cook, Order) → Meal  @AchievesGoal
-#
-# Classic GOAP: two independent precondition paths merge at the final action.
 # ===========================================================================
-
-
-def _choose_cook(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate selecting a cook based on available staff."""
-    return {
-        "has_cook": True,
-        "cook": {"name": "Chef Marie", "specialty": "French cuisine"},
-    }
-
-
-def _take_order(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate taking a customer order."""
-    return {
-        "has_order": True,
-        "order": {"dish": "Coq au Vin", "special_requests": "no mushrooms"},
-    }
-
-
-def _prepare_meal(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate meal preparation by the selected cook."""
-    cook = ws.get("cook", {})
-    order = ws.get("order", {})
-    return {
-        "meal_ready": True,
-        "meal": {
-            "dish": order.get("dish", ""),
-            "prepared_by": cook.get("name", ""),
-            "quality": "excellent",
-        },
-    }
-
-
-def _meal_prep_actions() -> list[ActionSpec]:
-    return [
-        ActionSpec(
-            name="choose_cook",
-            preconditions={"has_user_input": True},
-            effects={"has_cook": True},
-            execute=_choose_cook,
-        ),
-        ActionSpec(
-            name="take_order",
-            preconditions={"has_user_input": True},
-            effects={"has_order": True},
-            execute=_take_order,
-        ),
-        ActionSpec(
-            name="prepare_meal",
-            preconditions={"has_cook": True, "has_order": True},
-            effects={"meal_ready": True},
-            execute=_prepare_meal,
-        ),
-    ]
 
 
 class TestMealPreparation:
@@ -245,7 +101,7 @@ class TestMealPreparation:
 
     def test_full_meal_preparation(self) -> None:
         """Planner discovers choose_cook + take_order → prepare_meal."""
-        actions = _meal_prep_actions()
+        actions = meal_prep_actions()
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(conditions={"meal_ready": True}),
             world_state={"has_user_input": True},
@@ -267,7 +123,7 @@ class TestMealPreparation:
 
     def test_partial_prerequisites_met(self) -> None:
         """When cook is already chosen, only take_order and prepare needed."""
-        actions = _meal_prep_actions()
+        actions = meal_prep_actions()
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(conditions={"meal_ready": True}),
             world_state={
@@ -285,7 +141,7 @@ class TestMealPreparation:
 
     def test_goal_already_satisfied(self) -> None:
         """When meal is already ready, no actions needed."""
-        actions = _meal_prep_actions()
+        actions = meal_prep_actions()
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(conditions={"meal_ready": True}),
             world_state={"meal_ready": True},
@@ -316,73 +172,6 @@ class TestMealPreparation:
 # ===========================================================================
 
 
-def _craft_story(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate LLM generating a story from user input."""
-    user_input = ws.get("user_input", "a space adventure")
-    return {
-        "has_story": True,
-        "story": f"Once upon a time, in a galaxy far away, {user_input}...",
-    }
-
-
-def _assess_story(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate story assessment — always approves."""
-    return {"story_approved": True}
-
-
-def _finalize_review(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate producing the final reviewed story."""
-    story = ws.get("story", "")
-    return {
-        "review_complete": True,
-        "reviewed_story": {
-            "story": story,
-            "review": "A captivating narrative with excellent pacing.",
-            "reviewer": "NYT Book Review",
-        },
-    }
-
-
-def _write_review_actions(
-    *,
-    assess_fn: Any = _assess_story,
-    include_revise: bool = False,
-    revise_fn: Any | None = None,
-) -> list[ActionSpec]:
-    """Build Write-and-Review action set."""
-    actions = [
-        ActionSpec(
-            name="craft_story",
-            preconditions={"has_user_input": True},
-            effects={"has_story": True},
-            execute=_craft_story,
-        ),
-        ActionSpec(
-            name="assess_story",
-            preconditions={"has_story": True},
-            effects={"story_approved": True},
-            execute=assess_fn,
-        ),
-        ActionSpec(
-            name="finalize_review",
-            preconditions={"story_approved": True},
-            effects={"review_complete": True},
-            execute=_finalize_review,
-        ),
-    ]
-    if include_revise and revise_fn is not None:
-        actions.append(
-            ActionSpec(
-                name="revise_story",
-                # More preconditions → higher specificity → preferred by A*
-                preconditions={"has_story": True, "needs_revision": True},
-                effects={"story_approved": True},
-                execute=revise_fn,
-            ),
-        )
-    return actions
-
-
 class TestWriteAndReview:
     """Embabel Write and Review: creative content pipeline.
 
@@ -394,7 +183,7 @@ class TestWriteAndReview:
 
     def test_write_and_review_happy_path(self) -> None:
         """Planner discovers craft → assess → finalize path."""
-        actions = _write_review_actions()
+        actions = write_review_actions()
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(conditions={"review_complete": True}),
             world_state={
@@ -424,22 +213,8 @@ class TestWriteAndReview:
         finalize_review completes the goal.
         """
 
-        def assess_with_standards(ws: dict[str, Any]) -> dict[str, Any]:
-            story = ws.get("story", "")
-            if "REVISED" not in story:
-                return {"story_approved": False, "needs_revision": True}
-            return {"story_approved": True}
-
-        def revise_story(ws: dict[str, Any]) -> dict[str, Any]:
-            user_input = ws.get("user_input", "")
-            return {
-                "has_story": True,
-                "story": f"[REVISED] An epic saga: {user_input}",
-                "story_approved": True,
-            }
-
-        actions = _write_review_actions(
-            assess_fn=assess_with_standards,
+        actions = write_review_actions(
+            assess_fn=assess_story_strict,
             include_revise=True,
             revise_fn=revise_story,
         )
@@ -465,7 +240,7 @@ class TestWriteAndReview:
 
     def test_never_strategy_accepts_first_draft(self) -> None:
         """With NEVER strategy, story is assessed once and finalized."""
-        actions = _write_review_actions()
+        actions = write_review_actions()
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(
                 conditions={"review_complete": True},
@@ -492,49 +267,6 @@ class TestWriteAndReview:
 # ===========================================================================
 
 
-def _extract_assertions(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate extracting factual claims from content."""
-    content = ws.get("content", "")
-    return {
-        "has_assertions": True,
-        "assertions": [
-            {"claim": "Python was created in 1991", "source": content[:50]},
-            {"claim": "LangChain was released in 2022", "source": content[:50]},
-        ],
-    }
-
-
-def _rationalize_assertions(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate deduplicating and rationalizing assertions."""
-    assertions = ws.get("assertions", [])
-    return {
-        "has_rationalized": True,
-        "rationalized_assertions": [{**a, "importance": "high"} for a in assertions],
-    }
-
-
-def _check_facts(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate verifying each assertion against known sources."""
-    assertions = ws.get("rationalized_assertions", [])
-    checks = []
-    for a in assertions:
-        checks.append(
-            {
-                "claim": a["claim"],
-                "verified": True,
-                "confidence": 0.95,
-            }
-        )
-    return {
-        "fact_check_complete": True,
-        "fact_check": {
-            "total_claims": len(checks),
-            "verified": sum(1 for c in checks if c["verified"]),
-            "checks": checks,
-        },
-    }
-
-
 class TestFactChecker:
     """Embabel Fact Checker: multi-step verification pipeline."""
 
@@ -545,19 +277,19 @@ class TestFactChecker:
                 name="extract_assertions",
                 preconditions={"has_content": True},
                 effects={"has_assertions": True},
-                execute=_extract_assertions,
+                execute=extract_assertions,
             ),
             ActionSpec(
                 name="rationalize_assertions",
                 preconditions={"has_assertions": True},
                 effects={"has_rationalized": True},
-                execute=_rationalize_assertions,
+                execute=rationalize_assertions,
             ),
             ActionSpec(
                 name="check_facts",
                 preconditions={"has_rationalized": True},
                 effects={"fact_check_complete": True},
-                execute=_check_facts,
+                execute=check_facts,
             ),
         ]
 
@@ -591,19 +323,19 @@ class TestFactChecker:
                 name="extract_assertions",
                 preconditions={"has_content": True},
                 effects={"has_assertions": True},
-                execute=_extract_assertions,
+                execute=extract_assertions,
             ),
             ActionSpec(
                 name="rationalize_assertions",
                 preconditions={"has_assertions": True},
                 effects={"has_rationalized": True},
-                execute=_rationalize_assertions,
+                execute=rationalize_assertions,
             ),
             ActionSpec(
                 name="check_facts",
                 preconditions={"has_rationalized": True},
                 effects={"fact_check_complete": True},
-                execute=_check_facts,
+                execute=check_facts,
             ),
         ]
 

@@ -14,104 +14,16 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from tutorial_examples.adaptive_rag import (
+    adaptive_rag_actions,
+    generate_answer,
+    grade_documents,
+    grade_documents_none_relevant,
+    retrieve_documents,
+    web_search,
+)
 
 from langgoap import ActionSpec, GoalSpec, GoapGraph, ReplanStrategy
-
-# ---------------------------------------------------------------------------
-# Mock execute functions (deterministic, no LLM calls)
-# ---------------------------------------------------------------------------
-
-
-def _retrieve_documents(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate vector store retrieval."""
-    question = ws.get("question", "")
-    docs = [
-        {"page_content": f"Relevant info about {question}", "source": "vectorstore"},
-        {"page_content": "Background context", "source": "vectorstore"},
-    ]
-    return {"has_documents": True, "documents": docs}
-
-
-def _web_search(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate web search via Tavily-like tool."""
-    question = ws.get("question", "")
-    docs = [
-        {"page_content": f"Web result for: {question}", "source": "web"},
-    ]
-    return {"has_documents": True, "documents": docs}
-
-
-def _grade_documents_all_relevant(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate grading: all documents pass relevance check."""
-    docs = ws.get("documents", [])
-    return {"has_relevant_documents": True, "relevant_documents": docs}
-
-
-def _grade_documents_none_relevant(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate grading: no documents pass relevance check (triggers replan)."""
-    return {"has_relevant_documents": False, "relevant_documents": []}
-
-
-def _generate_answer(ws: dict[str, Any]) -> dict[str, Any]:
-    """Simulate RAG generation that produces a grounded, useful answer."""
-    docs = ws.get("relevant_documents", ws.get("documents", []))
-    content = "; ".join(d.get("page_content", "") for d in docs)
-    return {
-        "answer_ready": True,
-        "generation": f"Generated answer from {len(docs)} docs: {content}",
-    }
-
-
-# ---------------------------------------------------------------------------
-# Action factories
-# ---------------------------------------------------------------------------
-
-
-def _adaptive_rag_actions(
-    *,
-    grade_fn: Any = _grade_documents_all_relevant,
-    retrieve_cost: float = 1.0,
-    web_cost: float = 2.0,
-) -> list[ActionSpec]:
-    """Build the standard set of Adaptive RAG GOAP actions.
-
-    Note: The original Adaptive RAG also includes a transform_query step that
-    rewrites the question after retrieval failure.  Full query-transform
-    routing requires action blacklisting (so the planner stops re-selecting
-    the same failing retrieval path), which is planned for a future phase.
-    The current action set demonstrates cost-based retrieval routing and
-    failure recovery via replanning.
-    """
-    return [
-        ActionSpec(
-            name="retrieve_documents",
-            preconditions={"has_question": True},
-            effects={"has_documents": True},
-            cost=retrieve_cost,
-            execute=_retrieve_documents,
-        ),
-        ActionSpec(
-            name="web_search",
-            preconditions={"has_question": True},
-            effects={"has_documents": True},
-            cost=web_cost,
-            execute=_web_search,
-        ),
-        ActionSpec(
-            name="grade_documents",
-            preconditions={"has_documents": True},
-            effects={"has_relevant_documents": True},
-            cost=1.0,
-            execute=grade_fn,
-        ),
-        ActionSpec(
-            name="generate_answer",
-            preconditions={"has_relevant_documents": True},
-            effects={"answer_ready": True},
-            cost=1.0,
-            execute=_generate_answer,
-        ),
-    ]
 
 
 class TestAdaptiveRagGoapified:
@@ -119,7 +31,7 @@ class TestAdaptiveRagGoapified:
 
     def test_happy_path_vectorstore_retrieval(self) -> None:
         """Planner discovers retrieve → grade → generate path (lowest cost)."""
-        actions = _adaptive_rag_actions()
+        actions = adaptive_rag_actions()
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(conditions={"answer_ready": True}),
             world_state={
@@ -146,19 +58,19 @@ class TestAdaptiveRagGoapified:
                 name="web_search",
                 preconditions={"has_question": True},
                 effects={"has_documents": True},
-                execute=_web_search,
+                execute=web_search,
             ),
             ActionSpec(
                 name="grade_documents",
                 preconditions={"has_documents": True},
                 effects={"has_relevant_documents": True},
-                execute=_grade_documents_all_relevant,
+                execute=grade_documents,
             ),
             ActionSpec(
                 name="generate_answer",
                 preconditions={"has_relevant_documents": True},
                 effects={"answer_ready": True},
-                execute=_generate_answer,
+                execute=generate_answer,
             ),
         ]
 
@@ -176,7 +88,7 @@ class TestAdaptiveRagGoapified:
 
     def test_planner_prefers_lower_cost_retrieval(self) -> None:
         """When both paths are available, planner picks vectorstore (lower cost)."""
-        actions = _adaptive_rag_actions(retrieve_cost=1.0, web_cost=5.0)
+        actions = adaptive_rag_actions(retrieve_cost=1.0, web_cost=5.0)
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(conditions={"answer_ready": True}),
             world_state={"has_question": True, "question": "agent architectures"},
@@ -207,7 +119,7 @@ class TestAdaptiveRagGoapified:
             docs = ws.get("documents", [])
             return {"has_relevant_documents": True, "relevant_documents": docs}
 
-        actions = _adaptive_rag_actions(grade_fn=grade_then_succeed)
+        actions = adaptive_rag_actions(grade_fn=grade_then_succeed)
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(
                 conditions={"answer_ready": True},
@@ -228,7 +140,7 @@ class TestAdaptiveRagGoapified:
             call_count["retrieve"] += 1
             if call_count["retrieve"] == 1:
                 raise ConnectionError("Vector store unavailable")
-            return _retrieve_documents(ws)
+            return retrieve_documents(ws)
 
         actions = [
             ActionSpec(
@@ -243,19 +155,19 @@ class TestAdaptiveRagGoapified:
                 preconditions={"has_question": True},
                 effects={"has_documents": True},
                 cost=2.0,
-                execute=_web_search,
+                execute=web_search,
             ),
             ActionSpec(
                 name="grade_documents",
                 preconditions={"has_documents": True},
                 effects={"has_relevant_documents": True},
-                execute=_grade_documents_all_relevant,
+                execute=grade_documents,
             ),
             ActionSpec(
                 name="generate_answer",
                 preconditions={"has_relevant_documents": True},
                 effects={"answer_ready": True},
-                execute=_generate_answer,
+                execute=generate_answer,
             ),
         ]
 
@@ -276,7 +188,7 @@ class TestAdaptiveRagGoapified:
         This tests the two-tier state separation: planning uses boolean flags
         while execution context carries rich data (unhashable document lists).
         """
-        actions = _adaptive_rag_actions()
+        actions = adaptive_rag_actions()
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(conditions={"answer_ready": True}),
             world_state={
@@ -302,7 +214,7 @@ class TestAdaptiveRagGoapified:
                 name="retrieve_documents",
                 preconditions={"has_question": True},
                 effects={"has_documents": True},
-                execute=_retrieve_documents,
+                execute=retrieve_documents,
             ),
         ]
 

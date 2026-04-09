@@ -57,6 +57,9 @@ dev-dependencies = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# examples/tutorials is added so tests can import tutorial_examples.*
+# (the same import path notebooks use when running from that directory).
+pythonpath = [".", "examples/tutorials"]
 addopts = "--strict-markers --strict-config --durations=5 -vv"
 asyncio_mode = "auto"
 filterwarnings = [
