@@ -1,0 +1,703 @@
+"""Integration tests replicating Embabel agent examples with LangGoap.
+
+Embabel (embabel-agent) defines agents using GOAP planning with type-safe
+preconditions and effects. These tests replicate key Embabel patterns
+using LangGoap's action/goal model.
+
+Reference: research/repos/embabel-agent/
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+
+from langgoap import ActionSpec, GoalSpec, GoapGraph, ReplanStrategy
+
+# ===========================================================================
+# Example 1: Star News Finder (Horoscope)
+#
+# Original Embabel pattern:
+#   extractPerson(UserInput) → Person
+#   extractStarPerson(Person) → StarPerson
+#   retrieveHoroscope(StarPerson) → Horoscope
+#   findNewsStories(StarPerson, Horoscope) → RelevantNewsStories
+#   starNewsWriteup(StarPerson, Horoscope, News) → Writeup  @AchievesGoal
+#
+# In LangGoap: preconditions/effects as boolean flags + rich execution data.
+# ===========================================================================
+
+
+def _extract_person(ws: dict[str, Any]) -> dict[str, Any]:
+    """Simulate LLM extracting a person from user input."""
+    user_input = ws.get("user_input", "")
+    return {
+        "has_person": True,
+        "person": {"name": "Alice", "extracted_from": user_input},
+    }
+
+
+def _extract_star_sign(ws: dict[str, Any]) -> dict[str, Any]:
+    """Simulate LLM extracting star sign from person context."""
+    person = ws.get("person", {})
+    return {
+        "has_star_person": True,
+        "star_person": {**person, "sign": "Aries"},
+    }
+
+
+def _retrieve_horoscope(ws: dict[str, Any]) -> dict[str, Any]:
+    """Simulate calling horoscope service."""
+    star_person = ws.get("star_person", {})
+    sign = star_person.get("sign", "Unknown")
+    return {
+        "has_horoscope": True,
+        "horoscope": f"Today {sign} will experience great fortune in technology.",
+    }
+
+
+def _find_news_stories(ws: dict[str, Any]) -> dict[str, Any]:
+    """Simulate web search for news related to person and horoscope."""
+    person = ws.get("star_person", {})
+    name = person.get("name", "")
+    return {
+        "has_news": True,
+        "news_stories": [
+            f"{name} featured in AI conference keynote",
+            f"New developments in {person.get('sign', '')} season",
+        ],
+    }
+
+
+def _star_news_writeup(ws: dict[str, Any]) -> dict[str, Any]:
+    """Simulate generating the final amusing writeup."""
+    person = ws.get("star_person", {})
+    horoscope = ws.get("horoscope", "")
+    news = ws.get("news_stories", [])
+    return {
+        "writeup_complete": True,
+        "writeup": (
+            f"Star News for {person.get('name', '')}: "
+            f"{horoscope} "
+            f"In the news: {'; '.join(news)}"
+        ),
+    }
+
+
+def _star_news_actions() -> list[ActionSpec]:
+    return [
+        ActionSpec(
+            name="extract_person",
+            preconditions={"has_user_input": True},
+            effects={"has_person": True},
+            execute=_extract_person,
+        ),
+        ActionSpec(
+            name="extract_star_sign",
+            preconditions={"has_person": True},
+            effects={"has_star_person": True},
+            execute=_extract_star_sign,
+        ),
+        ActionSpec(
+            name="retrieve_horoscope",
+            preconditions={"has_star_person": True},
+            effects={"has_horoscope": True},
+            execute=_retrieve_horoscope,
+        ),
+        ActionSpec(
+            name="find_news_stories",
+            preconditions={"has_star_person": True},
+            effects={"has_news": True},
+            cost=2.0,  # Higher cost: web search
+            execute=_find_news_stories,
+        ),
+        ActionSpec(
+            name="star_news_writeup",
+            preconditions={"has_horoscope": True, "has_news": True},
+            effects={"writeup_complete": True},
+            execute=_star_news_writeup,
+        ),
+    ]
+
+
+class TestStarNewsFinder:
+    """Embabel Star News Finder: multi-step LLM pipeline with web search."""
+
+    def test_full_pipeline(self) -> None:
+        """Planner discovers full extraction → retrieval → writeup path."""
+        actions = _star_news_actions()
+        result = GoapGraph(actions=actions).invoke(
+            goal=GoalSpec(conditions={"writeup_complete": True}),
+            world_state={
+                "has_user_input": True,
+                "user_input": "Tell me about Alice who is an Aries",
+            },
+        )
+
+        assert result["status"] == "goal_achieved"
+        ws = result["world_state"]
+        assert ws["writeup_complete"] is True
+        assert "Alice" in ws["writeup"]
+        assert "Aries" in ws["writeup"]
+
+        successful = [h.action_name for h in result["execution_history"] if h.success]
+        assert "extract_person" in successful
+        assert "extract_star_sign" in successful
+        assert "retrieve_horoscope" in successful
+        assert "find_news_stories" in successful
+        assert "star_news_writeup" in successful
+
+    def test_extraction_chain_order(self) -> None:
+        """Person extraction must precede star sign extraction."""
+        actions = _star_news_actions()
+        result = GoapGraph(actions=actions).invoke(
+            goal=GoalSpec(conditions={"has_star_person": True}),
+            world_state={"has_user_input": True, "user_input": "Bob, Sagittarius"},
+        )
+
+        assert result["status"] == "goal_achieved"
+        successful = [h.action_name for h in result["execution_history"] if h.success]
+        assert successful == ["extract_person", "extract_star_sign"]
+
+    def test_horoscope_only_goal(self) -> None:
+        """Partial goal: only retrieve horoscope, skip news and writeup."""
+        actions = _star_news_actions()
+        result = GoapGraph(actions=actions).invoke(
+            goal=GoalSpec(conditions={"has_horoscope": True}),
+            world_state={"has_user_input": True},
+        )
+
+        assert result["status"] == "goal_achieved"
+        successful = [h.action_name for h in result["execution_history"] if h.success]
+        assert "retrieve_horoscope" in successful
+        assert "star_news_writeup" not in successful
+        assert "find_news_stories" not in successful
+
+
+# ===========================================================================
+# Example 2: Meal Preparation
+#
+# Original Embabel pattern:
+#   chooseCook(UserInput) → Cook
+#   takeOrder(UserInput) → Order
+#   prepareMeal(Cook, Order) → Meal  @AchievesGoal
+#
+# Classic GOAP: two independent precondition paths merge at the final action.
+# ===========================================================================
+
+
+def _choose_cook(ws: dict[str, Any]) -> dict[str, Any]:
+    """Simulate selecting a cook based on available staff."""
+    return {
+        "has_cook": True,
+        "cook": {"name": "Chef Marie", "specialty": "French cuisine"},
+    }
+
+
+def _take_order(ws: dict[str, Any]) -> dict[str, Any]:
+    """Simulate taking a customer order."""
+    return {
+        "has_order": True,
+        "order": {"dish": "Coq au Vin", "special_requests": "no mushrooms"},
+    }
+
+
+def _prepare_meal(ws: dict[str, Any]) -> dict[str, Any]:
+    """Simulate meal preparation by the selected cook."""
+    cook = ws.get("cook", {})
+    order = ws.get("order", {})
+    return {
+        "meal_ready": True,
+        "meal": {
+            "dish": order.get("dish", ""),
+            "prepared_by": cook.get("name", ""),
+            "quality": "excellent",
+        },
+    }
+
+
+def _meal_prep_actions() -> list[ActionSpec]:
+    return [
+        ActionSpec(
+            name="choose_cook",
+            preconditions={"has_user_input": True},
+            effects={"has_cook": True},
+            execute=_choose_cook,
+        ),
+        ActionSpec(
+            name="take_order",
+            preconditions={"has_user_input": True},
+            effects={"has_order": True},
+            execute=_take_order,
+        ),
+        ActionSpec(
+            name="prepare_meal",
+            preconditions={"has_cook": True, "has_order": True},
+            effects={"meal_ready": True},
+            execute=_prepare_meal,
+        ),
+    ]
+
+
+class TestMealPreparation:
+    """Embabel Meal Preparation: parallel preconditions merging at goal."""
+
+    def test_full_meal_preparation(self) -> None:
+        """Planner discovers choose_cook + take_order → prepare_meal."""
+        actions = _meal_prep_actions()
+        result = GoapGraph(actions=actions).invoke(
+            goal=GoalSpec(conditions={"meal_ready": True}),
+            world_state={"has_user_input": True},
+        )
+
+        assert result["status"] == "goal_achieved"
+        ws = result["world_state"]
+        assert ws["meal_ready"] is True
+        assert ws["meal"]["dish"] == "Coq au Vin"
+        assert ws["meal"]["prepared_by"] == "Chef Marie"
+
+        successful = [h.action_name for h in result["execution_history"] if h.success]
+        assert "choose_cook" in successful
+        assert "take_order" in successful
+        assert "prepare_meal" in successful
+        # prepare_meal must come after both prerequisites
+        assert successful.index("prepare_meal") > successful.index("choose_cook")
+        assert successful.index("prepare_meal") > successful.index("take_order")
+
+    def test_partial_prerequisites_met(self) -> None:
+        """When cook is already chosen, only take_order and prepare needed."""
+        actions = _meal_prep_actions()
+        result = GoapGraph(actions=actions).invoke(
+            goal=GoalSpec(conditions={"meal_ready": True}),
+            world_state={
+                "has_user_input": True,
+                "has_cook": True,
+                "cook": {"name": "Chef Pierre", "specialty": "Italian"},
+            },
+        )
+
+        assert result["status"] == "goal_achieved"
+        successful = [h.action_name for h in result["execution_history"] if h.success]
+        assert "choose_cook" not in successful
+        assert "take_order" in successful
+        assert "prepare_meal" in successful
+
+    def test_goal_already_satisfied(self) -> None:
+        """When meal is already ready, no actions needed."""
+        actions = _meal_prep_actions()
+        result = GoapGraph(actions=actions).invoke(
+            goal=GoalSpec(conditions={"meal_ready": True}),
+            world_state={"meal_ready": True},
+        )
+
+        assert result["status"] == "goal_achieved"
+        history = result["execution_history"]
+        # No actions should have been executed
+        successful = [h.action_name for h in history if h.success]
+        assert len(successful) == 0
+
+
+# ===========================================================================
+# Example 3: Write and Review Agent
+#
+# Original Embabel pattern (stateful with loops):
+#   craftStory(UserInput) → Story
+#   assess(Story) → Assessment (accept/reject)
+#   If rejected: revise(Story, Feedback) → Story (loop back)
+#   If accepted: review(Story) → ReviewedStory  @AchievesGoal
+#
+# In GOAP: iterative refinement via replanning when assess fails.
+# ===========================================================================
+
+
+def _craft_story(ws: dict[str, Any]) -> dict[str, Any]:
+    """Simulate LLM generating a story from user input."""
+    user_input = ws.get("user_input", "a space adventure")
+    return {
+        "has_story": True,
+        "story": f"Once upon a time, in a galaxy far away, {user_input}...",
+    }
+
+
+def _review_story(ws: dict[str, Any]) -> dict[str, Any]:
+    """Simulate a book reviewer critiquing the story."""
+    story = ws.get("story", "")
+    return {
+        "review_complete": True,
+        "reviewed_story": {
+            "story": story,
+            "review": "A captivating narrative with excellent pacing.",
+            "reviewer": "NYT Book Review",
+        },
+    }
+
+
+class TestWriteAndReview:
+    """Embabel Write and Review: creative content pipeline."""
+
+    def test_write_and_review_happy_path(self) -> None:
+        """Planner discovers craft_story → review_story path."""
+        actions = [
+            ActionSpec(
+                name="craft_story",
+                preconditions={"has_user_input": True},
+                effects={"has_story": True},
+                execute=_craft_story,
+            ),
+            ActionSpec(
+                name="review_story",
+                preconditions={"has_story": True},
+                effects={"review_complete": True},
+                execute=_review_story,
+            ),
+        ]
+
+        result = GoapGraph(actions=actions).invoke(
+            goal=GoalSpec(conditions={"review_complete": True}),
+            world_state={
+                "has_user_input": True,
+                "user_input": "a brave astronaut explored Mars",
+            },
+        )
+
+        assert result["status"] == "goal_achieved"
+        ws = result["world_state"]
+        assert ws["review_complete"] is True
+        assert "astronaut" in ws["story"]
+        assert "NYT Book Review" in ws["reviewed_story"]["reviewer"]
+
+        successful = [h.action_name for h in result["execution_history"] if h.success]
+        assert successful == ["craft_story", "review_story"]
+
+    def test_revision_via_replanning(self) -> None:
+        """Story rejected on first pass, revised via replanning.
+
+        Replicates the Embabel assess → revise loop. The craft_story
+        action produces a story that initially fails review (reviewer
+        returns review_complete=False, deviating from expectation).
+        Observer detects deviation, replanner creates new plan.
+        Second attempt succeeds.
+        """
+        call_count = {"craft": 0}
+
+        def craft_with_revision(ws: dict[str, Any]) -> dict[str, Any]:
+            call_count["craft"] += 1
+            user_input = ws.get("user_input", "")
+            if call_count["craft"] == 1:
+                return {
+                    "has_story": True,
+                    "story": "A very short and unimaginative tale.",
+                }
+            return {
+                "has_story": True,
+                "story": f"[REVISED] An epic saga: {user_input}",
+            }
+
+        review_count = {"count": 0}
+
+        def review_with_standards(ws: dict[str, Any]) -> dict[str, Any]:
+            review_count["count"] += 1
+            story = ws.get("story", "")
+            if "REVISED" not in story:
+                # Reject: clear has_story so replanner re-includes craft_story
+                return {"review_complete": False, "has_story": False}
+            return {
+                "review_complete": True,
+                "reviewed_story": {
+                    "story": story,
+                    "review": "Much improved! Compelling narrative.",
+                    "reviewer": "NYT Book Review",
+                },
+            }
+
+        actions = [
+            ActionSpec(
+                name="craft_story",
+                preconditions={"has_user_input": True},
+                effects={"has_story": True},
+                execute=craft_with_revision,
+            ),
+            ActionSpec(
+                name="review_story",
+                preconditions={"has_story": True},
+                effects={"review_complete": True},
+                execute=review_with_standards,
+            ),
+        ]
+
+        result = GoapGraph(actions=actions).invoke(
+            goal=GoalSpec(
+                conditions={"review_complete": True},
+                replan_strategy=ReplanStrategy.ON_DEVIATION,
+            ),
+            world_state={"has_user_input": True, "user_input": "dragons and knights"},
+        )
+
+        assert result["status"] == "goal_achieved"
+        assert result["replan_count"] >= 1
+        assert call_count["craft"] >= 2
+        ws = result["world_state"]
+        assert "REVISED" in ws["story"]
+
+    def test_never_strategy_accepts_first_draft(self) -> None:
+        """With NEVER strategy, story is written once and reviewed."""
+        actions = [
+            ActionSpec(
+                name="craft_story",
+                preconditions={"has_user_input": True},
+                effects={"has_story": True},
+                execute=_craft_story,
+            ),
+            ActionSpec(
+                name="review_story",
+                preconditions={"has_story": True},
+                effects={"review_complete": True},
+                execute=_review_story,
+            ),
+        ]
+
+        result = GoapGraph(actions=actions).invoke(
+            goal=GoalSpec(
+                conditions={"review_complete": True},
+                replan_strategy=ReplanStrategy.NEVER,
+            ),
+            world_state={"has_user_input": True, "user_input": "a cat named Whiskers"},
+        )
+
+        assert result["status"] == "goal_achieved"
+        assert result["replan_count"] == 0
+
+
+# ===========================================================================
+# Example 4: Fact Checker
+#
+# Original Embabel pattern:
+#   extractAssertions(Content) → FactualAssertions
+#   rationalizeAssertions(FactualAssertions) → RationalizedAssertions
+#   checkFacts(RationalizedAssertions) → FactCheck  @AchievesGoal
+#
+# Simplified version without multi-model ensemble.
+# ===========================================================================
+
+
+def _extract_assertions(ws: dict[str, Any]) -> dict[str, Any]:
+    """Simulate extracting factual claims from content."""
+    content = ws.get("content", "")
+    return {
+        "has_assertions": True,
+        "assertions": [
+            {"claim": "Python was created in 1991", "source": content[:50]},
+            {"claim": "LangChain was released in 2022", "source": content[:50]},
+        ],
+    }
+
+
+def _rationalize_assertions(ws: dict[str, Any]) -> dict[str, Any]:
+    """Simulate deduplicating and rationalizing assertions."""
+    assertions = ws.get("assertions", [])
+    return {
+        "has_rationalized": True,
+        "rationalized_assertions": [{**a, "importance": "high"} for a in assertions],
+    }
+
+
+def _check_facts(ws: dict[str, Any]) -> dict[str, Any]:
+    """Simulate verifying each assertion against known sources."""
+    assertions = ws.get("rationalized_assertions", [])
+    checks = []
+    for a in assertions:
+        checks.append(
+            {
+                "claim": a["claim"],
+                "verified": True,
+                "confidence": 0.95,
+            }
+        )
+    return {
+        "fact_check_complete": True,
+        "fact_check": {
+            "total_claims": len(checks),
+            "verified": sum(1 for c in checks if c["verified"]),
+            "checks": checks,
+        },
+    }
+
+
+class TestFactChecker:
+    """Embabel Fact Checker: multi-step verification pipeline."""
+
+    def test_full_fact_check_pipeline(self) -> None:
+        """Planner discovers extract → rationalize → check sequence."""
+        actions = [
+            ActionSpec(
+                name="extract_assertions",
+                preconditions={"has_content": True},
+                effects={"has_assertions": True},
+                execute=_extract_assertions,
+            ),
+            ActionSpec(
+                name="rationalize_assertions",
+                preconditions={"has_assertions": True},
+                effects={"has_rationalized": True},
+                execute=_rationalize_assertions,
+            ),
+            ActionSpec(
+                name="check_facts",
+                preconditions={"has_rationalized": True},
+                effects={"fact_check_complete": True},
+                execute=_check_facts,
+            ),
+        ]
+
+        result = GoapGraph(actions=actions).invoke(
+            goal=GoalSpec(conditions={"fact_check_complete": True}),
+            world_state={
+                "has_content": True,
+                "content": "Python was created by Guido van Rossum in 1991. "
+                "LangChain was released in 2022 for LLM app development.",
+            },
+        )
+
+        assert result["status"] == "goal_achieved"
+        ws = result["world_state"]
+        fc = ws["fact_check"]
+        assert fc["total_claims"] == 2
+        assert fc["verified"] == 2
+        assert all(c["verified"] for c in fc["checks"])
+
+        successful = [h.action_name for h in result["execution_history"] if h.success]
+        assert successful == [
+            "extract_assertions",
+            "rationalize_assertions",
+            "check_facts",
+        ]
+
+    def test_partial_goal_extraction_only(self) -> None:
+        """Can stop after extraction without full fact check."""
+        actions = [
+            ActionSpec(
+                name="extract_assertions",
+                preconditions={"has_content": True},
+                effects={"has_assertions": True},
+                execute=_extract_assertions,
+            ),
+            ActionSpec(
+                name="rationalize_assertions",
+                preconditions={"has_assertions": True},
+                effects={"has_rationalized": True},
+                execute=_rationalize_assertions,
+            ),
+            ActionSpec(
+                name="check_facts",
+                preconditions={"has_rationalized": True},
+                effects={"fact_check_complete": True},
+                execute=_check_facts,
+            ),
+        ]
+
+        result = GoapGraph(actions=actions).invoke(
+            goal=GoalSpec(conditions={"has_assertions": True}),
+            world_state={"has_content": True, "content": "Some factual content."},
+        )
+
+        assert result["status"] == "goal_achieved"
+        successful = [h.action_name for h in result["execution_history"] if h.success]
+        assert successful == ["extract_assertions"]
+
+
+# ===========================================================================
+# Example 5: Cost-Based Agent Selection (Embabel pattern)
+#
+# Embabel uses @Action(cost=100) to mark expensive actions as last resort.
+# This test verifies that LangGoap's A* planner correctly prefers cheap
+# actions over expensive ones, only falling back when necessary.
+# ===========================================================================
+
+
+class TestCostBasedPlanning:
+    """Embabel pattern: action cost controls planning preferences."""
+
+    def test_cheap_action_preferred(self) -> None:
+        """Low-cost cache lookup preferred over expensive API call."""
+
+        def cache_lookup(ws: dict[str, Any]) -> dict[str, Any]:
+            return {"has_answer": True, "answer": "cached result", "source": "cache"}
+
+        def api_call(ws: dict[str, Any]) -> dict[str, Any]:
+            return {"has_answer": True, "answer": "api result", "source": "api"}
+
+        actions = [
+            ActionSpec(
+                name="cache_lookup",
+                preconditions={"has_query": True},
+                effects={"has_answer": True},
+                cost=1.0,
+                execute=cache_lookup,
+            ),
+            ActionSpec(
+                name="api_call",
+                preconditions={"has_query": True},
+                effects={"has_answer": True},
+                cost=100.0,  # Embabel pattern: high cost = last resort
+                execute=api_call,
+            ),
+        ]
+
+        result = GoapGraph(actions=actions).invoke(
+            goal=GoalSpec(conditions={"has_answer": True}),
+            world_state={"has_query": True, "query": "What is GOAP?"},
+        )
+
+        assert result["status"] == "goal_achieved"
+        ws = result["world_state"]
+        assert ws["source"] == "cache"
+
+        successful = [h.action_name for h in result["execution_history"] if h.success]
+        assert successful == ["cache_lookup"]
+
+    def test_multi_path_cost_optimization(self) -> None:
+        """Planner picks cheapest multi-step path to goal."""
+
+        def fast_extract(ws: dict[str, Any]) -> dict[str, Any]:
+            return {"has_data": True, "data": "fast"}
+
+        def thorough_extract(ws: dict[str, Any]) -> dict[str, Any]:
+            return {"has_data": True, "data": "thorough"}
+
+        def process(ws: dict[str, Any]) -> dict[str, Any]:
+            return {"processed": True, "result": f"processed {ws.get('data', '')}"}
+
+        actions = [
+            ActionSpec(
+                name="fast_extract",
+                preconditions={"has_input": True},
+                effects={"has_data": True},
+                cost=1.0,
+                execute=fast_extract,
+            ),
+            ActionSpec(
+                name="thorough_extract",
+                preconditions={"has_input": True},
+                effects={"has_data": True},
+                cost=10.0,
+                execute=thorough_extract,
+            ),
+            ActionSpec(
+                name="process",
+                preconditions={"has_data": True},
+                effects={"processed": True},
+                cost=1.0,
+                execute=process,
+            ),
+        ]
+
+        result = GoapGraph(actions=actions).invoke(
+            goal=GoalSpec(conditions={"processed": True}),
+            world_state={"has_input": True},
+        )
+
+        assert result["status"] == "goal_achieved"
+        # Should use fast_extract (cost 1) + process (cost 1) = 2
+        # instead of thorough_extract (cost 10) + process (cost 1) = 11
+        assert result["world_state"]["result"] == "processed fast"
