@@ -37,9 +37,7 @@ class TestLinearCorridor:
         assert result["world_state"]["at_l3"] is True
         assert result["world_state"]["at_l0"] is False
 
-        successful = [
-            h.action_name for h in result["execution_history"] if h.success
-        ]
+        successful = [h.action_name for h in result["execution_history"] if h.success]
         assert successful == ["move_l0_to_l1", "move_l1_to_l2", "move_l2_to_l3"]
 
     def test_ten_step_corridor(self) -> None:
@@ -51,9 +49,7 @@ class TestLinearCorridor:
         )
 
         assert result["status"] == "goal_achieved"
-        successful = [
-            h.action_name for h in result["execution_history"] if h.success
-        ]
+        successful = [h.action_name for h in result["execution_history"] if h.success]
         assert len(successful) == 10
         assert successful[0] == "move_l0_to_l1"
         assert successful[-1] == "move_l9_to_l10"
@@ -71,9 +67,7 @@ class TestLinearCorridor:
         )
 
         assert result["status"] == "goal_achieved"
-        successful = [
-            h.action_name for h in result["execution_history"] if h.success
-        ]
+        successful = [h.action_name for h in result["execution_history"] if h.success]
         assert successful == []
 
 
@@ -89,9 +83,7 @@ class TestWeightedGrid:
         )
 
         assert result["status"] == "goal_achieved"
-        successful = [
-            h.action_name for h in result["execution_history"] if h.success
-        ]
+        successful = [h.action_name for h in result["execution_history"] if h.success]
         assert successful == ["move_A_to_B", "move_B_to_C", "move_C_to_E"]
 
     def test_reverse_direction(self) -> None:
@@ -103,9 +95,7 @@ class TestWeightedGrid:
         )
 
         assert result["status"] == "goal_achieved"
-        successful = [
-            h.action_name for h in result["execution_history"] if h.success
-        ]
+        successful = [h.action_name for h in result["execution_history"] if h.success]
         assert successful == ["move_E_to_C", "move_C_to_B", "move_B_to_A"]
 
     def test_intermediate_goal(self) -> None:
@@ -117,7 +107,5 @@ class TestWeightedGrid:
         )
 
         assert result["status"] == "goal_achieved"
-        successful = [
-            h.action_name for h in result["execution_history"] if h.success
-        ]
+        successful = [h.action_name for h in result["execution_history"] if h.success]
         assert successful == ["move_A_to_B", "move_B_to_C"]

@@ -130,13 +130,29 @@ def test_bench_loop_multigoal_any(benchmark: object) -> None:
 
     actions = [
         # sub-goal 0 — 1 step, cheapest
-        ActionSpec(name="quick", preconditions={}, effects={"quick_done": True}, cost=1.0),
+        ActionSpec(
+            name="quick", preconditions={}, effects={"quick_done": True}, cost=1.0
+        ),
         # sub-goal 1 — 2 steps
-        ActionSpec(name="slow_a", preconditions={}, effects={"slow_ready": True}, cost=1.0),
-        ActionSpec(name="slow_b", preconditions={"slow_ready": True}, effects={"slow_done": True}, cost=1.0),
+        ActionSpec(
+            name="slow_a", preconditions={}, effects={"slow_ready": True}, cost=1.0
+        ),
+        ActionSpec(
+            name="slow_b",
+            preconditions={"slow_ready": True},
+            effects={"slow_done": True},
+            cost=1.0,
+        ),
         # sub-goal 2 — 2 steps
-        ActionSpec(name="alt_a", preconditions={}, effects={"alt_ready": True}, cost=1.0),
-        ActionSpec(name="alt_b", preconditions={"alt_ready": True}, effects={"alt_done": True}, cost=1.0),
+        ActionSpec(
+            name="alt_a", preconditions={}, effects={"alt_ready": True}, cost=1.0
+        ),
+        ActionSpec(
+            name="alt_b",
+            preconditions={"alt_ready": True},
+            effects={"alt_done": True},
+            cost=1.0,
+        ),
     ]
     goal = MultiGoal(
         goals=(
