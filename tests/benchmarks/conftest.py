@@ -27,7 +27,6 @@ from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
 from langgoap.state import PlanningState
 
-
 # ---------------------------------------------------------------------------
 # Action-graph factories
 # ---------------------------------------------------------------------------

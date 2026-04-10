@@ -62,8 +62,7 @@ def _constrained_goal(n_hard: int, n_soft: int, budget: float = 999.0) -> GoalSp
     from langgoap.goals import ConstraintSpec
 
     hard = tuple(
-        ConstraintSpec(key=f"hard_{i}", max=budget, level="hard")
-        for i in range(n_hard)
+        ConstraintSpec(key=f"hard_{i}", max=budget, level="hard") for i in range(n_hard)
     )
     soft = tuple(
         ConstraintSpec(key=f"soft_{i}", max=budget, level="soft", weight=0.5)
