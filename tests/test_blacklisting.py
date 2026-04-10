@@ -4,7 +4,7 @@ Tests cover:
 - max_retries field on ActionSpec, goap_action, GoapAction
 - _get_last_failed_action / _get_max_retries helpers
 - Observer blacklisting logic in the action_failed branch
-- Planner blacklist filtering and Embabel fallback
+- Planner blacklist filtering and blacklist fallback
 - Backward compatibility of new GoapState fields
 """
 
@@ -358,7 +358,7 @@ class TestPlannerBlacklist:
         assert "direct" not in result.action_names
         assert result.action_names == ["step1", "step2"]
 
-    def test_embabel_fallback_clears_blacklist(self) -> None:
+    def test_blacklist_fallback_clears_blacklist(self) -> None:
         """When blacklist makes goal unreachable, retry with all actions."""
         start = PlanningState.from_dict({})
         goal = GoalSpec(conditions={"x": True})
@@ -382,13 +382,13 @@ class TestPlannerBlacklist:
         assert result_normal.action_names == result_empty.action_names
 
     def test_all_actions_blacklisted_fallback(self) -> None:
-        """All actions blacklisted → Embabel fallback retries with all."""
+        """All actions blacklisted → blacklist fallback retries with all."""
         start = PlanningState.from_dict({})
         goal = GoalSpec(conditions={"x": True})
         a = _action("a", eff={"x": True})
 
         result = astar_plan(start, goal, [a], blacklisted_actions=["a"])
-        # Embabel fallback means it should still find a plan
+        # Blacklist fallback means it should still find a plan
         assert result is not None
         assert result.action_names == ["a"]
 
@@ -449,8 +449,8 @@ class TestPlannerNodeBlacklist:
 
         assert result["plan"].action_names == ["cheap"]
 
-    def test_planner_embabel_fallback_via_state(self) -> None:
-        """Planner triggers Embabel fallback when blacklist blocks the only path."""
+    def test_planner_blacklist_fallback_via_state(self) -> None:
+        """Planner triggers blacklist fallback when blacklist blocks the only path."""
         only = _action("only", eff={"x": True})
         planner = GoapPlanner(actions=[only])
 
@@ -462,7 +462,7 @@ class TestPlannerNodeBlacklist:
         }
         result = planner(state)
 
-        # Embabel fallback should find the plan
+        # Blacklist fallback should find the plan
         assert result["status"] == "executing"
         assert result["plan"].action_names == ["only"]
         # Fallback clears blacklist and failure counts to give a fresh start

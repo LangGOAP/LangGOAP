@@ -7,22 +7,64 @@ These nodes form the core GOAP loop:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
+import json
 import logging
-from typing import Any
+import time
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any
 
 from langgraph.graph import END
 from langgraph.types import Command
 
 from langgoap.actions import ActionSpec
-from langgoap.goals import GoalSpec
+from langgoap.goals import GoalSpec, MultiGoal
 from langgoap.graph.state import ActionResult, GoapState
+from langgoap.history import ExecutionRecord, StoreExecutionHistory
 from langgoap.planner.astar import plan as astar_plan
 from langgoap.planner.types import Plan
 from langgoap.state import PlanningState
+from langgoap.tracing import NullTracer, PlanningTracer
 from langgoap.types import ReplanStrategy
 
+if TYPE_CHECKING:
+    from langgoap.planner.strategy import PlanningStrategy
+
 logger = logging.getLogger(__name__)
+
+
+def _compute_goal_hash(goal: GoalSpec) -> str:
+    """Stable short hash of a goal's conditions.
+
+    Used by ``GoapObserver`` to key execution records in
+    :class:`StoreExecutionHistory`.  The hash is deterministic
+    across runs (unlike Python's built-in ``hash``) and short
+    enough to read in logs.
+    """
+    items = sorted((str(k), v) for k, v in goal.conditions.items())
+    canonical = json.dumps(items, default=str, sort_keys=True)
+    return hashlib.sha256(canonical.encode()).hexdigest()[:16]
+
+
+def _safe_tracer_call(tracer: PlanningTracer, method: str, *args: Any) -> None:
+    """Invoke a sync tracer hook, swallowing any exception.
+
+    Observability must never break the planner — this is the second
+    line of defence beyond :class:`MultiTracer`'s own catch.
+    """
+    try:
+        getattr(tracer, method)(*args)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Tracer raised during %s: %s", method, exc)
+
+
+async def _safe_tracer_acall(tracer: PlanningTracer, method: str, *args: Any) -> None:
+    """Invoke an async tracer hook, swallowing any exception."""
+    try:
+        await getattr(tracer, method)(*args)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Tracer raised during %s: %s", method, exc)
 
 
 def _planning_keys(actions: list[ActionSpec], goal: GoalSpec) -> set[str]:
@@ -41,51 +83,76 @@ def _planning_keys(actions: list[ActionSpec], goal: GoalSpec) -> set[str]:
 
 
 class GoapPlanner:
-    """LangGraph node that invokes the A* planner.
+    """LangGraph node that invokes the planner.
 
-    Reads world_state and goal from GoapState, runs A* search,
-    and writes the resulting plan back.
+    Reads world_state and goal from GoapState, runs the configured
+    :class:`~langgoap.planner.strategy.PlanningStrategy` (default: pure
+    A* when the goal has no constraints/objectives, or the two-phase
+    A*→CSP pipeline otherwise), and writes the resulting plan back.
+
+    Args:
+        actions: Available actions for planning.
+        strategy: Optional custom :class:`PlanningStrategy`.  When
+            ``None`` (default) the planner auto-selects between pure A*
+            and the two-phase pipeline based on the goal — identical to
+            the pre-strategy behavior.  Pass a concrete strategy (or a
+            user-defined one implementing the Protocol) to override
+            this routing.
     """
 
-    def __init__(self, actions: list[ActionSpec]) -> None:
+    def __init__(
+        self,
+        actions: list[ActionSpec],
+        *,
+        strategy: PlanningStrategy | None = None,
+        tracer: PlanningTracer | None = None,
+    ) -> None:
         self.actions = actions
+        self._strategy = strategy
+        self._tracer: PlanningTracer = tracer or NullTracer()
 
-    def __call__(self, state: GoapState) -> dict[str, Any]:
-        world_state = state.get("world_state", {})
-        goal = state.get("goal")
-        if goal is None:
-            logger.error("GoapPlanner called with no goal in state")
-            return {
-                "plan": None,
-                "status": "error",
-                "current_step": 0,
-            }
+    def _strategy_name(self, goal: GoalSpec | MultiGoal | None) -> str:
+        """Human-readable label passed to ``on_plan_start``."""
+        if self._strategy is not None:
+            return type(self._strategy).__name__
+        if isinstance(goal, GoalSpec) and (
+            goal.constraints or goal.objectives is not None
+        ):
+            return "TwoPhasePipeline"
+        return "AStar"
 
-        # Only increment replan_count when a prior plan already existed.
-        # The initial planning call is not a replan.
-        existing_plan = state.get("plan")
-        replan_count = state.get("replan_count", 0)
-        if existing_plan is not None:
-            replan_count += 1
-            logger.info(
-                "Replanning (replan #%d), reason=%s, world_state=%s",
-                replan_count,
-                state.get("replan_reason"),
-                world_state,
-            )
-        else:
-            logger.info("Planning for goal %s", dict(goal.conditions))
+    def _plan_single(
+        self,
+        start: PlanningState,
+        goal: GoalSpec,
+        blacklisted: list[str],
+    ) -> Plan | None:
+        """Run the configured strategy (or automatic routing) once.
 
-        pkeys = _planning_keys(self.actions, goal)
-        start = PlanningState.from_dict(world_state, keys=pkeys)
-        blacklisted = list(state.get("blacklisted_actions", []))
-
-        # Route through CSP pipeline when constraints/objectives are present.
+        Extracted so both the single-goal path and the ``MultiGoal``
+        dispatch can share planning logic without duplication.
+        """
+        if self._strategy is not None:
+            try:
+                return self._strategy.plan(
+                    start,
+                    goal,
+                    self.actions,
+                    blacklisted_actions=blacklisted,
+                )
+            except ImportError:
+                logger.warning(
+                    "Configured strategy requires ortools which is not "
+                    "installed. Falling back to pure A*."
+                )
+                return astar_plan(
+                    start, goal, self.actions, blacklisted_actions=blacklisted
+                )
         if goal.constraints or goal.objectives is not None:
             try:
                 from langgoap.planner.pipeline import plan as pipeline_plan
 
-                result = pipeline_plan(
+                return pipeline_plan(
                     start, goal, self.actions, blacklisted_actions=blacklisted
                 )
             except ImportError:
@@ -93,35 +160,140 @@ class GoapPlanner:
                     "CSP constraints/objectives specified but ortools not "
                     "installed. Falling back to pure A*."
                 )
-                result = astar_plan(
+                return astar_plan(
                     start, goal, self.actions, blacklisted_actions=blacklisted
                 )
-        else:
-            # First try with blacklist; if that fails, try without (Embabel fallback).
-            result = astar_plan(
-                start, goal, self.actions, blacklisted_actions=blacklisted
+        return astar_plan(start, goal, self.actions, blacklisted_actions=blacklisted)
+
+    def _plan_core(self, state: GoapState) -> tuple[dict[str, Any], bool]:
+        """Shared planning logic for sync and async entry points.
+
+        Returns:
+            ``(updates, was_replan)`` — ``updates`` is the GoapState
+            delta to return from the node, and ``was_replan`` is
+            ``True`` when a prior plan was already present so the
+            caller can fire ``on_replan`` instead of
+            ``on_plan_complete``.
+        """
+        world_state = state.get("world_state", {})
+        raw_goal = state.get("goal")
+        if raw_goal is None:
+            logger.error("GoapPlanner called with no goal in state")
+            return (
+                {"plan": None, "status": "error", "current_step": 0},
+                False,
             )
 
-        # Detect Embabel fallback: if the plan uses a blacklisted action,
-        # the fallback fired — clear the blacklist to avoid repeated fallbacks.
+        # Only increment replan_count when a prior plan already existed.
+        # The initial planning call is not a replan.
+        existing_plan = state.get("plan")
+        was_replan = existing_plan is not None
+        replan_count = state.get("replan_count", 0)
+        if was_replan:
+            replan_count += 1
+            logger.info(
+                "Replanning (replan #%d), reason=%s, world_state=%s",
+                replan_count,
+                state.get("replan_reason"),
+                world_state,
+            )
+
+        blacklisted = list(state.get("blacklisted_actions", []))
+
+        # Resolve ``MultiGoal`` to an effective ``GoalSpec``.  The A*
+        # planner and CSP pipeline never see ``MultiGoal`` directly —
+        # that abstraction lives at the planner/observer dispatch layer.
+        extra_updates: dict[str, Any] = {}
+        precomputed_result: Plan | None = None
+        effective_goal: GoalSpec
+        if isinstance(raw_goal, MultiGoal):
+            if raw_goal.mode == "sequential":
+                idx = state.get("current_subgoal_index", 0)
+                effective_goal = raw_goal.goals[idx]
+                if not was_replan:
+                    logger.info(
+                        "Planning for MultiGoal (sequential, subgoal %d/%d): %s",
+                        idx + 1,
+                        len(raw_goal.goals),
+                        dict(effective_goal.conditions),
+                    )
+            else:  # "any"
+                # Enumerate sub-goals, plan each, pick the cheapest feasible.
+                # TODO: replace ``total_cost`` with ``plan.score`` comparison
+                # so that mixed-feasibility alternatives (hard violations)
+                # lose to feasible ones regardless of path cost.  Blocked on
+                # cross-subclass Score comparison (``SimpleScore`` vs
+                # ``HardSoftScore``) which currently raises ``TypeError``.
+                best_idx = -1
+                best_plan: Plan | None = None
+                for i, sg in enumerate(raw_goal.goals):
+                    sub_pkeys = _planning_keys(self.actions, sg)
+                    sub_start = PlanningState.from_dict(world_state, keys=sub_pkeys)
+                    candidate = self._plan_single(sub_start, sg, blacklisted)
+                    if candidate is None:
+                        continue
+                    if best_plan is None or candidate.total_cost < best_plan.total_cost:
+                        best_idx = i
+                        best_plan = candidate
+                if best_plan is None:
+                    logger.warning("MultiGoal 'any' mode: no sub-goal is reachable")
+                    return (
+                        {
+                            "plan": None,
+                            "status": "no_plan",
+                            "current_step": 0,
+                            "replan_count": replan_count,
+                        },
+                        was_replan,
+                    )
+                logger.info(
+                    "MultiGoal 'any' mode: picked sub-goal %d with cost %.2f",
+                    best_idx,
+                    best_plan.total_cost,
+                )
+                effective_goal = raw_goal.goals[best_idx]
+                precomputed_result = best_plan
+                extra_updates["current_subgoal_index"] = best_idx
+        else:
+            effective_goal = raw_goal
+            if not was_replan:
+                logger.info("Planning for goal %s", dict(effective_goal.conditions))
+
+        if precomputed_result is not None:
+            result: Plan | None = precomputed_result
+        else:
+            pkeys = _planning_keys(self.actions, effective_goal)
+            start = PlanningState.from_dict(world_state, keys=pkeys)
+            result = self._plan_single(start, effective_goal, blacklisted)
+
+        # Detect blacklist fallback: if the plan uses a blacklisted action,
+        # the A* fallback in ``astar_plan`` fired because the filtered
+        # action set could not reach the goal. Clear the blacklist so the
+        # same fallback is not re-triggered on every subsequent replan.
         used_blacklisted = False
         if result is not None and blacklisted:
             plan_names = set(result.action_names)
             if plan_names & set(blacklisted):
                 used_blacklisted = True
                 logger.info(
-                    "Embabel fallback: blacklist cleared, plan uses %s",
+                    "Blacklist fallback: cleared blacklist, plan uses %s",
                     plan_names & set(blacklisted),
                 )
 
         if result is None:
-            logger.warning("A* found no plan for goal %s", dict(goal.conditions))
-            return {
-                "plan": None,
-                "status": "no_plan",
-                "current_step": 0,
-                "replan_count": replan_count,
-            }
+            logger.warning(
+                "A* found no plan for goal %s", dict(effective_goal.conditions)
+            )
+            return (
+                {
+                    "plan": None,
+                    "status": "no_plan",
+                    "current_step": 0,
+                    "replan_count": replan_count,
+                    **extra_updates,
+                },
+                was_replan,
+            )
 
         logger.info(
             "Plan found: %s (cost=%.2f, nodes_explored=%d)",
@@ -134,12 +306,66 @@ class GoapPlanner:
             "status": "executing",
             "current_step": 0,
             "replan_count": replan_count,
+            **extra_updates,
         }
         if used_blacklisted:
             # Clear blacklist and failure counts so the retried action
             # gets a fresh start instead of being immediately re-blacklisted.
             updates["blacklisted_actions"] = []
             updates["action_failure_counts"] = {}
+        return updates, was_replan
+
+    def __call__(self, state: GoapState) -> dict[str, Any]:
+        goal = state.get("goal")
+        world_state = state.get("world_state", {})
+        strategy_name = self._strategy_name(goal)
+        _safe_tracer_call(
+            self._tracer, "on_plan_start", goal, world_state, strategy_name
+        )
+        started = time.perf_counter()
+        updates, was_replan = self._plan_core(state)
+        duration_ms = (time.perf_counter() - started) * 1000
+        plan = updates.get("plan")
+        if plan is None:
+            _safe_tracer_call(
+                self._tracer,
+                "on_plan_failed",
+                updates.get("status", "no_plan"),
+                duration_ms,
+            )
+        elif was_replan:
+            reason = state.get("replan_reason", "unknown")
+            _safe_tracer_call(self._tracer, "on_replan", reason, plan)
+        else:
+            _safe_tracer_call(self._tracer, "on_plan_complete", plan, duration_ms)
+        return updates
+
+    async def acall(self, state: GoapState) -> dict[str, Any]:
+        """Async entry point — fires async tracer hooks."""
+        goal = state.get("goal")
+        world_state = state.get("world_state", {})
+        strategy_name = self._strategy_name(goal)
+        await _safe_tracer_acall(
+            self._tracer, "aon_plan_start", goal, world_state, strategy_name
+        )
+        started = time.perf_counter()
+        updates, was_replan = self._plan_core(state)
+        duration_ms = (time.perf_counter() - started) * 1000
+        plan = updates.get("plan")
+        if plan is None:
+            await _safe_tracer_acall(
+                self._tracer,
+                "aon_plan_failed",
+                updates.get("status", "no_plan"),
+                duration_ms,
+            )
+        elif was_replan:
+            reason = state.get("replan_reason", "unknown")
+            await _safe_tracer_acall(self._tracer, "aon_replan", reason, plan)
+        else:
+            await _safe_tracer_acall(
+                self._tracer, "aon_plan_complete", plan, duration_ms
+            )
         return updates
 
 
@@ -240,6 +466,16 @@ def _prepare_execution(
     if status == "no_plan":
         return {}
 
+    # Empty plan with no remaining steps — the planner returned a
+    # zero-action Plan because the (sub-)goal was already satisfied
+    # in the current world state.  Return a no-op update so the
+    # observer can detect satisfaction and route accordingly;
+    # emitting a ``"<none>"`` failure record here would clutter
+    # execution history for legitimate pre-satisfied goals (notably
+    # ``MultiGoal`` sub-goals that begin already met).
+    if plan_obj is not None and len(plan_obj) == 0:
+        return {}
+
     if plan_obj is None or current_step >= len(plan_obj):
         return {
             "status": "error",
@@ -266,7 +502,14 @@ class GoapExecutor:
     same pre-condition checks, result building, and failure handling via the
     module-level helpers :func:`_prepare_execution`, :func:`_apply_result`,
     :func:`_build_success`, and :func:`_build_failure`.
+
+    Args:
+        tracer: Optional :class:`PlanningTracer` invoked around each
+            action execution.
     """
+
+    def __init__(self, *, tracer: PlanningTracer | None = None) -> None:
+        self._tracer: PlanningTracer = tracer or NullTracer()
 
     def __call__(self, state: GoapState) -> dict[str, Any]:
         prep = _prepare_execution(state)
@@ -281,6 +524,7 @@ class GoapExecutor:
             len(plan_obj),
         )
 
+        _safe_tracer_call(self._tracer, "on_action_start", action, world_state)
         state_before = dict(world_state)
         try:
             if action.aexecute is not None and action.execute is None:
@@ -303,9 +547,11 @@ class GoapExecutor:
             else:
                 raw = None  # no callable — _apply_result will use declared effects
             _apply_result(raw, action, world_state)
-            return _build_success(action, current_step, state_before, world_state)
+            result = _build_success(action, current_step, state_before, world_state)
         except Exception as e:
-            return _build_failure(action, e, state_before, world_state)
+            result = _build_failure(action, e, state_before, world_state)
+        _safe_tracer_call(self._tracer, "on_action_complete", result)
+        return result
 
     async def acall(self, state: GoapState) -> dict[str, Any]:
         """Async variant of the executor node.
@@ -328,13 +574,16 @@ class GoapExecutor:
             len(plan_obj),
         )
 
+        await _safe_tracer_acall(self._tracer, "aon_action_start", action, world_state)
         state_before = dict(world_state)
         try:
             raw = await async_execute_action(action, world_state)
             _apply_result(raw, action, world_state)
-            return _build_success(action, current_step, state_before, world_state)
+            result = _build_success(action, current_step, state_before, world_state)
         except Exception as e:
-            return _build_failure(action, e, state_before, world_state)
+            result = _build_failure(action, e, state_before, world_state)
+        await _safe_tracer_acall(self._tracer, "aon_action_complete", result)
+        return result
 
 
 async def async_execute_action(action: ActionSpec, world_state: dict[str, Any]) -> Any:
@@ -357,10 +606,6 @@ async def async_execute_action(action: ActionSpec, world_state: dict[str, Any]) 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, action.execute, world_state)
     return None
-
-
-# Back-compat alias; prefer async_execute_action in new code.
-_async_execute_action = async_execute_action
 
 
 def _get_last_failed_action(state: GoapState) -> str | None:
@@ -398,23 +643,192 @@ class GoapObserver:
             conditions) rather than the entire world state.  This
             prevents non-planning data (document lists, LLM responses)
             from triggering spurious replanning.
+        tracer: Optional :class:`PlanningTracer` invoked on terminal
+            states (``on_goal_achieved`` / ``on_plan_failed``).
+            **Known limitation (v0.1.0):** mid-run ``MultiGoal``
+            sub-goal completions do **not** emit tracer events — the
+            tracer stays silent until the whole ``MultiGoal``
+            terminates.  A future ``on_subgoal_achieved`` hook is out
+            of scope for v0.1.0.
+        history: Optional :class:`StoreExecutionHistory` that records
+            one :class:`ExecutionRecord` per terminal state so downstream
+            analytics can query past runs by goal or by failing action.
+            For ``MultiGoal`` runs the record captures the sub-goal
+            that was active at termination.
     """
 
-    def __init__(self, actions: list[ActionSpec] | None = None) -> None:
+    def __init__(
+        self,
+        actions: list[ActionSpec] | None = None,
+        *,
+        tracer: PlanningTracer | None = None,
+        history: StoreExecutionHistory | None = None,
+    ) -> None:
         self._actions = actions or []
+        self._tracer: PlanningTracer = tracer or NullTracer()
+        self._history = history
 
     def __call__(self, state: GoapState) -> Command[str]:
-        goal: GoalSpec | None = state.get("goal")
+        cmd = self._route(state)
+        self._fire_sync_tracer(state, cmd)
+        self._maybe_record_sync(state, cmd)
+        return cmd
+
+    async def acall(self, state: GoapState) -> Command[str]:
+        """Async variant — mirrors :meth:`__call__` but fires async hooks."""
+        cmd = self._route(state)
+        await self._fire_async_tracer(state, cmd)
+        await self._maybe_record_async(state, cmd)
+        return cmd
+
+    def _fire_sync_tracer(self, state: GoapState, cmd: Command[str]) -> None:
+        update = cmd.update or {}
+        if cmd.goto == END:
+            status = update.get("status")
+            if status == "goal_achieved":
+                _safe_tracer_call(
+                    self._tracer,
+                    "on_goal_achieved",
+                    state.get("world_state", {}),
+                )
+            elif status in {"failed", "no_plan", "error"}:
+                reason = update.get("replan_reason") or status
+                _safe_tracer_call(self._tracer, "on_plan_failed", reason, 0.0)
+
+    async def _fire_async_tracer(self, state: GoapState, cmd: Command[str]) -> None:
+        update = cmd.update or {}
+        if cmd.goto == END:
+            status = update.get("status")
+            if status == "goal_achieved":
+                await _safe_tracer_acall(
+                    self._tracer,
+                    "aon_goal_achieved",
+                    state.get("world_state", {}),
+                )
+            elif status in {"failed", "no_plan", "error"}:
+                reason = update.get("replan_reason") or status
+                await _safe_tracer_acall(self._tracer, "aon_plan_failed", reason, 0.0)
+
+    def _build_record(
+        self, state: GoapState, cmd: Command[str]
+    ) -> ExecutionRecord | None:
+        """Return an ``ExecutionRecord`` for a terminal command, or ``None``.
+
+        Records are only built when the command routes to ``END`` with a
+        non-trivial status — no record is emitted for intermediate
+        observer decisions.  For ``MultiGoal`` runs, the record captures
+        the sub-goal that was active at termination so downstream
+        analytics can attribute success/failure correctly.
+        """
+        if cmd.goto != END:
+            return None
+        raw_goal = state.get("goal")
+        if raw_goal is None:
+            return None
+        if isinstance(raw_goal, MultiGoal):
+            idx = state.get("current_subgoal_index", 0)
+            if idx >= len(raw_goal.goals):
+                idx = len(raw_goal.goals) - 1
+            goal: GoalSpec = raw_goal.goals[idx]
+        else:
+            goal = raw_goal
+        update = cmd.update or {}
+        status = update.get("status", "unknown")
+        if status == "goal_achieved":
+            outcome = "success"
+        elif status in {"failed", "no_plan", "error"}:
+            outcome = "failed"
+        else:
+            return None
+        plan_obj: Plan | None = state.get("plan")
+        return ExecutionRecord(
+            goal_hash=_compute_goal_hash(goal),
+            goal_conditions=dict(goal.conditions),
+            plan_actions=tuple(plan_obj.action_names) if plan_obj else (),
+            expected_cost=plan_obj.total_cost if plan_obj else 0.0,
+            actual_cost=plan_obj.total_cost if plan_obj else 0.0,
+            outcome=outcome,
+            replan_count=state.get("replan_count", 0),
+            timestamp=datetime.now(timezone.utc),
+        )
+
+    def _maybe_record_sync(self, state: GoapState, cmd: Command[str]) -> None:
+        if self._history is None:
+            return
+        record = self._build_record(state, cmd)
+        if record is None:
+            return
+        try:
+            self._history.record(record)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Failed to record execution history")
+
+    async def _maybe_record_async(self, state: GoapState, cmd: Command[str]) -> None:
+        if self._history is None:
+            return
+        record = self._build_record(state, cmd)
+        if record is None:
+            return
+        try:
+            await self._history.arecord(record)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Failed to record execution history")
+
+    def _route(self, state: GoapState) -> Command[str]:
+        raw_goal: GoalSpec | MultiGoal | None = state.get("goal")
         world_state: dict[str, Any] = state.get("world_state", {})
         plan_obj: Plan | None = state.get("plan")
         current_step: int = state.get("current_step", 0)
         status: str = state.get("status", "")
 
-        if goal is None:
+        if raw_goal is None:
             return Command(
                 goto=END,
                 update={"status": "error", "replan_reason": "no goal specified"},
             )
+
+        # ``MultiGoal`` dispatch: resolve to the current sub-goal before
+        # the existing single-goal logic runs.  In ``sequential`` mode,
+        # advance ``current_subgoal_index`` when a sub-goal is satisfied.
+        # In ``any`` mode, the planner already committed to a specific
+        # sub-goal via ``current_subgoal_index`` — satisfying it ends
+        # the run (we do not chase the remaining alternatives).
+        goal: GoalSpec
+        if isinstance(raw_goal, MultiGoal):
+            idx = state.get("current_subgoal_index", 0)
+            if idx >= len(raw_goal.goals):
+                return Command(goto=END, update={"status": "goal_achieved"})
+            current_sub = raw_goal.goals[idx]
+            sub_satisfied = all(
+                k in world_state and world_state[k] == v
+                for k, v in current_sub.conditions.items()
+            )
+            if sub_satisfied:
+                if raw_goal.mode == "sequential" and idx + 1 < len(raw_goal.goals):
+                    # Reset per-sub-goal accounting so the next
+                    # sub-goal gets a fresh replan budget, blacklist,
+                    # and failure counts.  ``max_replans`` is declared
+                    # per ``GoalSpec`` so its budget must also apply
+                    # per sub-goal; similarly, an action blacklisted
+                    # while working on sub-goal i should not carry
+                    # over to sub-goal i+1 which may need it.
+                    return Command(
+                        goto="planner",
+                        update={
+                            "current_subgoal_index": idx + 1,
+                            "plan": None,
+                            "current_step": 0,
+                            "replan_reason": "subgoal_achieved",
+                            "replan_count": 0,
+                            "blacklisted_actions": [],
+                            "action_failure_counts": {},
+                        },
+                    )
+                return Command(goto=END, update={"status": "goal_achieved"})
+            # Not yet satisfied — fall through with the effective sub-goal.
+            goal = current_sub
+        else:
+            goal = raw_goal
 
         # Goal achieved — check directly on the world_state dict to
         # avoid creating a PlanningState (which would choke on

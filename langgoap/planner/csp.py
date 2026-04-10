@@ -20,7 +20,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import timedelta
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from langgoap.planner.types import Plan
@@ -57,6 +57,17 @@ class ResourceUsage:
         constraint_min: Lower bound from the constraint, or ``None``.
         constraint_max: Upper bound from the constraint, or ``None``.
         satisfied: Whether the total falls within the constraint bounds.
+        level: Constraint level.
+
+            * ``"hard"`` — the usage corresponds to a
+              :class:`~langgoap.goals.ConstraintSpec` with
+              ``level="hard"``.  Violation marks the plan
+              :attr:`CSPStatus.INFEASIBLE`.
+            * ``"soft"`` — the usage corresponds to a soft constraint.
+              Violation contributes to the plan's soft score.
+            * ``"info"`` (default) — informational only; the resource
+              key has no matching ``ConstraintSpec``.  Violation is
+              impossible because there is no bound to violate.
     """
 
     key: str
@@ -64,6 +75,7 @@ class ResourceUsage:
     constraint_min: float | None = None
     constraint_max: float | None = None
     satisfied: bool = True
+    level: Literal["hard", "soft", "info"] = "info"
 
 
 @dataclass(frozen=True)
@@ -242,10 +254,11 @@ def validate_plan(
     # Compute resource totals
     totals = compute_resource_totals(plan.actions)
 
-    # Build resource usage and check constraints
+    # Build resource usage and check constraints.  Hard violations mark
+    # the plan INFEASIBLE; soft violations are recorded but do not.
     constraint_map: dict[str, ConstraintSpec] = {c.key: c for c in goal.constraints}
     usage_list: list[ResourceUsage] = []
-    all_satisfied = True
+    all_hard_satisfied = True
 
     # Process all constrained keys
     for key, constraint in constraint_map.items():
@@ -255,8 +268,8 @@ def validate_plan(
             satisfied = False
         if constraint.min is not None and total < constraint.min:
             satisfied = False
-        if not satisfied:
-            all_satisfied = False
+        if not satisfied and constraint.level == "hard":
+            all_hard_satisfied = False
         usage_list.append(
             ResourceUsage(
                 key=key,
@@ -264,13 +277,14 @@ def validate_plan(
                 constraint_min=constraint.min,
                 constraint_max=constraint.max,
                 satisfied=satisfied,
+                level=constraint.level,
             )
         )
 
     # Also include resource keys that have no constraints (informational)
     for key, total in totals.items():
         if key not in constraint_map:
-            usage_list.append(ResourceUsage(key=key, total=total))
+            usage_list.append(ResourceUsage(key=key, total=total, level="info"))
 
     # Compute objective values
     obj_values: dict[str, float] = {}
@@ -278,12 +292,12 @@ def validate_plan(
         for obj_key in goal.objectives:
             obj_values[obj_key] = totals.get(obj_key, 0.0)
 
-    status = CSPStatus.FEASIBLE if all_satisfied else CSPStatus.INFEASIBLE
+    status = CSPStatus.FEASIBLE if all_hard_satisfied else CSPStatus.INFEASIBLE
 
     # Check if any actions have durations → schedule
     schedule_meta: CSPMetadata | None = None
     has_durations = any(a.duration is not None for a in plan.actions)
-    if has_durations and all_satisfied:
+    if has_durations and all_hard_satisfied:
         schedule_meta = schedule_plan(plan, scale=scale)
 
     # Merge resource and scheduling statuses: scheduling failure overrides feasible.
@@ -477,20 +491,53 @@ def optimize_plans(
         model.add(rv == sum(selected[i] * scaled_values[i] for i in range(n)))
         resource_vars[key] = rv
 
-    # Hard constraints from ConstraintSpec
+    # Constraints from ConstraintSpec.  Hard constraints are enforced
+    # directly on the solver; soft constraints introduce a non-negative
+    # violation variable that contributes ``viol * weight`` to the
+    # objective (R1).
     constraint_map: dict[str, ConstraintSpec] = {c.key: c for c in goal.constraints}
+    soft_violation_terms: list[Any] = []
+    # Big-M for soft-violation variables. The maximum possible violation
+    # is bounded by the largest scaled resource total across all plans.
+    max_scaled = 1
+    for res in plan_resources:
+        for v in res.values():
+            scaled = int(abs(v) * scale) + 1
+            if scaled > max_scaled:
+                max_scaled = scaled
+    # Also account for explicit bounds when larger than observed totals.
+    for constraint in constraint_map.values():
+        if constraint.max is not None:
+            max_scaled = max(max_scaled, int(abs(constraint.max) * scale) + 1)
+        if constraint.min is not None:
+            max_scaled = max(max_scaled, int(abs(constraint.min) * scale) + 1)
+    big_m = max_scaled * 2 + 1
+
     for key, constraint in constraint_map.items():
         if key not in resource_vars:
             # Create a zero variable for constrained keys with no resources
             rv = model.new_int_var(0, 0, f"resource_{key}")
             resource_vars[key] = rv
         rv = resource_vars[key]
-        if constraint.max is not None:
-            model.add(rv <= int(constraint.max * scale))
-        if constraint.min is not None:
-            model.add(rv >= int(constraint.min * scale))
+        if constraint.level == "hard":
+            if constraint.max is not None:
+                model.add(rv <= int(constraint.max * scale))
+            if constraint.min is not None:
+                model.add(rv >= int(constraint.min * scale))
+        else:
+            # Soft bound: violations allowed but penalized.
+            weight_scaled = max(int(constraint.weight * scale), 1)
+            if constraint.max is not None:
+                viol_max = model.new_int_var(0, big_m, f"soft_viol_max_{key}")
+                model.add(viol_max >= rv - int(constraint.max * scale))
+                soft_violation_terms.append(viol_max * weight_scaled)
+            if constraint.min is not None:
+                viol_min = model.new_int_var(0, big_m, f"soft_viol_min_{key}")
+                model.add(viol_min >= int(constraint.min * scale) - rv)
+                soft_violation_terms.append(viol_min * weight_scaled)
 
-    # Objective: weighted sum aligned with ObjectiveDirection
+    # Objective: weighted sum aligned with ObjectiveDirection,
+    # plus soft-constraint violation penalties.
     objective_terms: list[Any] = []
     if goal.objectives:
         for obj_key, direction in goal.objectives.items():
@@ -502,10 +549,11 @@ def optimize_plans(
                     # Maximizing → negative coefficient (solver minimizes -value)
                     objective_terms.append(-resource_vars[obj_key])
 
-    if objective_terms:
-        model.minimize(sum(objective_terms))
+    combined_terms: list[Any] = list(objective_terms) + list(soft_violation_terms)
+    if combined_terms:
+        model.minimize(sum(combined_terms))
     else:
-        # No objectives — prefer lower total cost
+        # No objectives or soft violations — prefer lower total cost
         cost_terms = [selected[i] * int(plans[i].total_cost * scale) for i in range(n)]
         model.minimize(sum(cost_terms))
 
@@ -526,19 +574,42 @@ def optimize_plans(
         chosen_plan = plans[chosen_idx]
         chosen_resources = plan_resources[chosen_idx]
 
-        # Build resource usage
+        # Build resource usage.  satisfied=True for hard constraints is
+        # guaranteed by the solver; for soft constraints it depends on
+        # the actual chosen totals vs. bounds.
         usage_list: list[ResourceUsage] = []
         for key in sorted(all_keys):
             cspec = constraint_map.get(key)
+            total = chosen_resources.get(key, 0.0)
+            satisfied = True
+            if cspec is not None:
+                if cspec.max is not None and total > cspec.max:
+                    satisfied = False
+                if cspec.min is not None and total < cspec.min:
+                    satisfied = False
             usage_list.append(
                 ResourceUsage(
                     key=key,
-                    total=chosen_resources.get(key, 0.0),
+                    total=total,
                     constraint_min=cspec.min if cspec else None,
                     constraint_max=cspec.max if cspec else None,
-                    satisfied=True,
+                    satisfied=satisfied,
+                    level=cspec.level if cspec else "info",
                 )
             )
+        # Include constrained keys that don't appear in any plan's resources.
+        for key, cspec in constraint_map.items():
+            if key not in all_keys:
+                usage_list.append(
+                    ResourceUsage(
+                        key=key,
+                        total=0.0,
+                        constraint_min=cspec.min,
+                        constraint_max=cspec.max,
+                        satisfied=(cspec.min is None or cspec.min <= 0),
+                        level=cspec.level,
+                    )
+                )
 
         # Compute objective values
         obj_values: dict[str, float] = {}

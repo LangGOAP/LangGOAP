@@ -1,4 +1,4 @@
-.PHONY: install format lint test test-all clean check-types check docs docs-clean docs-serve test-coverage coverage-report coverage-html find-dead-code
+.PHONY: install format lint test test-all clean check-types check docs docs-clean docs-serve test-coverage coverage-report coverage-html find-dead-code benchmark benchmark-compare
 
 install:
 	uv sync
@@ -33,6 +33,22 @@ coverage-html:
 
 find-dead-code:
 	uv run python -m vulture langgoap --sort-by-size
+
+benchmark:
+	uv run pytest tests/benchmarks/ -v \
+		--benchmark-sort=mean \
+		--benchmark-columns=mean,stddev,min,max,rounds \
+		--benchmark-group-by=func \
+		--no-header \
+		-p no:randomly
+
+benchmark-compare:
+	uv run pytest tests/benchmarks/ -v \
+		--benchmark-sort=mean \
+		--benchmark-columns=mean,stddev,min,max,rounds \
+		--benchmark-compare \
+		--benchmark-compare-fail=mean:10% \
+		-p no:randomly
 
 check: lint test
 

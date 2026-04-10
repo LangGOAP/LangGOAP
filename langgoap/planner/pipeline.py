@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import replace
-from typing import Any
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
@@ -22,10 +21,56 @@ from langgoap.planner.csp import (
     optimize_plans,
     validate_plan,
 )
-from langgoap.planner.types import Plan, PlanMetadata
+from langgoap.planner.types import Plan
+from langgoap.score import HardSoftScore
 from langgoap.state import PlanningState
+from langgoap.types import ObjectiveDirection
 
 logger = logging.getLogger(__name__)
+
+
+def _score_from_csp(plan: Plan, goal: GoalSpec, meta: CSPMetadata) -> HardSoftScore:
+    """Build a :class:`HardSoftScore` from CSP metadata.
+
+    The sign convention matches OptaPlanner's ``penalize(amount)``:
+
+    * ``hard`` starts at ``0.0`` and each hard-constraint violation
+      subtracts ``violation_amount * weight``.  A feasible plan has
+      ``hard == 0.0``.
+    * ``soft`` starts at ``0.0``.  Soft-constraint violations subtract
+      the weighted amount.  Objective values contribute with a sign
+      aligned to their direction — ``MINIMIZE`` subtracts, ``MAXIMIZE``
+      adds.
+    """
+    constraint_by_key = {c.key: c for c in goal.constraints}
+    hard = 0.0
+    soft = 0.0
+
+    # Constraint violations → hard or soft depending on level.
+    for usage in meta.resource_usage:
+        c = constraint_by_key.get(usage.key)
+        if c is None:
+            continue
+        violation = 0.0
+        if c.max is not None and usage.total > c.max:
+            violation = usage.total - c.max
+        elif c.min is not None and usage.total < c.min:
+            violation = c.min - usage.total
+        if violation == 0.0:
+            continue
+        penalty = violation * c.weight
+        if c.level == "hard":
+            hard -= penalty
+        else:
+            soft -= penalty
+
+    # Objective contributions go to soft, aligned with direction.
+    if goal.objectives:
+        for key, direction in goal.objectives.items():
+            v = meta.objective_values.get(key, 0.0)
+            soft += -v if direction == ObjectiveDirection.MINIMIZE else v
+
+    return HardSoftScore(hard=hard, soft=soft)
 
 
 def needs_csp(goal: GoalSpec) -> bool:
@@ -37,10 +82,17 @@ def needs_csp(goal: GoalSpec) -> bool:
 _needs_csp = needs_csp
 
 
-def _augment_plan(plan: Plan, csp_meta: CSPMetadata) -> Plan:
-    """Create a new Plan with CSP metadata attached."""
+def _augment_plan(plan: Plan, goal: GoalSpec, csp_meta: CSPMetadata) -> Plan:
+    """Create a new Plan with CSP metadata and a HardSoftScore attached.
+
+    After CSP evaluation the plan's pure-A* :class:`~langgoap.score.SimpleScore`
+    is replaced with a :class:`~langgoap.score.HardSoftScore` computed from
+    ``csp_meta`` via :func:`_score_from_csp`.  The original plan is left
+    unchanged (frozen dataclass → ``dataclasses.replace``).
+    """
     new_metadata = replace(plan.metadata, csp=csp_meta)
-    return replace(plan, metadata=new_metadata)
+    new_score = _score_from_csp(plan, goal, csp_meta)
+    return replace(plan, metadata=new_metadata, score=new_score)
 
 
 def enumerate_alternatives(
@@ -128,7 +180,7 @@ def plan(
     )
 
     if csp_meta.status in (CSPStatus.FEASIBLE, CSPStatus.OPTIMAL):
-        return _augment_plan(primary, csp_meta)
+        return _augment_plan(primary, goal, csp_meta)
 
     # Primary plan rejected → generate alternatives
     logger.info(
@@ -146,7 +198,7 @@ def plan(
 
     if not alternatives:
         logger.warning("No alternative plans found")
-        return _augment_plan(primary, csp_meta)
+        return _augment_plan(primary, goal, csp_meta)
 
     # Phase 3: CP-SAT multi-plan optimization
     try:
@@ -157,8 +209,8 @@ def plan(
         for alt in alternatives:
             alt_meta = validate_plan(alt, goal)
             if alt_meta.status in (CSPStatus.FEASIBLE, CSPStatus.OPTIMAL):
-                return _augment_plan(alt, alt_meta)
-        return _augment_plan(primary, csp_meta)
+                return _augment_plan(alt, goal, alt_meta)
+        return _augment_plan(primary, goal, csp_meta)
 
     if opt_meta.status in (CSPStatus.FEASIBLE, CSPStatus.OPTIMAL):
         logger.info(
@@ -166,8 +218,8 @@ def plan(
             best_plan.action_names,
             opt_meta.status.value,
         )
-        return _augment_plan(best_plan, opt_meta)
+        return _augment_plan(best_plan, goal, opt_meta)
 
     # All alternatives infeasible — return primary with infeasible metadata
     logger.warning("All alternative plans infeasible")
-    return _augment_plan(primary, csp_meta)
+    return _augment_plan(primary, goal, csp_meta)

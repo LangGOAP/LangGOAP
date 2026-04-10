@@ -352,6 +352,61 @@ class TestValidatePlan:
         assert meta.status == CSPStatus.FEASIBLE
         assert meta.schedule == ()  # no scheduling performed
 
+    def test_hard_violation_marks_infeasible(self) -> None:
+        """Hard constraint violation → INFEASIBLE."""
+        a = make_action("a", eff={"done": True}, resources={"cost": 500})
+        p = make_plan(a)
+        goal = self._make_constrained_goal(
+            constraints=[ConstraintSpec(key="cost", max=100, level="hard")]
+        )
+        meta = validate_plan(p, goal)
+        assert meta.status == CSPStatus.INFEASIBLE
+        cost_usage = next(u for u in meta.resource_usage if u.key == "cost")
+        assert cost_usage.level == "hard"
+        assert cost_usage.satisfied is False
+
+    def test_soft_violation_remains_feasible(self) -> None:
+        """Soft constraint violation → FEASIBLE with level-tagged usage."""
+        a = make_action("a", eff={"done": True}, resources={"cost": 500})
+        p = make_plan(a)
+        goal = self._make_constrained_goal(
+            constraints=[ConstraintSpec(key="cost", max=100, level="soft")]
+        )
+        meta = validate_plan(p, goal)
+        # Soft violation does NOT mark infeasible
+        assert meta.status == CSPStatus.FEASIBLE
+        cost_usage = next(u for u in meta.resource_usage if u.key == "cost")
+        assert cost_usage.level == "soft"
+        assert cost_usage.satisfied is False
+
+    def test_unconstrained_resource_keys_are_info(self) -> None:
+        """Resource keys without matching constraints get level='info'."""
+        a = make_action(
+            "a", eff={"done": True}, resources={"tokens": 100, "latency_ms": 50}
+        )
+        p = make_plan(a)
+        goal = self._make_constrained_goal(
+            constraints=[ConstraintSpec(key="tokens", max=200)]
+        )
+        meta = validate_plan(p, goal)
+        latency_usage = next(u for u in meta.resource_usage if u.key == "latency_ms")
+        assert latency_usage.level == "info"
+        token_usage = next(u for u in meta.resource_usage if u.key == "tokens")
+        assert token_usage.level == "hard"
+
+    def test_hard_satisfied_with_soft_violated_is_feasible(self) -> None:
+        """Mixed constraints: hard satisfied + soft violated → FEASIBLE."""
+        a = make_action("a", eff={"done": True}, resources={"gpu": 1, "cost": 500})
+        p = make_plan(a)
+        goal = self._make_constrained_goal(
+            constraints=[
+                ConstraintSpec(key="gpu", max=10, level="hard"),
+                ConstraintSpec(key="cost", max=100, level="soft"),
+            ]
+        )
+        meta = validate_plan(p, goal)
+        assert meta.status == CSPStatus.FEASIBLE
+
 
 # ---------------------------------------------------------------------------
 # schedule_plan
@@ -548,3 +603,59 @@ class TestOptimizePlans:
         )
         _, meta = optimize_plans(plans, goal)
         assert meta.plans_evaluated == 4
+
+    def test_soft_constraint_allows_violation_but_penalizes(self) -> None:
+        """Soft max bound: a violating plan is still feasible and carries the
+        penalty via the CP-SAT objective.  With only a soft budget and no
+        objective, the solver should prefer the less-violating plan.
+        """
+        cheap = make_plan(
+            make_action("cheap", eff={"done": True}, resources={"cost": 10})
+        )
+        expensive = make_plan(
+            make_action("expensive", eff={"done": True}, resources={"cost": 50})
+        )
+        goal = GoalSpec(
+            conditions={"done": True},
+            constraints=(ConstraintSpec(key="cost", max=5, weight=1.0, level="soft"),),
+        )
+        chosen, meta = optimize_plans([cheap, expensive], goal)
+        # Soft budget → solver still returns a feasible status but minimizes
+        # the penalty by preferring the plan with less violation.
+        assert meta.status in (CSPStatus.OPTIMAL, CSPStatus.FEASIBLE)
+        assert chosen.action_names == ["cheap"]
+        # The "cost" usage entry should be labelled soft and marked unsatisfied
+        # (10 > 5) even though the plan is still returned.
+        cost_usage = next(u for u in meta.resource_usage if u.key == "cost")
+        assert cost_usage.level == "soft"
+        assert cost_usage.satisfied is False
+
+    def test_hard_and_soft_mix(self) -> None:
+        """A plan with a hard constraint met and a soft constraint violated
+        is chosen when both alternatives satisfy the hard bound."""
+        low_gpu_high_cost = make_plan(
+            make_action(
+                "low_gpu_high_cost",
+                eff={"done": True},
+                resources={"gpu": 1, "cost": 20},
+            )
+        )
+        high_gpu_low_cost = make_plan(
+            make_action(
+                "high_gpu_low_cost",
+                eff={"done": True},
+                resources={"gpu": 5, "cost": 5},
+            )
+        )
+        goal = GoalSpec(
+            conditions={"done": True},
+            constraints=(
+                ConstraintSpec(key="gpu", max=10, level="hard"),
+                ConstraintSpec(key="cost", max=10, weight=1.0, level="soft"),
+            ),
+        )
+        chosen, meta = optimize_plans([low_gpu_high_cost, high_gpu_low_cost], goal)
+        # Both satisfy the hard GPU bound; the soft cost penalty picks the
+        # plan with lower cost.
+        assert meta.status in (CSPStatus.OPTIMAL, CSPStatus.FEASIBLE)
+        assert chosen.action_names == ["high_gpu_low_cost"]

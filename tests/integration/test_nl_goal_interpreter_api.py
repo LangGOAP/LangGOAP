@@ -118,9 +118,9 @@ class TestGoalInterpreterOpenAI:
         )
         raw = interpreter.interpret_raw("Generate a report, but keep costs under $5")
         assert isinstance(raw, InterpretedGoal)
-        assert any(c.key == "cost_usd" for c in raw.constraints), (
-            f"Expected cost_usd constraint; got: {raw.constraints}"
-        )
+        assert any(
+            c.key == "cost_usd" for c in raw.constraints
+        ), f"Expected cost_usd constraint; got: {raw.constraints}"
         cost_c = next(c for c in raw.constraints if c.key == "cost_usd")
         assert cost_c.max is not None and cost_c.max <= 5.0
 
@@ -203,9 +203,9 @@ class TestGoalInterpreterAnthropic:
         interpreter = GoalInterpreter(llm=llm, actions=_report_pipeline_actions())  # type: ignore[arg-type]
         raw = interpreter.interpret_raw("Generate a report, but keep costs under $5")
         assert isinstance(raw, InterpretedGoal)
-        assert any(c.key == "cost_usd" for c in raw.constraints), (
-            f"Expected cost_usd constraint; got: {raw.constraints}"
-        )
+        assert any(
+            c.key == "cost_usd" for c in raw.constraints
+        ), f"Expected cost_usd constraint; got: {raw.constraints}"
         cost_c = next(c for c in raw.constraints if c.key == "cost_usd")
         assert cost_c.max is not None and cost_c.max <= 5.0
 

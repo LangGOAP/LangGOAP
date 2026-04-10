@@ -2,7 +2,7 @@
 
 Tests exercise GoapGraph.invoke() and ainvoke() with actions that fail,
 verifying that the blacklist mechanism switches to alternatives, respects
-max_retries, and applies the Embabel fallback correctly.
+max_retries, and applies the blacklist fallback correctly.
 """
 
 from __future__ import annotations
@@ -133,7 +133,7 @@ class TestBlacklistingGoapLoop:
         # Replanning count: 3 failures → 3 replans, plus 1 to switch to action_b
         assert result["replan_count"] >= 3
 
-    def test_embabel_fallback_retries_only_action(self) -> None:
+    def test_blacklist_fallback_retries_only_action(self) -> None:
         """Only one action can achieve goal → blacklisted → fallback clears blacklist → retried."""
         # Action fails once, then succeeds on second attempt
         action = _make_flaky(
@@ -159,7 +159,7 @@ class TestBlacklistingGoapLoop:
         assert len(failures) >= 1
         assert len(successes) >= 1
 
-        # Embabel fallback should have cleared the blacklist and failure counts
+        # Blacklist fallback should have cleared the blacklist and failure counts
         assert result.get("blacklisted_actions", []) == []
         assert result.get("action_failure_counts", {}) == {}
 

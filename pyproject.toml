@@ -54,6 +54,7 @@ dev-dependencies = [
     "langchain-openai>=0.3",
     "ipykernel>=7.2.0",
     "langchain-anthropic>=1.4.0",
+    "pytest-benchmark>=5.1",
 ]
 
 [tool.pytest.ini_options]
@@ -61,10 +62,11 @@ testpaths = ["tests"]
 # examples/tutorials is added so tests can import tutorial_examples.*
 # (the same import path notebooks use when running from that directory).
 pythonpath = [".", "examples/tutorials"]
-addopts = "--strict-markers --strict-config --durations=5 -vv"
+addopts = "--strict-markers --strict-config --durations=5 -vv --ignore=tests/benchmarks"
 asyncio_mode = "auto"
 markers = [
     "api: marks tests that call real LLM APIs (deselect with '-m not api')",
+    "bench: marks benchmark tests — run with 'make benchmark' (ignored by default test suite)",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning:testcontainers.core.waiting_utils",

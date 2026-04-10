@@ -36,12 +36,26 @@ from langgoap.types import ObjectiveDirection
 
 
 class InterpretedConstraint(BaseModel):
-    """A resource constraint extracted from natural language."""
+    """A resource constraint extracted from natural language.
+
+    ``level`` distinguishes hard ("must not exceed $5") from soft
+    ("would be nice to stay under $5") constraints.  Defaults to
+    ``"hard"`` so pre-existing mocks that omit the field continue to
+    produce hard constraints.
+    """
 
     key: str = Field(description="Resource key (e.g. 'cost_usd', 'total_tokens')")
     max: float | None = Field(default=None, description="Upper bound, or null")
     min: float | None = Field(default=None, description="Lower bound, or null")
     weight: float = Field(default=1.0, description="Relative importance (default 1.0)")
+    level: Literal["hard", "soft"] = Field(
+        default="hard",
+        description=(
+            "'hard' (must not violate) or 'soft' (prefer not to "
+            "violate; incurs a weighted penalty). Use 'soft' for "
+            "language like 'ideally', 'preferably', 'nice to have'."
+        ),
+    )
 
 
 class InterpretedObjective(BaseModel):
@@ -159,6 +173,7 @@ def to_goal_spec(interpreted: InterpretedGoal) -> GoalSpec:
             max=c.max,
             min=c.min,
             weight=c.weight,
+            level=c.level,
         )
         for c in interpreted.constraints
     )
@@ -172,7 +187,10 @@ def to_goal_spec(interpreted: InterpretedGoal) -> GoalSpec:
     objectives: MappingProxyType[str, ObjectiveDirection] | None = None
     if interpreted.objectives:
         objectives = MappingProxyType(
-            {obj.metric: _direction_map[obj.direction] for obj in interpreted.objectives}
+            {
+                obj.metric: _direction_map[obj.direction]
+                for obj in interpreted.objectives
+            }
         )
 
     # MappingProxyType wrapping satisfies GoalSpec's field type annotation.

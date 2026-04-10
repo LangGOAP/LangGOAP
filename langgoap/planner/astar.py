@@ -1,9 +1,9 @@
 """A* GOAP planner with two-pass optimization.
 
-Forward-chaining A* search adapted from Embabel and GOApy reference
-implementations. Includes:
-- Reachability pre-check (Embabel fast early exit)
-- Action specificity tie-breaking (Embabel)
+Forward-chaining A* search over GOAP state space. Includes:
+- Reachability pre-check (fast early exit when a goal condition has no
+  producing action)
+- Action specificity tie-breaking
 - Two-pass plan optimization: backward relevance + forward simulation
 """
 
@@ -18,6 +18,7 @@ from typing import Any
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
 from langgoap.planner.types import Plan, PlanMetadata
+from langgoap.score import SimpleScore
 from langgoap.state import PlanningState
 
 # ---------------------------------------------------------------------------
@@ -70,7 +71,7 @@ def _is_reachable(
     """Fast check: every unsatisfied goal condition must be producible by some action.
 
     This is a necessary (not sufficient) condition for plan existence.
-    Adapted from Embabel's reachability check.
+    Used as a cheap early-exit before entering the full A* search.
     """
     producible: set[tuple[str, Any]] = set()
     for action in actions:
@@ -213,6 +214,7 @@ def _search(
                     planning_time_ms=elapsed_ms,
                     actions_pruned=actions_pruned,
                 ),
+                score=SimpleScore(scalar=total_cost),
             )
 
         # Skip if we've found a better path to this state
@@ -266,7 +268,9 @@ def plan(
         actions: Available actions to choose from.
         blacklisted_actions: Action names to exclude from planning.
             If filtering makes the goal unreachable, the planner retries
-            with all actions (Embabel-style graceful degradation).
+            with all actions (graceful degradation: an unreachable goal
+            from the filtered set is preferred over returning ``None``
+            when a plan through the full action set still exists).
 
     Returns:
         A Plan if a path exists, None if the goal is unreachable.
@@ -285,6 +289,7 @@ def plan(
                 nodes_explored=0,
                 planning_time_ms=elapsed_ms,
             ),
+            score=SimpleScore(scalar=0.0),
         )
 
     # Filter blacklisted actions
@@ -294,7 +299,8 @@ def plan(
         result = _search(start, goal_conditions, available, t0)
         if result is not None:
             return result
-        # Embabel fallback: blacklist made goal unreachable — retry with all actions
+        # Blacklist fallback: filtered action set made the goal unreachable
+        # — retry with all actions so the executor can decide at runtime.
         return _search(start, goal_conditions, actions, t0)
 
     return _search(start, goal_conditions, actions, t0)

@@ -15,9 +15,11 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Checkpointer
 
 from langgoap.actions import ActionSpec
-from langgoap.goals import GoalSpec
+from langgoap.goals import GoalSpec, MultiGoal
 from langgoap.graph.nodes import GoapExecutor, GoapObserver, GoapPlanner
 from langgoap.graph.state import GoapState
+from langgoap.history import StoreExecutionHistory
+from langgoap.tracing import PlanningTracer
 
 
 class GoapGraph:
@@ -49,8 +51,16 @@ class GoapGraph:
                   └─────────────────────┘
     """
 
-    def __init__(self, actions: list[ActionSpec]) -> None:
+    def __init__(
+        self,
+        actions: list[ActionSpec],
+        *,
+        tracer: PlanningTracer | None = None,
+        history: StoreExecutionHistory | None = None,
+    ) -> None:
         self.actions = actions
+        self._tracer = tracer
+        self._history = history
 
     def compile(
         self,
@@ -68,16 +78,28 @@ class GoapGraph:
         """
         builder = StateGraph(GoapState)
 
-        # Add nodes — executor is wrapped with RunnableLambda to provide
-        # both sync (__call__) and async (acall) paths.  LangGraph will
-        # call the appropriate variant depending on invoke() vs ainvoke().
-        executor = GoapExecutor()
-        builder.add_node("planner", GoapPlanner(self.actions))
+        # All three nodes are wrapped with RunnableLambda so LangGraph
+        # dispatches to the async variant under ``ainvoke`` and the sync
+        # variant under ``invoke``.  Without this wiring, the planner
+        # and observer would only ever see the sync ``__call__`` path
+        # and their async tracer hooks would never fire (audit NS2).
+        planner = GoapPlanner(self.actions, tracer=self._tracer)
+        executor = GoapExecutor(tracer=self._tracer)
+        observer = GoapObserver(
+            self.actions, tracer=self._tracer, history=self._history
+        )
+        builder.add_node(
+            "planner",
+            RunnableLambda(func=planner.__call__, afunc=planner.acall),
+        )
         builder.add_node(
             "executor",
             RunnableLambda(func=executor.__call__, afunc=executor.acall),
         )
-        builder.add_node("observer", GoapObserver(self.actions))
+        builder.add_node(
+            "observer",
+            RunnableLambda(func=observer.__call__, afunc=observer.acall),
+        )
 
         # Wire edges
         builder.add_edge(START, "planner")
@@ -92,7 +114,7 @@ class GoapGraph:
 
     def invoke(
         self,
-        goal: GoalSpec,
+        goal: GoalSpec | MultiGoal,
         world_state: dict[str, Any] | None = None,
         config: RunnableConfig | None = None,
     ) -> GoapState:
@@ -103,7 +125,8 @@ class GoapGraph:
         use :meth:`compile` directly.
 
         Args:
-            goal: The goal to achieve.
+            goal: The goal to achieve.  May be a single :class:`GoalSpec`
+                or a :class:`MultiGoal` wrapping several sub-goals.
             world_state: Initial world state (defaults to an empty dict).
             config: Optional LangGraph run configuration
                 (e.g. ``{"configurable": {"thread_id": "..."}}``)
@@ -122,7 +145,7 @@ class GoapGraph:
 
     async def ainvoke(
         self,
-        goal: GoalSpec,
+        goal: GoalSpec | MultiGoal,
         world_state: dict[str, Any] | None = None,
         config: RunnableConfig | None = None,
     ) -> GoapState:
@@ -132,7 +155,8 @@ class GoapGraph:
         graph, enabling native async execution of action callables.
 
         Args:
-            goal: The goal to achieve.
+            goal: The goal to achieve.  May be a single :class:`GoalSpec`
+                or a :class:`MultiGoal` wrapping several sub-goals.
             world_state: Initial world state (defaults to an empty dict).
             config: Optional LangGraph run configuration.
 

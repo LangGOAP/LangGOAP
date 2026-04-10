@@ -125,7 +125,7 @@ class TestSpecificityTieBreaking:
 
 class TestMultiStepBranching:
     def test_crime_scenario(self) -> None:
-        """Adapted from Embabel: multi-branch scenario with optimal path selection.
+        """Multi-branch scenario with optimal path selection.
 
         Scenario: An agent wants to get_rich. It can:
         - Rob a bank (needs weapon) → get rich
@@ -282,6 +282,46 @@ class TestPlanMetadata:
         assert result is not None
         assert result.metadata.nodes_explored >= 1
         assert result.metadata.planning_time_ms >= 0.0
+
+    def test_simple_score_matches_total_cost(self) -> None:
+        """A*-only plans must carry ``SimpleScore(value=total_cost)``.
+
+        Regression for audit finding NC1: without explicit ``score=`` at every
+        A* ``Plan(...)`` construction site the score would silently default to
+        ``SimpleScore(0.0)`` regardless of the actual path cost.
+        """
+        from langgoap.score import SimpleScore
+
+        actions = [
+            _action("cheap", eff={"a": True}, cost=1.5),
+            _action("medium", pre={"a": True}, eff={"b": True}, cost=2.5),
+            _action("expensive", pre={"b": True}, eff={"done": True}, cost=4.0),
+        ]
+        start = PlanningState.from_dict({})
+        goal = GoalSpec(conditions={"done": True})
+
+        result = plan(start, goal, actions)
+
+        assert result is not None
+        assert result.action_names == ["cheap", "medium", "expensive"]
+        assert isinstance(result.score, SimpleScore)
+        assert result.score.scalar == result.total_cost
+        assert result.total_cost == pytest.approx(8.0)
+
+    def test_empty_plan_score_is_zero(self) -> None:
+        """Already-satisfied goal yields an empty plan with ``SimpleScore(0.0)``."""
+        from langgoap.score import SimpleScore
+
+        actions = [_action("noop", eff={"done": True})]
+        start = PlanningState.from_dict({"done": True})
+        goal = GoalSpec(conditions={"done": True})
+
+        result = plan(start, goal, actions)
+
+        assert result is not None
+        assert len(result) == 0
+        assert isinstance(result.score, SimpleScore)
+        assert result.score.scalar == 0.0
 
 
 class TestScalability:
