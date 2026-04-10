@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langgoap.actions import ActionSpec
 from langgoap.state import PlanningState
+
+if TYPE_CHECKING:
+    from langgoap.planner.csp import CSPMetadata
 
 
 @dataclass(frozen=True)
@@ -17,11 +20,14 @@ class PlanMetadata:
         nodes_explored: Number of A* nodes expanded during search.
         planning_time_ms: Wall-clock time spent planning in milliseconds.
         actions_pruned: Number of actions removed by optimization passes.
+        csp: Results from CSP constraint validation/optimization, or ``None``
+            when no constraints or objectives were specified.
     """
 
     nodes_explored: int = 0
     planning_time_ms: float = 0.0
     actions_pruned: int = 0
+    csp: CSPMetadata | None = None
 
 
 @dataclass(frozen=True)

@@ -26,6 +26,13 @@ class ConstraintSpec:
     min: float | None = None
     weight: float = 1.0
 
+    def __post_init__(self) -> None:
+        if self.min is not None and self.max is not None and self.min > self.max:
+            raise ValueError(
+                f"ConstraintSpec(key={self.key!r}): min ({self.min}) must be "
+                f"<= max ({self.max})."
+            )
+
 
 @dataclass(frozen=True)
 class GoalSpec:
@@ -63,15 +70,15 @@ class GoalSpec:
             "conditions",
             MappingProxyType(dict(self.conditions)),
         )
-        # Wrap objectives if a plain dict was supplied.
-        if self.objectives is not None and not isinstance(
-            self.objectives, MappingProxyType
-        ):
-            object.__setattr__(
-                self,
-                "objectives",
-                MappingProxyType(dict(self.objectives)),
-            )
+        # Normalise objectives: plain dict → MappingProxyType, empty → None.
+        if self.objectives is not None:
+            obj_dict = dict(self.objectives)
+            if not obj_dict:
+                # Empty objectives dict is semantically equivalent to no objectives;
+                # normalise to None so _needs_csp() and CSP checks behave correctly.
+                object.__setattr__(self, "objectives", None)
+            elif not isinstance(self.objectives, MappingProxyType):
+                object.__setattr__(self, "objectives", MappingProxyType(obj_dict))
         # Normalise constraints: accept list or tuple from callers.
         if not isinstance(self.constraints, tuple):
             object.__setattr__(self, "constraints", tuple(self.constraints))

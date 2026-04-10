@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -18,6 +19,8 @@ def make_action(
     cost: float = 1.0,
     execute: Any = None,
     max_retries: int = 0,
+    resources: dict[str, float] | None = None,
+    duration: timedelta | None = None,
 ) -> ActionSpec:
     """Create an ActionSpec with convenient defaults for testing."""
     return ActionSpec(
@@ -27,6 +30,8 @@ def make_action(
         cost=cost,
         execute=execute,
         max_retries=max_retries,
+        resources=resources,
+        duration=duration,
     )
 
 

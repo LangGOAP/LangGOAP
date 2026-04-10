@@ -80,8 +80,27 @@ class GoapPlanner:
         start = PlanningState.from_dict(world_state, keys=pkeys)
         blacklisted = list(state.get("blacklisted_actions", []))
 
-        # First try with blacklist; if that fails, try without (Embabel fallback).
-        result = astar_plan(start, goal, self.actions, blacklisted_actions=blacklisted)
+        # Route through CSP pipeline when constraints/objectives are present.
+        if goal.constraints or goal.objectives is not None:
+            try:
+                from langgoap.planner.pipeline import plan as pipeline_plan
+
+                result = pipeline_plan(
+                    start, goal, self.actions, blacklisted_actions=blacklisted
+                )
+            except ImportError:
+                logger.warning(
+                    "CSP constraints/objectives specified but ortools not "
+                    "installed. Falling back to pure A*."
+                )
+                result = astar_plan(
+                    start, goal, self.actions, blacklisted_actions=blacklisted
+                )
+        else:
+            # First try with blacklist; if that fails, try without (Embabel fallback).
+            result = astar_plan(
+                start, goal, self.actions, blacklisted_actions=blacklisted
+            )
 
         # Detect Embabel fallback: if the plan uses a blacklisted action,
         # the fallback fired — clear the blacklist to avoid repeated fallbacks.
