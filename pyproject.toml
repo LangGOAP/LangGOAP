@@ -53,6 +53,7 @@ dev-dependencies = [
     "vulture>=2.14",
     "langchain-openai>=0.3",
     "ipykernel>=7.2.0",
+    "langchain-anthropic>=1.4.0",
 ]
 
 [tool.pytest.ini_options]
@@ -62,6 +63,9 @@ testpaths = ["tests"]
 pythonpath = [".", "examples/tutorials"]
 addopts = "--strict-markers --strict-config --durations=5 -vv"
 asyncio_mode = "auto"
+markers = [
+    "api: marks tests that call real LLM APIs (deselect with '-m not api')",
+]
 filterwarnings = [
     "ignore::DeprecationWarning:testcontainers.core.waiting_utils",
 ]

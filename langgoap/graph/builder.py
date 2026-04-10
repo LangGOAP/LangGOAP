@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import RunnableConfig, RunnableLambda
 from langgraph.graph import START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -145,3 +146,79 @@ class GoapGraph:
             "world_state": world_state or {},
         }
         return await compiled.ainvoke(input_state, config=config)  # type: ignore[return-value]
+
+    def invoke_nl(
+        self,
+        request: str,
+        world_state: dict[str, Any] | None = None,
+        *,
+        llm: BaseChatModel,
+        config: RunnableConfig | None = None,
+        structured_output_kwargs: dict[str, Any] | None = None,
+    ) -> GoapState:
+        """Interpret a natural language request and execute the GOAP loop.
+
+        Convenience method that creates a :class:`~langgoap.interpreter.GoalInterpreter`,
+        converts the request to a :class:`~langgoap.goals.GoalSpec`, and invokes
+        the graph in one call.
+
+        Args:
+            request: Natural language description of the goal.
+            world_state: Initial world state (defaults to an empty dict).
+            llm: LangChain chat model for goal interpretation.
+            config: Optional LangGraph run configuration.
+            structured_output_kwargs: Forwarded to
+                :class:`~langgoap.interpreter.GoalInterpreter` and then to
+                ``llm.with_structured_output()``.  Use
+                ``{"method": "function_calling"}`` for OpenAI when the
+                conditions dict must stay open-ended.
+
+        Returns:
+            The final :class:`~langgoap.graph.state.GoapState` after the
+            GOAP loop completes.
+        """
+        from langgoap.interpreter import GoalInterpreter
+
+        interpreter = GoalInterpreter(
+            llm=llm,
+            actions=self.actions,
+            structured_output_kwargs=structured_output_kwargs,
+        )
+        goal = interpreter.interpret(request, world_state=world_state)
+        return self.invoke(goal=goal, world_state=world_state, config=config)
+
+    async def ainvoke_nl(
+        self,
+        request: str,
+        world_state: dict[str, Any] | None = None,
+        *,
+        llm: BaseChatModel,
+        config: RunnableConfig | None = None,
+        structured_output_kwargs: dict[str, Any] | None = None,
+    ) -> GoapState:
+        """Async variant of :meth:`invoke_nl`.
+
+        Args:
+            request: Natural language description of the goal.
+            world_state: Initial world state (defaults to an empty dict).
+            llm: LangChain chat model for goal interpretation.
+            config: Optional LangGraph run configuration.
+            structured_output_kwargs: Forwarded to
+                :class:`~langgoap.interpreter.GoalInterpreter` and then to
+                ``llm.with_structured_output()``.  Use
+                ``{"method": "function_calling"}`` for OpenAI when the
+                conditions dict must stay open-ended.
+
+        Returns:
+            The final :class:`~langgoap.graph.state.GoapState` after the
+            GOAP loop completes.
+        """
+        from langgoap.interpreter import GoalInterpreter
+
+        interpreter = GoalInterpreter(
+            llm=llm,
+            actions=self.actions,
+            structured_output_kwargs=structured_output_kwargs,
+        )
+        goal = await interpreter.ainterpret(request, world_state=world_state)
+        return await self.ainvoke(goal=goal, world_state=world_state, config=config)
