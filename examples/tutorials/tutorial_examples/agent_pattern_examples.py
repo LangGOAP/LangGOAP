@@ -1,8 +1,17 @@
-"""Shared execute functions for the GOAPified Embabel Examples tutorial.
+"""Shared execute functions for the Agent Pattern Examples tutorial.
+
+Five canonical agent workflow patterns rendered in LangGoap:
+
+1. Star News Finder — multi-step LLM pipeline with web search.
+2. Meal Preparation — parallel preconditions merging at a single goal.
+3. Write and Review — iterative refinement via replanning on deviation.
+4. Fact Checker — multi-step verification pipeline.
+5. Cost-Based Selection — planner prefers cheap actions over expensive
+   ones when both satisfy the same goal.
 
 Imported by:
-- ``tests/integration/test_embabel_examples.py``
-- ``examples/tutorials/embabel_examples_goapified.ipynb``
+- ``tests/integration/test_agent_pattern_examples.py``
+- ``examples/tutorials/agent_pattern_examples_goapified.ipynb``
 """
 
 from __future__ import annotations

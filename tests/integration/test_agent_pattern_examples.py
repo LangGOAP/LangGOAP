@@ -1,10 +1,17 @@
-"""Integration tests replicating Embabel agent examples with LangGoap.
+"""Integration tests for canonical agent workflow patterns in LangGoap.
 
-Embabel (embabel-agent) defines agents using GOAP planning with type-safe
-preconditions and effects. These tests replicate key Embabel patterns
-using LangGoap's action/goal model.
+Each test exercises a common agent pattern end-to-end through
+:class:`GoapGraph`:
 
-Reference: research/repos/embabel-agent/
+1. Star News Finder — multi-step LLM pipeline with web search.
+2. Meal Preparation — parallel preconditions merging at a single goal.
+3. Write and Review — iterative refinement via replanning on deviation.
+4. Fact Checker — multi-step verification pipeline.
+5. Cost-Based Selection — cheapest satisfying action wins.
+
+The shared execute functions live in
+``examples/tutorials/tutorial_examples/agent_pattern_examples.py`` so
+the notebook and the tests stay in sync.
 """
 
 from __future__ import annotations
@@ -12,7 +19,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from tutorial_examples.embabel_examples import (
+from tutorial_examples.agent_pattern_examples import (
     assess_story,
     assess_story_strict,
     check_facts,
@@ -38,7 +45,7 @@ from langgoap import ActionSpec, GoalSpec, GoapGraph, ReplanStrategy
 
 
 class TestStarNewsFinder:
-    """Embabel Star News Finder: multi-step LLM pipeline with web search."""
+    """Star News Finder: multi-step LLM pipeline with web search."""
 
     def test_full_pipeline(self) -> None:
         """Planner discovers full extraction → retrieval → writeup path."""
@@ -97,7 +104,7 @@ class TestStarNewsFinder:
 
 
 class TestMealPreparation:
-    """Embabel Meal Preparation: parallel preconditions merging at goal."""
+    """Meal Preparation: parallel preconditions merging at goal."""
 
     def test_full_meal_preparation(self) -> None:
         """Planner discovers choose_cook + take_order → prepare_meal."""
@@ -157,11 +164,11 @@ class TestMealPreparation:
 # ===========================================================================
 # Example 3: Write and Review Agent
 #
-# Original Embabel pattern (stateful with loops):
-#   craftStory(UserInput) → Story
-#   assess(Story) → Assessment (accept/reject)
-#   If rejected: revise(Story, Feedback) → Story (loop back)
-#   If accepted: review(Story) → ReviewedStory  @AchievesGoal
+# Workflow (stateful with replanning loop):
+#   craft_story(user_input) → story
+#   assess_story(story) → assessment (accept/reject)
+#   If rejected: revise_story(story, feedback) → story (loop back)
+#   If accepted: finalize_review(story) → reviewed_story  (goal)
 #
 # In GOAP: each phase is a separate action with honest declared effects.
 # The assess action writes story_approved (distinct key, never undoes
@@ -173,7 +180,7 @@ class TestMealPreparation:
 
 
 class TestWriteAndReview:
-    """Embabel Write and Review: creative content pipeline.
+    """Write and Review: creative content pipeline with revise-on-reject.
 
     Uses a three-action pipeline — craft → assess → finalize — where the
     assess action writes to story_approved (a distinct key) without undoing
@@ -204,7 +211,7 @@ class TestWriteAndReview:
     def test_revision_via_replanning(self) -> None:
         """Story rejected on first pass, revised via replanning.
 
-        Replicates the Embabel assess → revise loop.  assess_story returns
+        Exercises the assess → revise loop.  assess_story returns
         story_approved=False (deviating from declared True) and sets
         needs_revision=True.  The observer triggers replanning.  In the
         new state, revise_story is preferred over assess_story via A*
@@ -258,17 +265,17 @@ class TestWriteAndReview:
 # ===========================================================================
 # Example 4: Fact Checker
 #
-# Original Embabel pattern:
-#   extractAssertions(Content) → FactualAssertions
-#   rationalizeAssertions(FactualAssertions) → RationalizedAssertions
-#   checkFacts(RationalizedAssertions) → FactCheck  @AchievesGoal
+# Workflow:
+#   extract_assertions(content) → factual_assertions
+#   rationalize_assertions(factual_assertions) → rationalized_assertions
+#   check_facts(rationalized_assertions) → fact_check  (goal)
 #
 # Simplified version without multi-model ensemble.
 # ===========================================================================
 
 
 class TestFactChecker:
-    """Embabel Fact Checker: multi-step verification pipeline."""
+    """Fact Checker: multi-step verification pipeline."""
 
     def test_full_fact_check_pipeline(self) -> None:
         """Planner discovers extract → rationalize → check sequence."""
@@ -350,16 +357,16 @@ class TestFactChecker:
 
 
 # ===========================================================================
-# Example 5: Cost-Based Agent Selection (Embabel pattern)
+# Example 5: Cost-Based Agent Selection
 #
-# Embabel uses @Action(cost=100) to mark expensive actions as last resort.
+# Mark expensive actions with a high ``cost`` to push them to last resort.
 # This test verifies that LangGoap's A* planner correctly prefers cheap
 # actions over expensive ones, only falling back when necessary.
 # ===========================================================================
 
 
 class TestCostBasedPlanning:
-    """Embabel pattern: action cost controls planning preferences."""
+    """Cost-based selection: action cost controls planning preferences."""
 
     def test_cheap_action_preferred(self) -> None:
         """Low-cost cache lookup preferred over expensive API call."""
@@ -382,7 +389,7 @@ class TestCostBasedPlanning:
                 name="api_call",
                 preconditions={"has_query": True},
                 effects={"has_answer": True},
-                cost=100.0,  # Embabel pattern: high cost = last resort
+                cost=100.0,  # high cost = last resort
                 execute=api_call,
             ),
         ]
