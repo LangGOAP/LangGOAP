@@ -43,6 +43,8 @@ class GoapState(TypedDict, total=False):
         replan_count: How many times the planner has been invoked.
         replan_reason: Why the last replan was triggered.
         status: Current execution status.
+        blacklisted_actions: Action names the planner must skip.
+        action_failure_counts: Per-action cumulative failure counts.
     """
 
     world_state: dict[str, Any]
@@ -53,3 +55,5 @@ class GoapState(TypedDict, total=False):
     replan_count: int
     replan_reason: str | None
     status: str
+    blacklisted_actions: list[str]
+    action_failure_counts: dict[str, int]

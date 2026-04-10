@@ -17,6 +17,7 @@ def make_action(
     eff: dict[str, Any] | None = None,
     cost: float = 1.0,
     execute: Any = None,
+    max_retries: int = 0,
 ) -> ActionSpec:
     """Create an ActionSpec with convenient defaults for testing."""
     return ActionSpec(
@@ -25,6 +26,7 @@ def make_action(
         effects=eff or {},
         cost=cost,
         execute=execute,
+        max_retries=max_retries,
     )
 
 

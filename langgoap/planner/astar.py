@@ -151,37 +151,17 @@ def _forward_optimization(
 # ---------------------------------------------------------------------------
 
 
-def plan(
+def _search(
     start: PlanningState,
-    goal: GoalSpec,
+    goal_conditions: Mapping[str, Any],
     actions: list[ActionSpec],
+    t0: float,
 ) -> Plan | None:
-    """Find an optimal action sequence from start to goal using A*.
+    """Core A* search loop.
 
-    Args:
-        start: Current world state.
-        goal: Goal specification with target conditions.
-        actions: Available actions to choose from.
-
-    Returns:
-        A Plan if a path exists, None if the goal is unreachable.
+    Separated from :func:`plan` so the blacklist fallback can call it
+    without duplicating the search implementation.
     """
-    t0 = time.monotonic()
-    goal_conditions = goal.conditions
-
-    # Early exit: goal already satisfied
-    if start.satisfies(goal_conditions):
-        elapsed_ms = (time.monotonic() - t0) * 1000
-        return Plan(
-            actions=(),
-            expected_states=(),
-            total_cost=0.0,
-            metadata=PlanMetadata(
-                nodes_explored=0,
-                planning_time_ms=elapsed_ms,
-            ),
-        )
-
     # Reachability pre-check
     if not _is_reachable(start, goal_conditions, actions):
         return None
@@ -270,3 +250,51 @@ def plan(
                 heapq.heappush(open_list, node)
 
     return None  # No path found
+
+
+def plan(
+    start: PlanningState,
+    goal: GoalSpec,
+    actions: list[ActionSpec],
+    blacklisted_actions: list[str] | None = None,
+) -> Plan | None:
+    """Find an optimal action sequence from start to goal using A*.
+
+    Args:
+        start: Current world state.
+        goal: Goal specification with target conditions.
+        actions: Available actions to choose from.
+        blacklisted_actions: Action names to exclude from planning.
+            If filtering makes the goal unreachable, the planner retries
+            with all actions (Embabel-style graceful degradation).
+
+    Returns:
+        A Plan if a path exists, None if the goal is unreachable.
+    """
+    t0 = time.monotonic()
+    goal_conditions = goal.conditions
+
+    # Early exit: goal already satisfied
+    if start.satisfies(goal_conditions):
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        return Plan(
+            actions=(),
+            expected_states=(),
+            total_cost=0.0,
+            metadata=PlanMetadata(
+                nodes_explored=0,
+                planning_time_ms=elapsed_ms,
+            ),
+        )
+
+    # Filter blacklisted actions
+    blacklist_set = set(blacklisted_actions) if blacklisted_actions else set()
+    if blacklist_set:
+        available = [a for a in actions if a.name not in blacklist_set]
+        result = _search(start, goal_conditions, available, t0)
+        if result is not None:
+            return result
+        # Embabel fallback: blacklist made goal unreachable — retry with all actions
+        return _search(start, goal_conditions, actions, t0)
+
+    return _search(start, goal_conditions, actions, t0)

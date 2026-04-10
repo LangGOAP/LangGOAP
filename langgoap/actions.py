@@ -33,6 +33,10 @@ class ActionSpec:
             Called by the executor after execution to verify actual effects.
             Returning ``False`` signals that the action did not produce its
             declared effects (treated as a soft failure prompting replanning).
+        max_retries: Number of allowed retries before blacklisting.
+            ``0`` (default) means the action is blacklisted on its first
+            failure.  ``N`` allows N retries before blacklisting (i.e.,
+            the action is blacklisted after N+1 total failures).
         resources: Estimated resource consumption for this action.
             Used by the CSP optimizer (Phase 2).
             Example: ``{"tokens": 500, "cost_usd": 0.02, "api_calls": 1}``.
@@ -52,6 +56,7 @@ class ActionSpec:
     execute: Callable[..., Any] | None = None
     aexecute: Callable[..., Any] | None = None
     effect_validator: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
+    max_retries: int = 0
     # CSP optimizer inputs (ignored by the A* planner)
     resources: Mapping[str, float] | None = None
     duration: timedelta | None = None
@@ -98,6 +103,8 @@ class ActionSpec:
             parts.append(f"effects={dict(self.effects)!r}")
         if self.cost != 1.0:
             parts.append(f"cost={self.cost!r}")
+        if self.max_retries != 0:
+            parts.append(f"max_retries={self.max_retries!r}")
         return f"ActionSpec({', '.join(parts)})"
 
     def validate_effects(
@@ -129,6 +136,7 @@ def goap_action(
     effects: dict[str, Any] | None = None,
     cost: float | CostFunction = 1.0,
     name: str | None = None,
+    max_retries: int = 0,
     resources: dict[str, float] | None = None,
     duration: timedelta | None = None,
     metadata: dict[str, Any] | None = None,
@@ -178,6 +186,7 @@ def goap_action(
             # the sync executor can detect and reject them at call time.
             execute=None if is_async else func,
             aexecute=func if is_async else None,
+            max_retries=max_retries,
             resources=resources,
             duration=duration,
             metadata=metadata,
@@ -211,6 +220,7 @@ class GoapAction:
     # __init_subclass__ below, preventing the shared-mutable-dict antipattern.
     preconditions: dict[str, Any] = {}
     effects: dict[str, Any] = {}
+    max_retries: int = 0
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -278,4 +288,5 @@ class GoapAction:
             execute=self.execute,
             aexecute=custom_aexecute,
             effect_validator=custom_validator,
+            max_retries=self.max_retries,
         )

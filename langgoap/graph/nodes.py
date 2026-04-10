@@ -78,7 +78,22 @@ class GoapPlanner:
 
         pkeys = _planning_keys(self.actions, goal)
         start = PlanningState.from_dict(world_state, keys=pkeys)
-        result = astar_plan(start, goal, self.actions)
+        blacklisted = list(state.get("blacklisted_actions", []))
+
+        # First try with blacklist; if that fails, try without (Embabel fallback).
+        result = astar_plan(start, goal, self.actions, blacklisted_actions=blacklisted)
+
+        # Detect Embabel fallback: if the plan uses a blacklisted action,
+        # the fallback fired — clear the blacklist to avoid repeated fallbacks.
+        used_blacklisted = False
+        if result is not None and blacklisted:
+            plan_names = set(result.action_names)
+            if plan_names & set(blacklisted):
+                used_blacklisted = True
+                logger.info(
+                    "Embabel fallback: blacklist cleared, plan uses %s",
+                    plan_names & set(blacklisted),
+                )
 
         if result is None:
             logger.warning("A* found no plan for goal %s", dict(goal.conditions))
@@ -95,12 +110,18 @@ class GoapPlanner:
             result.total_cost,
             result.metadata.nodes_explored,
         )
-        return {
+        updates: dict[str, Any] = {
             "plan": result,
             "status": "executing",
             "current_step": 0,
             "replan_count": replan_count,
         }
+        if used_blacklisted:
+            # Clear blacklist and failure counts so the retried action
+            # gets a fresh start instead of being immediately re-blacklisted.
+            updates["blacklisted_actions"] = []
+            updates["action_failure_counts"] = {}
+        return updates
 
 
 def _apply_result(
@@ -323,6 +344,23 @@ async def async_execute_action(action: ActionSpec, world_state: dict[str, Any]) 
 _async_execute_action = async_execute_action
 
 
+def _get_last_failed_action(state: GoapState) -> str | None:
+    """Extract the action name from the last failed ActionResult in history."""
+    history: list[Any] = state.get("execution_history", [])
+    for result in reversed(history):
+        if not result.success:
+            return result.action_name  # type: ignore[no-any-return]
+    return None
+
+
+def _get_max_retries(action_name: str, actions: list[ActionSpec]) -> int:
+    """Look up the max_retries value for *action_name*, defaulting to 0."""
+    for action in actions:
+        if action.name == action_name:
+            return action.max_retries
+    return 0
+
+
 class GoapObserver:
     """LangGraph node that decides the next step via Command routing.
 
@@ -393,13 +431,31 @@ class GoapObserver:
 
         never = goal.replan_strategy == ReplanStrategy.NEVER
 
-        # Action failed → replan (unless NEVER strategy forbids it)
+        # Action failed → track failure, blacklist if threshold exceeded, replan
         if status == "action_failed":
             if never:
                 # With NEVER, treat a failed action as a hard stop.
                 return Command(
                     goto=END,
                     update={"status": "failed", "replan_reason": "action_failed"},
+                )
+
+            failed_name = _get_last_failed_action(state)
+            if failed_name is not None:
+                counts = dict(state.get("action_failure_counts", {}))
+                counts[failed_name] = counts.get(failed_name, 0) + 1
+                max_retries = _get_max_retries(failed_name, self._actions)
+                blacklist = list(state.get("blacklisted_actions", []))
+                if counts[failed_name] > max_retries:
+                    if failed_name not in blacklist:
+                        blacklist.append(failed_name)
+                return Command(
+                    goto="planner",
+                    update={
+                        "replan_reason": "action_failed",
+                        "action_failure_counts": counts,
+                        "blacklisted_actions": blacklist,
+                    },
                 )
             return Command(
                 goto="planner",
