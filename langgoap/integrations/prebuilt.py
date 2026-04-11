@@ -129,9 +129,11 @@ def create_goap_agent(
 
     graph = GoapGraph(actions=actions)
     compiled = graph.compile(**graph_kwargs)
-    # Stash the resolved goal on the compiled graph so tests and
-    # downstream code can retrieve it for diagnostics.
-    setattr(compiled, "_langgoap_goal", resolved_goal)
+    # Attach the resolved goal as a public attribute so callers can
+    # pass it back to ``invoke({"goal": agent.goap_goal, ...})`` — the
+    # resolved goal is otherwise opaque to the caller when the input
+    # was a natural-language string.
+    setattr(compiled, "goap_goal", resolved_goal)
     return compiled
 
 

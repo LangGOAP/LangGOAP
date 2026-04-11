@@ -137,8 +137,9 @@ class TestCreateGoapAgentNLGoal:
                 "write_report": {"has_data": True},
             },
         )
-        # The resolved goal is stashed for diagnostics.
-        resolved = getattr(agent, "_langgoap_goal")
+        # The resolved goal is exposed as a public attribute so callers
+        # can pass it back to ``invoke({"goal": ...})``.
+        resolved = agent.goap_goal
         assert dict(resolved.conditions) == {"report_written": True}
         # And the agent still runs end-to-end.
         result = agent.invoke(
