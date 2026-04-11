@@ -295,3 +295,145 @@ class TestSequentialReplanBudget:
         # Each action was executed twice: one failure, one success.
         assert first_attempts["n"] == 2
         assert second_attempts["n"] == 2
+
+
+class TestTracerSeesEffectiveSubgoal:
+    """Regression: the planner must hand tracers the *effective*
+    sub-goal in sequential mode, not the raw ``MultiGoal``.  A tracer
+    reading ``goal.conditions.keys()`` would otherwise crash on every
+    plan invocation, and the crash would be silently swallowed by
+    ``_safe_tracer_call`` — the worst kind of observability bug.
+    """
+
+    def test_sequential_mode_feeds_subgoals_to_on_plan_start(self) -> None:
+        plan_start_goals: list[Any] = []
+
+        class Recorder:
+            # Intentionally NOT a NullTracer subclass so any missing
+            # hook surfaces loudly rather than being silently absorbed.
+            def on_plan_start(self, goal: Any, state: Any, strategy_name: str) -> None:
+                # Must not raise — if ``goal`` is a ``MultiGoal`` the
+                # ``.conditions`` attribute does not exist and the
+                # tracer call is swallowed by ``_safe_tracer_call``.
+                plan_start_goals.append(tuple(sorted(goal.conditions.keys())))
+
+            def on_plan_complete(self, plan: Any, duration_ms: float) -> None:
+                pass
+
+            def on_plan_failed(self, reason: str, duration_ms: float) -> None:
+                pass
+
+            def on_action_start(self, action: Any, state: Any) -> None:
+                pass
+
+            def on_action_complete(self, result: Any) -> None:
+                pass
+
+            def on_replan(self, reason: str, new_plan: Any) -> None:
+                pass
+
+            def on_goal_achieved(self, final_state: Any) -> None:
+                pass
+
+            async def aon_plan_start(
+                self, goal: Any, state: Any, strategy_name: str
+            ) -> None:
+                self.on_plan_start(goal, state, strategy_name)
+
+            async def aon_plan_complete(self, plan: Any, duration_ms: float) -> None:
+                pass
+
+            async def aon_plan_failed(self, reason: str, duration_ms: float) -> None:
+                pass
+
+            async def aon_action_start(self, action: Any, state: Any) -> None:
+                pass
+
+            async def aon_action_complete(self, result: Any) -> None:
+                pass
+
+            async def aon_replan(self, reason: str, new_plan: Any) -> None:
+                pass
+
+            async def aon_goal_achieved(self, final_state: Any) -> None:
+                pass
+
+        mg = MultiGoal(
+            goals=(
+                GoalSpec(conditions={"data": True}),
+                GoalSpec(conditions={"published": True}),
+            ),
+            mode="sequential",
+        )
+        graph = GoapGraph(_actions(), tracer=Recorder())
+        result = graph.invoke(goal=mg, world_state={})
+        assert result["status"] == "goal_achieved"
+        # Exactly one on_plan_start per sub-goal with the correct keys.
+        assert plan_start_goals == [("data",), ("published",)]
+
+    def test_any_mode_feeds_raw_multigoal_to_on_plan_start(self) -> None:
+        # ``any`` mode enumerates sub-goals inside ``_plan_core`` and
+        # has no single effective sub-goal at the time ``on_plan_start``
+        # fires, so the tracer receives the ``MultiGoal`` itself.
+        # Tracers that care about ``any`` mode should branch on
+        # ``isinstance(goal, MultiGoal)``.
+        observed_goals: list[Any] = []
+
+        class MGTracer:
+            def on_plan_start(self, goal: Any, state: Any, strategy_name: str) -> None:
+                observed_goals.append(goal)
+
+            def on_plan_complete(self, plan: Any, duration_ms: float) -> None:
+                pass
+
+            def on_plan_failed(self, reason: str, duration_ms: float) -> None:
+                pass
+
+            def on_action_start(self, action: Any, state: Any) -> None:
+                pass
+
+            def on_action_complete(self, result: Any) -> None:
+                pass
+
+            def on_replan(self, reason: str, new_plan: Any) -> None:
+                pass
+
+            def on_goal_achieved(self, final_state: Any) -> None:
+                pass
+
+            async def aon_plan_start(
+                self, goal: Any, state: Any, strategy_name: str
+            ) -> None:
+                self.on_plan_start(goal, state, strategy_name)
+
+            async def aon_plan_complete(self, plan: Any, duration_ms: float) -> None:
+                pass
+
+            async def aon_plan_failed(self, reason: str, duration_ms: float) -> None:
+                pass
+
+            async def aon_action_start(self, action: Any, state: Any) -> None:
+                pass
+
+            async def aon_action_complete(self, result: Any) -> None:
+                pass
+
+            async def aon_replan(self, reason: str, new_plan: Any) -> None:
+                pass
+
+            async def aon_goal_achieved(self, final_state: Any) -> None:
+                pass
+
+        mg = MultiGoal(
+            goals=(
+                GoalSpec(conditions={"data": True}),
+                GoalSpec(conditions={"published": True}),
+            ),
+            mode="any",
+        )
+        graph = GoapGraph(_actions(), tracer=MGTracer())
+        graph.invoke(goal=mg, world_state={})
+        # At least one on_plan_start fired; the first (and only) goal
+        # handed to the tracer is the raw MultiGoal.
+        assert len(observed_goals) >= 1
+        assert isinstance(observed_goals[0], MultiGoal)

@@ -110,6 +110,29 @@ class GoapPlanner:
             return "TwoPhasePipeline"
         return "AStar"
 
+    def _effective_goal_for_tracer(
+        self, state: GoapState
+    ) -> GoalSpec | MultiGoal | None:
+        """Resolve the ``MultiGoal`` wrapper for tracer visibility.
+
+        For ``"sequential"`` mode, tracers should see the plain
+        :class:`GoalSpec` currently being planned so hooks like
+        ``on_plan_start`` receive a goal with a readable
+        ``conditions`` attribute — otherwise every sub-goal advance
+        would hand the tracer a ``MultiGoal`` without the expected
+        interface, silently crashing any recorder that inspects the
+        current goal.  For ``"any"`` mode the planner has not yet
+        picked a sub-goal, so the raw ``MultiGoal`` is the right
+        thing to expose: tracers can either branch on
+        ``isinstance(goal, MultiGoal)`` or read ``goal.goals``
+        directly.
+        """
+        goal = state.get("goal")
+        if isinstance(goal, MultiGoal) and goal.mode == "sequential":
+            idx = state.get("current_subgoal_index", 0)
+            return goal.goals[idx]
+        return goal
+
     def _plan_single(
         self,
         start: PlanningState,
@@ -308,8 +331,9 @@ class GoapPlanner:
         goal = state.get("goal")
         world_state = state.get("world_state", {})
         strategy_name = self._strategy_name(goal)
+        tracer_goal = self._effective_goal_for_tracer(state)
         _safe_tracer_call(
-            self._tracer, "on_plan_start", goal, world_state, strategy_name
+            self._tracer, "on_plan_start", tracer_goal, world_state, strategy_name
         )
         started = time.perf_counter()
         updates, was_replan = self._plan_core(state)
@@ -334,8 +358,9 @@ class GoapPlanner:
         goal = state.get("goal")
         world_state = state.get("world_state", {})
         strategy_name = self._strategy_name(goal)
+        tracer_goal = self._effective_goal_for_tracer(state)
         await _safe_tracer_acall(
-            self._tracer, "aon_plan_start", goal, world_state, strategy_name
+            self._tracer, "aon_plan_start", tracer_goal, world_state, strategy_name
         )
         started = time.perf_counter()
         updates, was_replan = self._plan_core(state)

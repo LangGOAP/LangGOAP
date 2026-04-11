@@ -31,6 +31,7 @@ from langgoap.interpreter import (
 )
 from langgoap.planner.astar import plan
 from langgoap.planner.csp import CSPMetadata, CSPStatus, ResourceUsage, ScheduleEntry
+from langgoap.planner.pipeline import plan as pipeline_plan
 from langgoap.planner.strategy import (
     AStarStrategy,
     CSPRefinementStrategy,
@@ -97,6 +98,7 @@ __all__ = [
     "ActionResult",
     # Planning
     "plan",
+    "pipeline_plan",
     "Plan",
     "PlanMetadata",
     "PlanningState",
