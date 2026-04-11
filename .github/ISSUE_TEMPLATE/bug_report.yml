@@ -1,0 +1,147 @@
+name: "\U0001F41B Bug Report"
+description: Report a bug in LangGoap. To report a security issue, please instead use the security advisory option (below). For general questions, please use GitHub Discussions (below).
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > **All contributions must be in English.** See the language policy in `CONTRIBUTING.md`.
+
+        Thank you for taking the time to file a bug report.
+
+        For usage questions, design discussions, and general community support, please use
+        [GitHub Discussions](https://github.com/integrallis/langgoap/discussions) or the
+        [LangChain Forum](https://forum.langchain.com/) for LangChain/LangGraph-core questions.
+
+        Before submitting, please confirm the issue has not already been reported or fixed:
+
+        * [LangGoap documentation](https://integrallis.github.io/langgoap)
+        * [CHANGELOG](https://github.com/integrallis/langgoap/blob/main/CHANGELOG.md)
+        * [GitHub issue search](https://github.com/integrallis/langgoap/issues?q=is%3Aissue)
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checked other resources
+      description: Please confirm and check all the following options.
+      options:
+        - label: This is a bug, not a usage question.
+          required: true
+        - label: I added a clear and descriptive title that summarises this issue.
+          required: true
+        - label: I used the GitHub issue search to find a similar report and did not find it.
+          required: true
+        - label: I am sure that this is a bug in LangGoap rather than in my own code or in an upstream dependency.
+          required: true
+        - label: The bug is not resolved by updating to the latest released version of LangGoap.
+          required: true
+        - label: I posted a self-contained, minimal, reproducible example that a maintainer can copy and run as is.
+          required: true
+  - type: checkboxes
+    id: component
+    attributes:
+      label: Component (required)
+      description: |
+        Which LangGoap subsystem does this bug affect? Select at least one.
+      options:
+        - label: A* planner (`langgoap.planner.astar`)
+        - label: CSP optimizer / CP-SAT (`langgoap.planner.csp`, `langgoap.planner.pipeline`)
+        - label: Graph state / builder (`langgoap.graph`)
+        - label: Actions / `ActionSpec` (`langgoap.actions`)
+        - label: Goals / `GoalSpec` / `MultiGoal` (`langgoap.goals`)
+        - label: NL goal interpreter (`langgoap.interpreter`)
+        - label: Tracing / history (`langgoap.tracing`, `langgoap.history`)
+        - label: Visualization (`langgoap.viz`)
+        - label: Prebuilt integrations (`create_goap_agent`, `goapify_tool`, `GoapSubgraph`)
+        - label: Scoring (`SimpleScore`, `HardSoftScore`, `BendableScore`)
+        - label: Packaging / installation / CI
+        - label: Documentation / notebooks
+        - label: Other / not sure
+  - type: textarea
+    id: related
+    validations:
+      required: false
+    attributes:
+      label: Related issues / PRs
+      description: |
+        If this bug is related to any existing issues or pull requests, please link them here.
+      placeholder: |
+        e.g. #123, #456
+  - type: textarea
+    id: reproduction
+    validations:
+      required: true
+    attributes:
+      label: Reproduction steps / example code (Python)
+      description: |
+        Please add a self-contained, [minimal, reproducible example](https://stackoverflow.com/help/minimal-reproducible-example).
+
+        If a maintainer can copy it, run it, and see the bug right away, there is a much higher chance you will get a fast fix.
+
+        **Important!**
+
+        * Avoid screenshots — they are hard to read and impossible to copy and paste.
+        * Reduce your code to the minimum required to reproduce the issue.
+        * If the bug requires LLM calls, prefer a `FakeStructuredModel` or explicit stub rather than a live API call.
+
+        (This will be automatically formatted as Python, so no need for backticks.)
+      render: python
+      placeholder: |
+        from langgoap import ActionSpec, GoalSpec, GoapGraph
+
+        actions = [
+            ActionSpec(
+                name="step",
+                preconditions={},
+                effects={"done": True},
+            ),
+        ]
+
+        result = GoapGraph(actions=actions).invoke(
+            goal=GoalSpec(conditions={"done": True}),
+            world_state={},
+        )
+        print(result["status"])  # expected "goal_achieved", got "..."
+  - type: textarea
+    attributes:
+      label: Error message and stack trace (if applicable)
+      description: |
+        If you are reporting an error, copy and paste the full error message and stack trace.
+        (This will be automatically formatted as shell output, so no need for backticks.)
+      render: shell
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: |
+        What is the problem, question, or error?
+
+        Write a short description of what you are doing, what you expect to happen, and what is currently happening.
+      placeholder: |
+        * I'm trying to use LangGoap to do X.
+        * I expect to see Y.
+        * Instead, it does Z.
+    validations:
+      required: true
+  - type: textarea
+    id: system-info
+    attributes:
+      label: System info
+      description: |
+        Please share the output of the following in your environment:
+
+        ```bash
+        python -c "import langgoap, langgraph, sys, platform; print('langgoap', langgoap.__version__); print('langgraph', langgraph.__version__); print('python', sys.version); print('platform', platform.platform())"
+        ```
+
+        If the bug involves the CSP optimizer, also include:
+
+        ```bash
+        python -c "import ortools; print('ortools', ortools.__version__)"
+        ```
+      placeholder: |
+        langgoap 0.1.0
+        langgraph 1.x.x
+        python 3.12.x
+        platform ...
+    validations:
+      required: true

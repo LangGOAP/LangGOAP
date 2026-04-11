@@ -1,0 +1,15 @@
+blank_issues_enabled: false
+version: 2.1
+contact_links:
+  - name: 💬 GitHub Discussions
+    url: https://github.com/integrallis/langgoap/discussions
+    about: General questions, design discussions, and community support
+  - name: 📚 LangGoap Documentation
+    url: https://integrallis.github.io/langgoap
+    about: View the LangGoap documentation, concepts, and tutorials
+  - name: 📚 LangChain Forum
+    url: https://forum.langchain.com/
+    about: Questions about LangChain / LangGraph core behaviour
+  - name: 🔒 Report a security vulnerability
+    url: https://github.com/integrallis/langgoap/security/advisories/new
+    about: See SECURITY.md — do not report vulnerabilities as public issues

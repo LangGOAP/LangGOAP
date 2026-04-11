@@ -1,0 +1,139 @@
+name: "✨ Feature Request"
+description: Request a new feature or enhancement for LangGoap. For general questions, please use GitHub Discussions (below).
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > **All contributions must be in English.** See the language policy in `CONTRIBUTING.md`.
+
+        Thank you for taking the time to request a new feature.
+
+        Use this template to request **new features or enhancements** in LangGoap. For bug reports,
+        please use the bug report template instead. For usage questions and design discussions,
+        please use [GitHub Discussions](https://github.com/integrallis/langgoap/discussions) or
+        the [LangChain Forum](https://forum.langchain.com/) for LangChain/LangGraph-core questions.
+
+        Before filing, please check whether your idea has already been proposed:
+
+        * [LangGoap documentation](https://integrallis.github.io/langgoap)
+        * [GitHub issue search](https://github.com/integrallis/langgoap/issues?q=is%3Aissue)
+        * [GitHub discussion search](https://github.com/integrallis/langgoap/discussions)
+
+        **Note:** Do not begin work on a PR unless explicitly assigned to this issue by a maintainer.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checked other resources
+      description: Please confirm and check all the following options.
+      options:
+        - label: This is a feature request, not a bug report or usage question.
+          required: true
+        - label: I added a clear and descriptive title that summarises the feature request.
+          required: true
+        - label: I used the GitHub issue search to find a similar request and did not find it.
+          required: true
+        - label: I checked the LangGoap documentation and CHANGELOG to see whether this feature already exists.
+          required: true
+  - type: checkboxes
+    id: component
+    attributes:
+      label: Component (required)
+      description: |
+        Which LangGoap subsystem should this feature land in? Select at least one.
+      options:
+        - label: A* planner (`langgoap.planner.astar`)
+        - label: CSP optimizer / CP-SAT (`langgoap.planner.csp`, `langgoap.planner.pipeline`)
+        - label: Graph state / builder (`langgoap.graph`)
+        - label: Actions / `ActionSpec` (`langgoap.actions`)
+        - label: Goals / `GoalSpec` / `MultiGoal` (`langgoap.goals`)
+        - label: NL goal interpreter (`langgoap.interpreter`)
+        - label: Tracing / history (`langgoap.tracing`, `langgoap.history`)
+        - label: Visualization (`langgoap.viz`)
+        - label: Prebuilt integrations (`create_goap_agent`, `goapify_tool`, `GoapSubgraph`)
+        - label: Scoring (`SimpleScore`, `HardSoftScore`, `BendableScore`)
+        - label: Packaging / installation / CI
+        - label: Documentation / notebooks
+        - label: Other / not sure
+  - type: textarea
+    id: feature-description
+    validations:
+      required: true
+    attributes:
+      label: Feature description
+      description: |
+        Please provide a clear and concise description of the feature you would like to see added.
+
+        What specific functionality are you requesting? Be as detailed as possible, and
+        call out which public API surface would be affected (new type, new method, new
+        integration, new notebook, …).
+      placeholder: |
+        I would like LangGoap to support ...
+
+        This would affect the public API by ...
+  - type: textarea
+    id: use-case
+    validations:
+      required: true
+    attributes:
+      label: Use case
+      description: |
+        Describe the specific use case or problem this feature would solve.
+
+        Why do you need it? What problem does it solve for you or other users? A concrete
+        end-to-end scenario (planning domain, integration target, research paper,
+        benchmark) is much more compelling than a generic wish.
+      placeholder: |
+        I'm trying to build an application that ...
+
+        Currently, I have to work around this by ...
+
+        This feature would help me or other users to ...
+  - type: textarea
+    id: proposed-solution
+    validations:
+      required: false
+    attributes:
+      label: Proposed solution
+      description: |
+        If you have ideas about how this feature could be implemented, describe them here.
+        Sketch the public API if possible — what would `ActionSpec(...)`, `GoalSpec(...)`,
+        or `GoapGraph(...)` look like after your change?
+      placeholder: |
+        I think this could be implemented by ...
+
+        The API could look like:
+
+        ```python
+        # Example of how the feature might be used
+        ```
+  - type: textarea
+    id: alternatives
+    validations:
+      required: false
+    attributes:
+      label: Alternatives considered
+      description: |
+        Have you considered any alternative solutions or workarounds?
+      placeholder: |
+        I've tried ...
+
+        Alternative approaches I considered:
+        1. ...
+        2. ...
+  - type: textarea
+    id: additional-context
+    validations:
+      required: false
+    attributes:
+      label: Additional context
+      description: |
+        Add any other context, references, or prior art that would help explain your feature request.
+
+        Relevant papers, reference implementations, comparable libraries, or links to
+        related issues are all welcome.
+      placeholder: |
+        Related issues: #...
+
+        Prior art / reference implementations:
+        - ...
