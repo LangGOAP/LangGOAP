@@ -636,10 +636,10 @@ async def async_execute_action(action: ActionSpec, world_state: dict[str, Any]) 
 
 def _get_last_failed_action(state: GoapState) -> str | None:
     """Extract the action name from the last failed ActionResult in history."""
-    history: list[Any] = state.get("execution_history", [])
+    history: list[ActionResult] = state.get("execution_history", [])
     for result in reversed(history):
         if not result.success:
-            return result.action_name  # type: ignore[no-any-return]
+            return result.action_name
     return None
 
 

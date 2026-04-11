@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Goal-Oriented Action Planning framework for LangGraph with constraint optimization."
 readme = "README.md"
 license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10,<3.15"
 authors = [
     { name = "Brian Sam-Bodden", email = "bsb@integrallis.com" },
@@ -11,12 +12,22 @@ authors = [
 ]
 keywords = ["ai", "goap", "planning", "agents", "langgraph", "langchain", "constraint-satisfaction"]
 classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
-    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
 dependencies = [
@@ -28,8 +39,11 @@ dependencies = [
 optimization = ["ortools>=9.8"]
 
 [project.urls]
-Repository = "https://github.com/integrallis/langgoap"
+Homepage = "https://github.com/integrallis/langgoap"
 Documentation = "https://integrallis.github.io/langgoap"
+Repository = "https://github.com/integrallis/langgoap"
+Issues = "https://github.com/integrallis/langgoap/issues"
+Changelog = "https://github.com/integrallis/langgoap/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["hatchling"]
@@ -94,7 +108,7 @@ exclude = '''
 disallow_untyped_defs = true
 explicit_package_bases = true
 warn_no_return = true
-warn_unused_ignores = false
+warn_unused_ignores = true
 warn_redundant_casts = true
 allow_redefinition = true
 ignore_missing_imports = true
