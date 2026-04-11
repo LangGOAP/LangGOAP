@@ -16,8 +16,7 @@ from langgraph.store.memory import InMemoryStore
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
 from langgoap.graph.builder import GoapGraph
-from langgoap.graph.nodes import _compute_goal_hash
-from langgoap.history import StoreExecutionHistory
+from langgoap.history import StoreExecutionHistory, compute_goal_hash
 
 
 def _actions() -> list[ActionSpec]:
@@ -42,7 +41,7 @@ class TestHistoryStoreSync:
         result = graph.invoke(goal=goal, world_state={})
         assert result["status"] == "goal_achieved"
 
-        records = history.query_by_goal(_compute_goal_hash(goal), limit=10)
+        records = history.query_by_goal(compute_goal_hash(goal), limit=10)
         assert len(records) == 1
         assert records[0].outcome == "success"
         assert records[0].plan_actions == ("gather", "process")
@@ -57,7 +56,7 @@ class TestHistoryStoreSync:
         result = graph.invoke(goal=goal, world_state={})
         assert result["status"] == "no_plan"
 
-        records = history.query_by_goal(_compute_goal_hash(goal), limit=10)
+        records = history.query_by_goal(compute_goal_hash(goal), limit=10)
         assert len(records) == 1
         assert records[0].outcome == "failed"
         assert records[0].plan_actions == ()
@@ -74,7 +73,7 @@ class TestHistoryStoreAsync:
         result = await graph.ainvoke(goal=goal, world_state={})
         assert result["status"] == "goal_achieved"
 
-        records = await history.aquery_by_goal(_compute_goal_hash(goal), limit=10)
+        records = await history.aquery_by_goal(compute_goal_hash(goal), limit=10)
         assert len(records) == 1
         assert records[0].outcome == "success"
 
@@ -91,6 +90,6 @@ class TestHistoryStoreMultipleGoals:
         graph.invoke(goal=goal, world_state={})
         graph.invoke(goal=goal, world_state={})
 
-        records = history.query_by_goal(_compute_goal_hash(goal), limit=10)
+        records = history.query_by_goal(compute_goal_hash(goal), limit=10)
         assert len(records) == 2
         assert all(r.outcome == "success" for r in records)

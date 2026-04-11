@@ -7,9 +7,7 @@ These nodes form the core GOAP loop:
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import inspect
-import json
 import logging
 import time
 from datetime import datetime, timezone
@@ -21,7 +19,11 @@ from langgraph.types import Command
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec, MultiGoal
 from langgoap.graph.state import ActionResult, GoapState
-from langgoap.history import ExecutionRecord, StoreExecutionHistory
+from langgoap.history import (
+    ExecutionRecord,
+    StoreExecutionHistory,
+    compute_goal_hash,
+)
 from langgoap.planner.astar import plan as astar_plan
 from langgoap.planner.types import Plan
 from langgoap.state import PlanningState
@@ -32,19 +34,6 @@ if TYPE_CHECKING:
     from langgoap.planner.strategy import PlanningStrategy
 
 logger = logging.getLogger(__name__)
-
-
-def _compute_goal_hash(goal: GoalSpec) -> str:
-    """Stable short hash of a goal's conditions.
-
-    Used by ``GoapObserver`` to key execution records in
-    :class:`StoreExecutionHistory`.  The hash is deterministic
-    across runs (unlike Python's built-in ``hash``) and short
-    enough to read in logs.
-    """
-    items = sorted((str(k), v) for k, v in goal.conditions.items())
-    canonical = json.dumps(items, default=str, sort_keys=True)
-    return hashlib.sha256(canonical.encode()).hexdigest()[:16]
 
 
 def _safe_tracer_call(tracer: PlanningTracer, method: str, *args: Any) -> None:
@@ -754,7 +743,7 @@ class GoapObserver:
             return None
         plan_obj: Plan | None = state.get("plan")
         return ExecutionRecord(
-            goal_hash=_compute_goal_hash(goal),
+            goal_hash=compute_goal_hash(goal),
             goal_conditions=dict(goal.conditions),
             plan_actions=tuple(plan_obj.action_names) if plan_obj else (),
             expected_cost=plan_obj.total_cost if plan_obj else 0.0,

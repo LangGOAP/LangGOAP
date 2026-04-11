@@ -12,7 +12,11 @@ from langgoap.goals import ConstraintSpec, Goal, GoalSpec, MultiGoal
 from langgoap.graph.builder import GoapGraph
 from langgoap.graph.nodes import GoapExecutor, GoapObserver, GoapPlanner
 from langgoap.graph.state import ActionResult, GoapState
-from langgoap.history import ExecutionRecord, StoreExecutionHistory
+from langgoap.history import (
+    ExecutionRecord,
+    StoreExecutionHistory,
+    compute_goal_hash,
+)
 from langgoap.integrations import (
     GoapSubgraph,
     add_goap_subgraph,
@@ -132,4 +136,5 @@ __all__ = [
     # Execution history
     "ExecutionRecord",
     "StoreExecutionHistory",
+    "compute_goal_hash",
 ]

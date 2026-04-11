@@ -41,6 +41,8 @@ Trade-offs accepted for v0.1.0:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -48,9 +50,30 @@ from typing import Any, Mapping
 
 from langgraph.store.base import BaseStore
 
+from langgoap.goals import GoalSpec
+
 _EXECUTIONS_NS = ("langgoap", "executions")
 _GOAL_INDEX_NS = ("langgoap", "goal_index")
 _FAILURE_INDEX_NS = ("langgoap", "failure_index")
+
+
+def compute_goal_hash(goal: GoalSpec) -> str:
+    """Return a stable short hash of a goal's conditions.
+
+    The hash is deterministic across runs (unlike Python's built-in
+    ``hash``) and short enough to read in logs.  It is the same key
+    used by :class:`StoreExecutionHistory` to file records under its
+    goal reverse-index, so callers can look up the history of a goal
+    by passing the result to :meth:`StoreExecutionHistory.query_by_goal`.
+
+    Example::
+
+        history = StoreExecutionHistory(store)
+        records = history.query_by_goal(compute_goal_hash(goal))
+    """
+    items = sorted((str(k), v) for k, v in goal.conditions.items())
+    canonical = json.dumps(items, default=str, sort_keys=True)
+    return hashlib.sha256(canonical.encode()).hexdigest()[:16]
 
 
 @dataclass(frozen=True)
@@ -155,6 +178,17 @@ class StoreExecutionHistory:
     def __init__(self, store: BaseStore, *, index_limit: int = 100) -> None:
         self._store = store
         self._index_limit = index_limit
+
+    @staticmethod
+    def goal_hash_for(goal: GoalSpec) -> str:
+        """Return the goal-index key this history would file ``goal`` under.
+
+        Thin wrapper around :func:`compute_goal_hash` exposed as an
+        instance-accessible helper so callers can write
+        ``history.query_by_goal(history.goal_hash_for(goal))`` without
+        importing the module-level function explicitly.
+        """
+        return compute_goal_hash(goal)
 
     # ------------------------------------------------------------------
     # Sync API
@@ -266,4 +300,4 @@ class StoreExecutionHistory:
         return results
 
 
-__all__ = ["ExecutionRecord", "StoreExecutionHistory"]
+__all__ = ["ExecutionRecord", "StoreExecutionHistory", "compute_goal_hash"]
