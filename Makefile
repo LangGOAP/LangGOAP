@@ -50,7 +50,7 @@ benchmark-compare:
 		--benchmark-compare-fail=mean:10% \
 		-p no:randomly
 
-check: lint test
+check: lint find-dead-code test
 
 docs:
 	uv run python docs/copy_notebooks.py
