@@ -45,7 +45,7 @@ from langgoap.types import ObjectiveDirection
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class BuilderOutput:
     """Tagged bundle returned by :meth:`ConstraintBuilder.build`.
 
@@ -66,7 +66,7 @@ class BuilderOutput:
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _ChainState:
     """Accumulated state for a single fluent chain.
 
@@ -83,7 +83,7 @@ class _ChainState:
     direction: ObjectiveDirection | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ChainOutput:
     """Output of a single terminated builder chain.
 

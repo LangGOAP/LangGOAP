@@ -76,7 +76,7 @@ def compute_goal_hash(goal: GoalSpec) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()[:16]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ExecutionRecord:
     """One planner → executor → observer loop outcome.
 

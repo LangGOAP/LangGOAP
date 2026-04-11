@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from langgoap.constraints import BuilderOutput
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ConstraintSpec:
     """A resource/budget constraint for CSP optimization.
 
@@ -53,7 +53,7 @@ class ConstraintSpec:
             )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class GoalSpec:
     """Specification of a GOAP goal.
 
@@ -157,7 +157,7 @@ class GoalSpec:
 Goal = GoalSpec
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MultiGoal:
     """A composite goal made up of one or more :class:`GoalSpec` children.
 

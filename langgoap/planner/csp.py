@@ -47,7 +47,7 @@ class CSPStatus(str, enum.Enum):
     SKIPPED = "skipped"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ResourceUsage:
     """Per-key resource breakdown for a plan.
 
@@ -78,7 +78,7 @@ class ResourceUsage:
     level: Literal["hard", "soft", "info"] = "info"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ScheduleEntry:
     """Per-action temporal slot in a schedule.
 
@@ -95,7 +95,7 @@ class ScheduleEntry:
     end: timedelta
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class CSPMetadata:
     """Results from the CSP optimizer.
 

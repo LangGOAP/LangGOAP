@@ -13,7 +13,7 @@ from typing import Any, Callable
 from langgoap.types import CostFunction
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ActionSpec:
     """Specification of a GOAP action for planning.
 

@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from langgoap.planner.csp import CSPMetadata
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class PlanMetadata:
     """Metadata about how a plan was generated.
 
@@ -32,7 +32,7 @@ class PlanMetadata:
     csp: CSPMetadata | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Plan:
     """A sequence of actions that achieves a goal from a given start state.
 

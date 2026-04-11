@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-@dataclass(frozen=True, order=False)
+@dataclass(frozen=True, order=False, slots=True)
 class Score:
     """Abstract base for all score types.
 
@@ -53,7 +53,7 @@ class Score:
         raise NotImplementedError
 
 
-@dataclass(frozen=True, order=False)
+@dataclass(frozen=True, order=False, slots=True)
 class SimpleScore(Score):
     """A single scalar score.
 
@@ -110,7 +110,7 @@ class SimpleScore(Score):
         return f"SimpleScore({self.scalar:g})"
 
 
-@dataclass(frozen=True, order=False)
+@dataclass(frozen=True, order=False, slots=True)
 class HardSoftScore(Score):
     """A two-level score with hard and soft components.
 
@@ -177,7 +177,7 @@ class HardSoftScore(Score):
         return f"HardSoftScore(hard={self.hard:g}, soft={self.soft:g})"
 
 
-@dataclass(frozen=True, order=False)
+@dataclass(frozen=True, order=False, slots=True)
 class BendableScore(Score):
     """A variable-width score with any number of hard and soft levels.
 
