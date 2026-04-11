@@ -42,6 +42,7 @@ from langgoap.planner.types import Plan, PlanMetadata
 from langgoap.score import BendableScore, HardSoftScore, Score, SimpleScore
 from langgoap.state import PlanningState
 from langgoap.tracing import (
+    LangSmithTracer,
     LoggingTracer,
     MultiTracer,
     NullTracer,
@@ -135,6 +136,7 @@ __all__ = [
     "NullTracer",
     "LoggingTracer",
     "MultiTracer",
+    "LangSmithTracer",
     # Execution history
     "ExecutionRecord",
     "StoreExecutionHistory",
