@@ -30,7 +30,14 @@ extensions = [
 ]
 
 templates_path = ["_templates"]
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "**.ipynb_checkpoints"]
+exclude_patterns = [
+    "_build",
+    "Thumbs.db",
+    ".DS_Store",
+    "**.ipynb_checkpoints",
+    # Release-engineering artifacts — not published on the docs site.
+    "release_audit_*.md",
+]
 
 # -- Options for HTML output -------------------------------------------------
 
@@ -75,6 +82,18 @@ html_theme_options = {
 
 autoclass_content = "both"
 add_module_names = False
+
+# Suppress warnings that are either expected artifacts of our build
+# (TypedDict classes generate an empty ``__init__`` that autosummary
+# templates try to document; docutils complains about a cosmetic
+# "explicit markup" line emitted by the autodoc-generated summary
+# pages) or cosmetic link targets inside notebook markdown that point
+# at files outside the docs tree.
+suppress_warnings = [
+    "autodoc",
+    "docutils",
+    "myst.xref_missing",
+]
 
 nb_execution_mode = "off"
 

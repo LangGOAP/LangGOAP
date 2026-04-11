@@ -71,6 +71,7 @@ venv.bak/
 docs/_build/
 docs/examples/basics/
 docs/examples/tutorials/
+docs/api/generated/
 
 # Jupyter
 .ipynb_checkpoints

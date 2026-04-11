@@ -106,20 +106,23 @@ graduate without rewriting action definitions.
 ┌─────────────────────────────────────────────────────────────────────┐
 │ Layer A — create_goap_agent(tools, goal, llm=, …)                   │
 │   The one-liner. NL goal + tools → compiled StateGraph.             │
-│   → examples/basics/create_goap_agent.ipynb                         │
 ├─────────────────────────────────────────────────────────────────────┤
 │ Layer B — goapify_tool(tool, preconditions=, effects=, …)           │
 │   Explicit BaseTool → ActionSpec adapter. Fully deterministic.      │
-│   → examples/basics/goapify_langchain_tools.ipynb                   │
 ├─────────────────────────────────────────────────────────────────────┤
 │ Layer C — GoapSubgraph / add_goap_subgraph(parent, …)               │
 │   Drop a GOAP loop into an existing StateGraph as a sealed node.    │
-│   → examples/basics/goap_subgraph_in_existing_app.ipynb             │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 Internally, Layer A delegates to Layer B, and Layer C uses the same
-`GoapGraph` builder — there is no duplicated wiring code.
+`GoapGraph` builder — there is no duplicated wiring code. End-to-end
+use of each layer is covered by
+[`tests/integration/test_prebuilt.py`](tests/integration/test_prebuilt.py),
+[`tests/integration/test_goapify_tool.py`](tests/integration/test_goapify_tool.py),
+and [`tests/integration/test_subgraph.py`](tests/integration/test_subgraph.py);
+the Tier 2 tutorial notebooks below exercise Layer A (`create_goap_agent`)
+and Layer B (`goapify_tool`) on real problems.
 
 ---
 
@@ -169,8 +172,10 @@ Internally, Layer A delegates to Layer B, and Layer C uses the same
 
 - **`PlanningTracer` Protocol** with sync + async hooks (`on_*` /
   `aon_*`). `NullTracer`, `LoggingTracer`, and `MultiTracer` ship
-  in-tree. OpenTelemetry and LangSmith integration examples are in
-  `examples/basics/tracing_and_history.ipynb`.
+  in-tree. Custom tracers (OpenTelemetry, LangSmith, Prometheus) are
+  ordinary Python classes that implement the protocol — see the
+  `PlanningTracer` docstring in `langgoap/tracing.py` for the hook
+  contract. Tracer exceptions never propagate into the planner.
 - **Plan visualization** — `render_mermaid`, `render_mermaid_gantt`,
   `render_dot`, `render_ascii`, `render_ascii_gantt`, `visualize`.
   Pure Python; no binary dependencies for Mermaid / ASCII output.
@@ -216,8 +221,11 @@ domain data live in the shared
 - (14) `temporal_match_cellar.ipynb` — durative overlapping actions.
 - (15) `flexible_job_shop.ipynb` — every v0.1.0 feature in one notebook.
 
-Basics notebooks (`examples/basics/`) cover visualization, the NL goal
-interpreter, the three integration layers, and tracing + history.
+Basics notebooks (`examples/basics/`) cover plan visualization
+(`plan_visualization.ipynb`) and the natural-language goal interpreter
+(`nl_goal_interpreter.ipynb`). The three integration layers, tracing,
+and execution history are covered by the tutorial notebooks above and
+by their corresponding integration tests under `tests/integration/`.
 
 ---
 

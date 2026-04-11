@@ -153,7 +153,7 @@ class GoalSpec:
         )
 
 
-#: Public alias for :class:`GoalSpec`.  Use ``Goal`` in user-facing code.
+# Public alias for GoalSpec. Use ``Goal`` in user-facing code.
 Goal = GoalSpec
 
 

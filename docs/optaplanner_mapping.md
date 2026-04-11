@@ -88,8 +88,8 @@ the moves as Python classes.
 
 The `PlanningStrategy` Protocol is the extension point for users who
 want a solver different from A* or the two-phase pipeline.  Any class
-with the signature below can be passed to `GoapPlanner(..., strategy=
-...)`:
+with the signature below can be passed as the `strategy` keyword to
+`GoapPlanner`:
 
 ```python
 from langgoap.actions import ActionSpec

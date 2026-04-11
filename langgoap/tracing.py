@@ -22,9 +22,12 @@ Three built-in tracers are provided:
   cannot break the planner (this is a hard invariant).
 
 OpenTelemetry and LangSmith adapters are **not** shipped in the core
-package — the v0.1.0 contract is zero extra pip dependencies.  See
-``examples/basics/tracing_and_history.ipynb`` for ~30-line worked
-examples of writing an ``OTelTracer`` or integrating with LangSmith.
+package — the v0.1.0 contract is zero extra pip dependencies.  Because
+:class:`PlanningTracer` is a ``runtime_checkable`` Protocol, any class
+that implements the hooks listed below satisfies the contract; a
+custom ``OTelTracer`` or ``LangSmithTracer`` is ~30 lines of user code
+that wraps the appropriate client SDK inside each ``on_*`` / ``aon_*``
+hook.
 """
 
 from __future__ import annotations

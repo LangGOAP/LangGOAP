@@ -169,9 +169,10 @@ maps to a LangGoap class.
   with full sync + async parity (`on_*` and `aon_*` hooks for plan
   start/complete/failed, action start/complete, replan, and
   goal-achieved). `NullTracer`, `LoggingTracer`, and `MultiTracer`
-  ship in-tree. OpenTelemetry and LangSmith adapters are documented in
-  `examples/basics/tracing_and_history.ipynb` but not shipped to keep
-  the core dependency-free. Tracer exceptions never propagate into the
+  ship in-tree. OpenTelemetry and LangSmith adapters are not bundled
+  so the core stays dependency-free; custom tracers are ordinary
+  Python classes that implement the protocol (the protocol docstring
+  lists every hook). Tracer exceptions never propagate into the
   planner.
 - **Plan visualization** (`langgoap.viz`): `render_mermaid`,
   `render_mermaid_gantt`, `render_dot`, `render_ascii`,
