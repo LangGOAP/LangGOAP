@@ -393,7 +393,19 @@ def _build_success(
     state_before: dict[str, Any],
     world_state: dict[str, Any],
 ) -> dict[str, Any]:
-    """Build the success return dict for the executor."""
+    """Build the success return dict for the executor.
+
+    When ``action.effect_validator`` rejects the post-state, the executor
+    rolls the world state back to the snapshot taken before the action
+    ran.  This is critical: a validator's purpose is to detect actions
+    that did not actually accomplish what they claimed, and a rejection
+    means the effects are *not trustworthy*.  Leaking the mutated
+    world_state through would let the rejected action satisfy the
+    planner's goal predicate (because the effect keys are already set),
+    short-circuiting the blacklist + replan dance the validator was
+    designed to trigger.  The mutated post-state is still exposed via
+    ``ActionResult.state_after`` for diagnostics.
+    """
     state_after = dict(world_state)
     if action.effect_validator is not None and not action.validate_effects(
         state_before, state_after
@@ -401,7 +413,7 @@ def _build_success(
         logger.warning("Action %r effect validation failed", action.name)
         return {
             "status": "action_failed",
-            "world_state": world_state,
+            "world_state": state_before,
             "execution_history": [
                 ActionResult(
                     action_name=action.name,

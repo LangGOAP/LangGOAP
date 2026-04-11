@@ -377,6 +377,39 @@ class TestAsyncGoapExecutor:
         assert result["status"] == "action_failed"
         assert "validation failed" in (result["execution_history"][0].error or "")
 
+    async def test_acall_validator_rejection_rolls_back_world_state(self) -> None:
+        """Async path mirrors the sync rollback contract on validator rejection."""
+
+        def always_fail(pre: dict[str, Any], post: dict[str, Any]) -> bool:
+            return False
+
+        async def async_fn(ws: dict[str, Any]) -> dict[str, Any]:
+            return {"done": True, "side_effect": "leaked"}
+
+        action = ActionSpec(
+            name="validated",
+            effects={"done": True},
+            aexecute=async_fn,
+            effect_validator=always_fail,
+        )
+        plan_obj = _make_plan(action)
+        executor = GoapExecutor()
+
+        state: GoapState = {
+            "world_state": {"prior": "value"},
+            "plan": plan_obj,
+            "current_step": 0,
+        }
+        result = await executor.acall(state)
+
+        assert result["world_state"] == {"prior": "value"}
+        assert "done" not in result["world_state"]
+        assert "side_effect" not in result["world_state"]
+        history_entry = result["execution_history"][0]
+        assert history_entry.state_after.get("done") is True
+        assert history_entry.state_after.get("side_effect") == "leaked"
+        assert history_entry.state_before == {"prior": "value"}
+
 
 # ---------------------------------------------------------------------------
 # GoapGraph.ainvoke

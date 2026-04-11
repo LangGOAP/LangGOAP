@@ -428,6 +428,44 @@ class TestGoapExecutorValidation:
         assert result["execution_history"][0].success is False
         assert "validation failed" in (result["execution_history"][0].error or "")
 
+    def test_validator_rejection_rolls_back_world_state(self) -> None:
+        """Failed validation must restore the world state to its pre-action snapshot.
+
+        The validator's purpose is to detect actions that did not actually
+        accomplish what they claimed.  If the rejected effects were left
+        in world state, the planner's goal predicate could be satisfied
+        by an unverified action and the blacklist + replan dance the
+        validator was designed to trigger would be short-circuited.
+        """
+
+        def always_fail(pre: dict[str, Any], post: dict[str, Any]) -> bool:
+            return False
+
+        action = ActionSpec(
+            name="validated",
+            effects={"done": True},
+            execute=lambda ws: {"done": True, "side_effect": "leaked"},
+            effect_validator=always_fail,
+        )
+        plan_obj = _make_plan(action)
+        executor = GoapExecutor()
+        state: GoapState = {
+            "world_state": {"prior": "value"},
+            "plan": plan_obj,
+            "current_step": 0,
+        }
+        result = executor(state)
+
+        # World state must NOT contain the rejected effects.
+        assert result["world_state"] == {"prior": "value"}
+        assert "done" not in result["world_state"]
+        assert "side_effect" not in result["world_state"]
+        # The diagnostic record still shows what the action *tried* to do.
+        history_entry = result["execution_history"][0]
+        assert history_entry.state_after.get("done") is True
+        assert history_entry.state_after.get("side_effect") == "leaked"
+        assert history_entry.state_before == {"prior": "value"}
+
     def test_no_validation_when_no_validator(self) -> None:
         """Without effect_validator, executor skips validation entirely."""
 
