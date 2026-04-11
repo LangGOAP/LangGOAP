@@ -38,7 +38,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv sync
+          uv sync --extra optimization
           uv pip install -r docs/requirements.txt
 
       - name: Build versioned documentation

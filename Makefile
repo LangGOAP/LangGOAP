@@ -17,10 +17,10 @@ check-types:
 lint: format check-types
 
 test:
-	uv run python -m pytest -vv -s --log-level=CRITICAL
+	uv run python -m pytest -vv -s --log-level=CRITICAL -m "not api"
 
 test-all:
-	uv run python -m pytest -vv -s --log-level=CRITICAL --run-api-tests
+	uv run python -m pytest -vv -s --log-level=CRITICAL
 
 test-coverage:
 	uv run python -m pytest --cov=langgoap --cov-report=html --cov-report=term-missing --cov-report=xml --log-level=CRITICAL
