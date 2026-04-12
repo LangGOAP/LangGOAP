@@ -19,6 +19,7 @@ from langgoap.goals import GoalSpec, MultiGoal
 from langgoap.graph.nodes import GoapExecutor, GoapObserver, GoapPlanner
 from langgoap.graph.state import GoapState
 from langgoap.history import StoreExecutionHistory
+from langgoap.serde import install_langgoap_serde
 from langgoap.tracing import PlanningTracer
 
 
@@ -66,16 +67,37 @@ class GoapGraph:
         self,
         checkpointer: Checkpointer | None = None,
         store: Any = None,
+        *,
+        interrupt_before: list[str] | None = None,
+        interrupt_after: list[str] | None = None,
     ) -> CompiledStateGraph:
         """Build and compile the GOAP StateGraph.
 
         Args:
             checkpointer: Optional LangGraph checkpointer for persistence.
+                When provided, the checkpointer's serde is swapped for a
+                LangGoap-aware subclass (see :mod:`langgoap.serde`) so that
+                frozen dataclasses using ``MappingProxyType`` fields
+                round-trip through msgpack correctly.
             store: Optional LangGraph store for shared state.
+            interrupt_before: Optional list of node names to interrupt
+                before.  Forwarded to ``StateGraph.compile``.  Use
+                ``["executor"]`` to gate each action execution behind a
+                human-in-the-loop checkpoint boundary, then resume via
+                ``compiled.invoke(None, config=...)``.
+            interrupt_after: Optional list of node names to interrupt
+                after.  Forwarded to ``StateGraph.compile``.
 
         Returns:
             A compiled StateGraph ready for invocation.
         """
+        # Install LangGoap's MappingProxyType-aware serde on the
+        # checkpointer so frozen dataclasses serialize cleanly.  Skipped
+        # silently when no checkpointer is provided — no-ops don't need
+        # a custom serde because state never hits disk.
+        if checkpointer is not None and checkpointer is not False:
+            install_langgoap_serde(checkpointer)  # type: ignore[arg-type]
+
         builder = StateGraph(GoapState)
 
         # All three nodes are wrapped with RunnableLambda so LangGraph
@@ -107,10 +129,15 @@ class GoapGraph:
         builder.add_edge("executor", "observer")
         # Observer uses Command(goto=...) for routing — no explicit edges needed
 
-        return builder.compile(
-            checkpointer=checkpointer,
-            store=store,
-        )
+        compile_kwargs: dict[str, Any] = {
+            "checkpointer": checkpointer,
+            "store": store,
+        }
+        if interrupt_before is not None:
+            compile_kwargs["interrupt_before"] = interrupt_before
+        if interrupt_after is not None:
+            compile_kwargs["interrupt_after"] = interrupt_after
+        return builder.compile(**compile_kwargs)
 
     def invoke(
         self,

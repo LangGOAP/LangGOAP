@@ -40,6 +40,7 @@ from langgoap.planner.strategy import (
 )
 from langgoap.planner.types import Plan, PlanMetadata
 from langgoap.score import BendableScore, HardSoftScore, Score, SimpleScore
+from langgoap.serde import LangGoapSerializer, install_langgoap_serde
 from langgoap.state import PlanningState
 from langgoap.tracing import (
     LangSmithTracer,
@@ -141,4 +142,7 @@ __all__ = [
     "ExecutionRecord",
     "StoreExecutionHistory",
     "compute_goal_hash",
+    # Serde
+    "LangGoapSerializer",
+    "install_langgoap_serde",
 ]
