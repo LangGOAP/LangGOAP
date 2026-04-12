@@ -37,6 +37,13 @@ class ActionSpec:
             ``0`` (default) means the action is blacklisted on its first
             failure.  ``N`` allows N retries before blacklisting (i.e.,
             the action is blacklisted after N+1 total failures).
+        require_human_approval: When ``True``, the executor calls
+            ``interrupt()`` before running this action, pausing the graph
+            until a human resumes via ``Command(resume=...)``.  Requires
+            a checkpointer.  The resume value is interpreted as approval:
+            ``None``, ``True``, or ``{"approved": True}`` continue
+            execution; ``False`` or ``{"approved": False}`` deny the
+            action and trigger replanning.
         resources: Estimated resource consumption for this action.
             Used by the CSP optimizer (Phase 2).
             Example: ``{"tokens": 500, "cost_usd": 0.02, "api_calls": 1}``.
@@ -57,6 +64,7 @@ class ActionSpec:
     aexecute: Callable[..., Any] | None = None
     effect_validator: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
     max_retries: int = 0
+    require_human_approval: bool = False
     # CSP optimizer inputs (ignored by the A* planner)
     resources: Mapping[str, float] | None = None
     duration: timedelta | None = None
@@ -137,6 +145,7 @@ def goap_action(
     cost: float | CostFunction = 1.0,
     name: str | None = None,
     max_retries: int = 0,
+    require_human_approval: bool = False,
     resources: dict[str, float] | None = None,
     duration: timedelta | None = None,
     metadata: dict[str, Any] | None = None,
@@ -187,6 +196,7 @@ def goap_action(
             execute=None if is_async else func,
             aexecute=func if is_async else None,
             max_retries=max_retries,
+            require_human_approval=require_human_approval,
             resources=resources,
             duration=duration,
             metadata=metadata,
@@ -221,6 +231,7 @@ class GoapAction:
     preconditions: dict[str, Any] = {}
     effects: dict[str, Any] = {}
     max_retries: int = 0
+    require_human_approval: bool = False
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -289,4 +300,5 @@ class GoapAction:
             aexecute=custom_aexecute,
             effect_validator=custom_validator,
             max_retries=self.max_retries,
+            require_human_approval=self.require_human_approval,
         )

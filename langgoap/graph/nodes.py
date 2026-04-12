@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from langgraph.graph import END
-from langgraph.types import Command
+from langgraph.types import Command, interrupt
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec, MultiGoal
@@ -475,6 +475,77 @@ def _build_failure(
     }
 
 
+def _is_approved(resume_value: Any) -> bool:
+    """Interpret a ``Command(resume=...)`` value as an approval decision.
+
+    The resume value sent by the human client is interpreted generously:
+
+    - ``None`` → approved (implicit: resume with no payload = continue)
+    - ``True`` → approved
+    - ``False`` → denied
+    - ``{"approved": True}`` → approved
+    - ``{"approved": False}`` → denied
+    - Any other truthy value → approved
+    """
+    if resume_value is None or resume_value is True:
+        return True
+    if resume_value is False:
+        return False
+    if isinstance(resume_value, dict):
+        return bool(resume_value.get("approved", True))
+    return bool(resume_value)
+
+
+def _check_human_approval(
+    action: ActionSpec,
+    world_state: dict[str, Any],
+    state_before: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Gate execution behind a human approval interrupt when required.
+
+    Calls :func:`~langgraph.types.interrupt` to pause the graph.  On
+    first encounter LangGraph raises ``GraphInterrupt`` (persisted by
+    the checkpointer).  On resume, ``interrupt()`` returns the
+    ``Command(resume=...)`` payload.
+
+    Returns:
+        ``None`` if the action is approved (or does not require approval).
+        A ``GoapState`` delta dict if the action was denied — the caller
+        should return this immediately and skip execution.
+    """
+    if not action.require_human_approval:
+        return None
+
+    resume_value = interrupt(
+        {
+            "type": "goap_action_approval",
+            "action": action.name,
+            "preconditions": dict(action.preconditions),
+            "effects": dict(action.effects),
+            "world_state": dict(world_state),
+        }
+    )
+
+    if _is_approved(resume_value):
+        return None
+
+    # Denied — build a failure result.  Pre-set the failure count to
+    # max_retries + 1 so the observer's blacklist threshold trips on the
+    # first denial regardless of max_retries (a human denial is a
+    # deliberate decision, not a transient flake).
+    reason = "denied by operator"
+    if isinstance(resume_value, dict):
+        reason = resume_value.get("reason", reason)
+    result = _build_failure(
+        action,
+        RuntimeError(f"human_approval_denied: {reason}"),
+        state_before,
+        world_state,
+    )
+    result["action_failure_counts"] = {action.name: action.max_retries + 1}
+    return result
+
+
 def _prepare_execution(
     state: GoapState,
 ) -> tuple[dict[str, Any], Plan, int, ActionSpec] | dict[str, Any]:
@@ -552,6 +623,15 @@ class GoapExecutor:
 
         _safe_tracer_call(self._tracer, "on_action_start", action, world_state)
         state_before = dict(world_state)
+
+        # Human-in-the-loop gate: interrupt() raises GraphInterrupt on
+        # first pass (checkpointer persists state); returns the resume
+        # payload on the second pass.
+        denial = _check_human_approval(action, world_state, state_before)
+        if denial is not None:
+            _safe_tracer_call(self._tracer, "on_action_complete", denial)
+            return denial
+
         try:
             if action.aexecute is not None and action.execute is None:
                 # Action is async-only — fail fast with an actionable message
@@ -602,6 +682,12 @@ class GoapExecutor:
 
         await _safe_tracer_acall(self._tracer, "aon_action_start", action, world_state)
         state_before = dict(world_state)
+
+        denial = _check_human_approval(action, world_state, state_before)
+        if denial is not None:
+            await _safe_tracer_acall(self._tracer, "aon_action_complete", denial)
+            return denial
+
         try:
             raw = await async_execute_action(action, world_state)
             _apply_result(raw, action, world_state)

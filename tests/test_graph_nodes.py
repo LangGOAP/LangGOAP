@@ -9,7 +9,7 @@ from langgraph.graph import END
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
-from langgoap.graph.nodes import GoapExecutor, GoapObserver, GoapPlanner
+from langgoap.graph.nodes import GoapExecutor, GoapObserver, GoapPlanner, _is_approved
 from langgoap.graph.state import ActionResult, GoapState
 from langgoap.planner.types import Plan, PlanMetadata
 from langgoap.state import PlanningState
@@ -615,3 +615,43 @@ class TestGoapObserverRichState:
 
         # Should continue executing, NOT trigger deviation replan
         assert cmd.goto == "executor"
+
+
+# ---------------------------------------------------------------------------
+# _is_approved helper
+# ---------------------------------------------------------------------------
+
+
+class TestIsApproved:
+    """Unit tests for the ``_is_approved`` resume-value interpreter."""
+
+    def test_none_is_approved(self) -> None:
+        assert _is_approved(None) is True
+
+    def test_true_is_approved(self) -> None:
+        assert _is_approved(True) is True
+
+    def test_false_is_denied(self) -> None:
+        assert _is_approved(False) is False
+
+    def test_dict_approved_true(self) -> None:
+        assert _is_approved({"approved": True}) is True
+
+    def test_dict_approved_false(self) -> None:
+        assert _is_approved({"approved": False}) is False
+
+    def test_dict_missing_approved_defaults_true(self) -> None:
+        """A dict without 'approved' key defaults to approval."""
+        assert _is_approved({"reason": "let's go"}) is True
+
+    def test_truthy_string_is_approved(self) -> None:
+        assert _is_approved("yes") is True
+
+    def test_empty_string_is_denied(self) -> None:
+        assert _is_approved("") is False
+
+    def test_zero_is_denied(self) -> None:
+        assert _is_approved(0) is False
+
+    def test_positive_int_is_approved(self) -> None:
+        assert _is_approved(1) is True

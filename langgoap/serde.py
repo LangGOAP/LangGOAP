@@ -55,9 +55,11 @@ from langgraph.checkpoint.serde.jsonplus import (
     EXT_CONSTRUCTOR_KW_ARGS,
     EXT_CONSTRUCTOR_SINGLE_ARG,
     JsonPlusSerializer,
-    _msgpack_default as _stock_msgpack_default,
-    _option as _stock_option,
 )
+from langgraph.checkpoint.serde.jsonplus import (
+    _msgpack_default as _stock_msgpack_default,
+)
+from langgraph.checkpoint.serde.jsonplus import _option as _stock_option
 
 __all__ = [
     "LangGoapSerializer",
@@ -133,15 +135,29 @@ def _langgoap_msgpack_default(obj: Any) -> Any:
         # ``_msgpack_enc`` which uses the stock default, bypassing our
         # hook and losing every LangGoap-specific encoding inside a
         # dataclass field.
+        #
+        # Callable fields (execute, aexecute, effect_validator,
+        # cost-functions) are serialized as ``None`` because lambdas
+        # and bound methods are not picklable across process boundaries
+        # in general.  After restoring from a checkpoint, the executor
+        # re-binds actions from the action spec list provided at
+        # compile-time, so the callables are never read from the
+        # checkpoint.
+        fields_dict: dict[str, Any] = {}
+        for field in dataclasses.fields(obj):
+            val = getattr(obj, field.name)
+            if callable(val) and not isinstance(val, (type, MappingProxyType)):
+                # Also skip CostFunction callables — but preserve
+                # plain float/int cost values.
+                if not isinstance(val, (int, float)):
+                    val = None
+            fields_dict[field.name] = val
         return ormsgpack.Ext(
             EXT_CONSTRUCTOR_KW_ARGS,
             _pack_ext_payload(
                 obj.__class__.__module__,
                 obj.__class__.__name__,
-                {
-                    field.name: getattr(obj, field.name)
-                    for field in dataclasses.fields(obj)
-                },
+                fields_dict,
             ),
         )
     return _stock_msgpack_default(obj)
@@ -253,8 +269,7 @@ def _make_langgoap_redis_serializer_cls() -> type:
                     "id": ["builtins", "frozenset"],
                     "kwargs": {
                         "__set_items__": [
-                            self._preprocess_interrupts(item)
-                            for item in obj
+                            self._preprocess_interrupts(item) for item in obj
                         ]
                     },
                 }
@@ -271,8 +286,7 @@ def _make_langgoap_redis_serializer_cls() -> type:
                     "id": ["builtins", "tuple"],
                     "kwargs": {
                         "__tuple_items__": [
-                            self._preprocess_interrupts(item)
-                            for item in obj
+                            self._preprocess_interrupts(item) for item in obj
                         ]
                     },
                 }
@@ -294,19 +308,13 @@ def _make_langgoap_redis_serializer_cls() -> type:
             # directly and recursively preprocess each field value.
             if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
                 processed_dict = {
-                    f.name: self._preprocess_interrupts(
-                        getattr(obj, f.name)
-                    )
+                    f.name: self._preprocess_interrupts(getattr(obj, f.name))
                     for f in dataclasses.fields(obj)
                 }
-                return self._encode_constructor_args(
-                    type(obj), kwargs=processed_dict
-                )
+                return self._encode_constructor_args(type(obj), kwargs=processed_dict)
             return super()._preprocess_interrupts(obj)
 
-        def _reconstruct_from_constructor(
-            self, obj: dict[str, Any]
-        ) -> Any:
+        def _reconstruct_from_constructor(self, obj: dict[str, Any]) -> Any:
             import importlib
 
             id_parts = obj.get("id", [])
@@ -315,24 +323,18 @@ def _make_langgoap_redis_serializer_cls() -> type:
             # frozenset: same pattern as stock set handling.
             if id_parts == ["builtins", "frozenset"]:
                 items = kwargs.get("__set_items__", [])
-                return frozenset(
-                    self._revive_if_needed(item) for item in items
-                )
+                return frozenset(self._revive_if_needed(item) for item in items)
 
             # tuple: reconstruct from __tuple_items__.
             if id_parts == ["builtins", "tuple"]:
                 items = kwargs.get("__tuple_items__", [])
-                return tuple(
-                    self._revive_if_needed(item) for item in items
-                )
+                return tuple(self._revive_if_needed(item) for item in items)
 
             # enum: reconstruct from __enum_value__.
             if "__enum_value__" in kwargs and len(id_parts) >= 2:
                 module_path = ".".join(id_parts[:-1])
                 class_name = id_parts[-1]
-                cls = getattr(
-                    importlib.import_module(module_path), class_name
-                )
+                cls = getattr(importlib.import_module(module_path), class_name)
                 return cls(kwargs["__enum_value__"])
 
             return super()._reconstruct_from_constructor(obj)
