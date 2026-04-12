@@ -57,7 +57,6 @@ from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
 from langgoap.graph.builder import GoapGraph
 
-
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------

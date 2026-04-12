@@ -142,3 +142,58 @@ def chain_actions_20() -> tuple[list[ActionSpec], GoalSpec, PlanningState]:
 @pytest.fixture(scope="session")
 def wide_100_3() -> tuple[list[ActionSpec], GoalSpec, PlanningState]:
     return wide_pool(n_noise=100, path_depth=3)
+
+
+# ---------------------------------------------------------------------------
+# Temporal chain fixtures (with durations + resources)
+# ---------------------------------------------------------------------------
+
+
+def temporal_chain(
+    n: int,
+) -> tuple[list[ActionSpec], GoalSpec, PlanningState]:
+    """Linear chain with durations and resource usage on each action.
+
+    Used by temporal benchmark to exercise CP-SAT IntervalVar scheduling.
+    """
+    from datetime import timedelta
+
+    from langgoap.goals import ConstraintSpec
+
+    actions: list[ActionSpec] = []
+    for i in range(n):
+        pre = {f"step_{i - 1}": True} if i > 0 else {}
+        actions.append(
+            ActionSpec(
+                name=f"action_{i}",
+                preconditions=pre,
+                effects={f"step_{i}": True},
+                cost=1.0 + (i % 5) * 0.2,
+                resources={"cpu": 1.0, "memory_gb": 0.3 + (i % 4) * 0.1},
+                duration=timedelta(seconds=1 + (i % 3)),
+            )
+        )
+    goal = GoalSpec(
+        conditions={f"step_{n - 1}": True},
+        constraints=(
+            ConstraintSpec(key="cpu", max=float(n + 10), weight=1.0),
+            ConstraintSpec(key="memory_gb", max=float(n), weight=1.0),
+        ),
+    )
+    start = PlanningState.from_dict({})
+    return actions, goal, start
+
+
+@pytest.fixture(scope="session")
+def temporal_10() -> tuple[list[ActionSpec], GoalSpec, PlanningState]:
+    return temporal_chain(10)
+
+
+@pytest.fixture(scope="session")
+def temporal_50() -> tuple[list[ActionSpec], GoalSpec, PlanningState]:
+    return temporal_chain(50)
+
+
+@pytest.fixture(scope="session")
+def temporal_100() -> tuple[list[ActionSpec], GoalSpec, PlanningState]:
+    return temporal_chain(100)
