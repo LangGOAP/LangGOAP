@@ -5,6 +5,10 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any
 
+from dotenv import load_dotenv
+
+load_dotenv()  # Load .env file for API keys (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)
+
 from langgoap.actions import ActionSpec
 from langgoap.planner.types import Plan
 from langgoap.state import PlanningState
