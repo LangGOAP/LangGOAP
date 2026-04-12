@@ -24,10 +24,12 @@ Built by [Integrallis Software](https://integrallis.com).
 | Multi-objective optimization (CP-SAT)   |    Yes   |          No          |
 | Temporal scheduling (`IntervalVar`)     |    Yes   |          No          |
 | Natural-language goal interpretation    |    Yes   |          —           |
+| Human-in-the-loop (`interrupt()`)       |    Yes   |         Yes          |
 | Compiled `StateGraph` as the plan       |    Yes   |         Yes          |
 | Sync + async parity                     |    Yes   |         Yes          |
 | Multi-goal sequential decomposition     |    Yes   |          No          |
 | Execution history in `BaseStore`        |    Yes   |          —           |
+| Checkpointing (Memory / Postgres / Redis) |  Yes   |         Yes          |
 | Plan visualization (Mermaid / DOT)      |    Yes   |          No          |
 
 ---
@@ -94,6 +96,39 @@ result = agent.invoke({"world_state": {}, "goal": agent.goap_goal})
 
 No free-form ReAct loop — the planner produces a deterministic action
 sequence before a single tool executes, and re-plans on failure.
+
+### With checkpointing
+
+```python
+from langgraph.checkpoint.memory import MemorySaver
+
+graph = GoapGraph(actions).compile(checkpointer=MemorySaver())
+result = graph.invoke(
+    {"world_state": {}, "goal": goal},
+    config={"configurable": {"thread_id": "run-1"}},
+)
+```
+
+<details>
+<summary>With Redis or Postgres</summary>
+
+```python
+# Redis
+from langgraph.checkpoint.redis import RedisSaver
+
+with RedisSaver.from_conn_string("redis://localhost:6379") as saver:
+    saver.setup()
+    graph = GoapGraph(actions).compile(checkpointer=saver)
+
+# Postgres
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+async with AsyncPostgresSaver.from_conn_string(dsn) as saver:
+    await saver.setup()
+    graph = GoapGraph(actions).compile(checkpointer=saver)
+```
+
+</details>
 
 ---
 
@@ -171,14 +206,32 @@ and Layer B (`goapify_tool`) on real problems.
 ### Observability
 
 - **`PlanningTracer` Protocol** with sync + async hooks (`on_*` /
-  `aon_*`). `NullTracer`, `LoggingTracer`, and `MultiTracer` ship
-  in-tree. Custom tracers (OpenTelemetry, LangSmith, Prometheus) are
-  ordinary Python classes that implement the protocol — see the
-  `PlanningTracer` docstring in `langgoap/tracing.py` for the hook
-  contract. Tracer exceptions never propagate into the planner.
+  `aon_*`). `NullTracer`, `LoggingTracer`, `MultiTracer`, and
+  `LangSmithTracer` ship in-tree. `LangSmithTracer` maps GOAP domain
+  events (plan/replan/goal-achieved) to LangSmith runs alongside
+  LangGraph's automatic node-level tracing. Custom tracers
+  (OpenTelemetry, Prometheus) are ordinary Python classes that implement
+  the protocol. Tracer exceptions never propagate into the planner.
 - **Plan visualization** — `render_mermaid`, `render_mermaid_gantt`,
   `render_dot`, `render_ascii`, `render_ascii_gantt`, `visualize`.
   Pure Python; no binary dependencies for Mermaid / ASCII output.
+
+### Human-in-the-loop
+
+- **`ActionSpec.require_human_approval`** — when `True`, the executor
+  calls `interrupt()` before running the action and waits for a resume.
+  Denied actions are immediately blacklisted and the planner replans.
+  Requires a checkpointer (`MemorySaver`, `AsyncPostgresSaver`,
+  `RedisSaver`, etc.).
+
+### Checkpointing
+
+- **Tested with all three LangGraph backends**: `MemorySaver`,
+  `AsyncPostgresSaver`, and `RedisSaver`/`AsyncRedisSaver`. Custom
+  ormsgpack serializers round-trip frozen dataclasses,
+  `MappingProxyType`, `frozenset`, `timedelta`, and `tuple` correctly.
+  Install optional extras: `pip install langgoap[checkpoint-postgres]`
+  or `pip install langgoap[checkpoint-redis]`.
 
 ### Natural-language goals
 

@@ -168,18 +168,61 @@ maps to a LangGoap class.
 - **Tracing protocol** (`langgoap.tracing`): `PlanningTracer` Protocol
   with full sync + async parity (`on_*` and `aon_*` hooks for plan
   start/complete/failed, action start/complete, replan, and
-  goal-achieved). `NullTracer`, `LoggingTracer`, and `MultiTracer`
-  ship in-tree. OpenTelemetry and LangSmith adapters are not bundled
-  so the core stays dependency-free; custom tracers are ordinary
-  Python classes that implement the protocol (the protocol docstring
-  lists every hook). Tracer exceptions never propagate into the
-  planner.
+  goal-achieved). `NullTracer`, `LoggingTracer`, `MultiTracer`, and
+  `LangSmithTracer` ship in-tree. `LangSmithTracer` maps domain events
+  (plan/replan/goal-achieved) to LangSmith runs alongside LangGraph's
+  automatic node-level tracing — `langsmith` is already a transitive
+  dependency via `langchain-core`, so no extra install is needed.
+  OpenTelemetry adapters are documented but not bundled; custom tracers
+  are ordinary Python classes that implement the protocol. Tracer
+  exceptions never propagate into the planner.
 - **Plan visualization** (`langgoap.viz`): `render_mermaid`,
   `render_mermaid_gantt`, `render_dot`, `render_ascii`,
   `render_ascii_gantt`, and `visualize` with auto-format detection.
   Pure-Python — Mermaid and DOT require no extra dependencies; DOT
   rendering falls back to returning the raw DOT string when the
   `graphviz` binary is missing.
+
+### Human-in-the-loop
+
+- **`ActionSpec.require_human_approval`** (`bool`, default `False`). When
+  `True`, `GoapExecutor` calls LangGraph's `interrupt()` before executing
+  the action, surfacing the pending action name, preconditions, effects,
+  and current world state to the caller. Resume with
+  `Command(resume={"approved": True})` to continue or
+  `Command(resume={"approved": False, "reason": "..."})` to deny — a
+  denied action is immediately blacklisted (bypasses `max_retries`) and
+  the planner replans around it. Requires a checkpointer
+  (`MemorySaver`, `AsyncPostgresSaver`, `RedisSaver`, etc.) to persist
+  the interrupt across the pause/resume boundary.
+
+### Checkpointer support
+
+- **Custom ormsgpack serializers** for LangGoap's frozen dataclasses.
+  `MappingProxyType`, `frozenset`, `timedelta`, and `tuple` are all
+  round-tripped correctly through LangGraph's checkpoint wire format.
+  Callable fields (`execute`, `aexecute`, `effect_validator`) are
+  serialized as `None` — they are re-bound from the compile-time action
+  specs, not from checkpoints.
+- **Tested with all three LangGraph checkpoint backends**: `MemorySaver`
+  (in-memory), `AsyncPostgresSaver` (via TestContainers), and
+  `RedisSaver`/`AsyncRedisSaver` (via TestContainers with `redis:8`).
+  Install optional extras with `pip install langgoap[checkpoint-postgres]`
+  or `pip install langgoap[checkpoint-redis]`.
+
+### Performance
+
+- **`slots=True`** on all 18 frozen dataclasses across the core package.
+  Removes the per-instance `__dict__` overhead (typically 48–112 bytes on
+  CPython) for every hot-path object: `PlanningState`, `ActionSpec`,
+  `Plan`, `PlanMetadata`, `GoalSpec`, `ConstraintSpec`, `Score` hierarchy,
+  `CSPMetadata`, `ResourceUsage`, `ScheduleEntry`, `ExecutionRecord`, and
+  constraint-builder internals.
+- **Benchmark suite** (`tests/benchmarks/`): memory footprint profiling,
+  A* and A*→CSP temporal scheduling at 10/50/100-action scale, and a
+  head-to-head latency comparison against
+  `langgraph.prebuilt.create_react_agent`. GOAP baselines are
+  regression-gated via `make benchmark-compare`.
 
 ### Hierarchical / multi-goal planning
 
@@ -213,7 +256,7 @@ surface:
   `InterpretedConstraint`, `InterpretedObjective`.
 - **Graph nodes**: `GoapPlanner`, `GoapExecutor`, `GoapObserver`.
 - **Tracing**: `PlanningTracer`, `NullTracer`, `LoggingTracer`,
-  `MultiTracer`.
+  `MultiTracer`, `LangSmithTracer`.
 - **History**: `ExecutionRecord`, `StoreExecutionHistory`,
   `compute_goal_hash`.
 - **Types**: `CostFunction`, `Maximize`, `Minimize`,
@@ -226,7 +269,8 @@ surface:
 Documented in the release plan and `docs/optaplanner_mapping.md`:
 utility AI planner, annotation-based `@Agent`/`@Action` reflection API,
 recursive HTN-style decomposition, learned cost functions from
-execution history, bundled OpenTelemetry / LangSmith adapters,
+execution history, bundled OpenTelemetry adapter (LangSmith adapter
+ships in-tree as `LangSmithTracer`),
 multi-agent peer coordination beyond sequential `MultiGoal`, interactive
 HTML/D3 visualization, custom `Move`/`Phase`/`Tabu`/`SimulatedAnnealing`
 classes (CP-SAT implements these at a lower level), `CostNormalizer`
