@@ -168,6 +168,126 @@ class TestGoapifyToolExecuteWrapper:
         assert result1 is not result2
 
 
+class TestGoapifyToolResultKey:
+    """result_key stores the tool's raw return value in world_state."""
+
+    def test_result_key_none_returns_only_effects(self) -> None:
+        """Default (no result_key): execute returns exactly the effects dict."""
+        eff = {"done": True}
+        action = goapify_tool(greet, effects=eff)
+        assert action.execute is not None
+        result = action.execute({"name": "Alice"})
+        assert result == eff
+
+    def test_result_key_captures_tool_return_value(self) -> None:
+        """With result_key, the tool's return value appears alongside effects."""
+        action = goapify_tool(
+            greet,
+            effects={"greeted": True},
+            result_key="greeting_text",
+        )
+        assert action.execute is not None
+        result = action.execute({"name": "Bob"})
+        # Effect flag is preserved
+        assert result["greeted"] is True
+        # Tool output captured under result_key
+        assert result["greeting_text"] == "Hello, Bob!"
+
+    def test_result_key_does_not_appear_in_effects(self) -> None:
+        """result_key must NOT pollute ActionSpec.effects — A* stays boolean."""
+        action = goapify_tool(
+            greet,
+            effects={"greeted": True},
+            result_key="greeting_text",
+        )
+        assert "greeting_text" not in dict(action.effects)
+
+    def test_result_key_with_numeric_return_value(self) -> None:
+        """Numeric tool outputs are stored verbatim."""
+        action = goapify_tool(
+            add_numbers,
+            effects={"sum_ready": True},
+            result_key="sum_value",
+        )
+        assert action.execute is not None
+        result = action.execute({"a": 3, "b": 4})
+        assert result["sum_ready"] is True
+        assert result["sum_value"] == 7
+
+    def test_result_key_with_zero_arg_tool(self) -> None:
+        """Zero-arg tools with result_key also capture output."""
+        action = goapify_tool(
+            noop_tool,
+            effects={"noop_done": True},
+            result_key="noop_output",
+        )
+        assert action.execute is not None
+        result = action.execute({})
+        assert result["noop_done"] is True
+        assert result["noop_output"] == "done"
+
+    def test_result_key_value_reaches_world_state_via_executor(self) -> None:
+        """End-to-end: result_key value lands in world_state after execution."""
+        from langgoap.graph.nodes import GoapExecutor
+        from langgoap.graph.state import GoapState
+        from tests.conftest import make_plan
+
+        action = goapify_tool(
+            greet,
+            preconditions={},
+            effects={"greeted": True},
+            result_key="greeting_text",
+        )
+        plan = make_plan(action)
+        executor = GoapExecutor()
+        state: GoapState = {
+            "world_state": {"name": "Carol"},
+            "plan": plan,
+            "current_step": 0,
+        }
+        update = executor(state)
+        ws = update["world_state"]
+        assert ws["greeted"] is True
+        assert ws["greeting_text"] == "Hello, Carol!"
+
+    def test_result_key_does_not_affect_planning(self) -> None:
+        """A* plans correctly when result_key is set; only effects matter."""
+        from langgoap.goals import GoalSpec
+        from langgoap.graph.nodes import GoapPlanner
+        from langgoap.graph.state import GoapState
+
+        action = goapify_tool(
+            greet,
+            preconditions={"has_name": True},
+            effects={"greeted": True},
+            result_key="greeting_text",
+        )
+        planner = GoapPlanner([action])
+        goal = GoalSpec(conditions={"greeted": True})
+        state: GoapState = {"world_state": {"has_name": True}, "goal": goal}
+        result = planner(state)
+        plan = result.get("plan")
+        assert plan is not None
+        assert len(plan) == 1
+        assert plan.actions[0].name == "greet"
+        # result_key must not appear in the action's effects
+        assert "greeting_text" not in dict(plan.actions[0].effects)
+
+    def test_each_execute_call_is_independent(self) -> None:
+        """Multiple execute calls each return their own result_key value."""
+        action = goapify_tool(
+            greet,
+            effects={"greeted": True},
+            result_key="greeting_text",
+        )
+        assert action.execute is not None
+        r1 = action.execute({"name": "Alice"})
+        r2 = action.execute({"name": "Dave"})
+        assert r1["greeting_text"] == "Hello, Alice!"
+        assert r2["greeting_text"] == "Hello, Dave!"
+        assert r1 is not r2
+
+
 class TestGoapifyToolTypeError:
     """goapify_tool rejects non-BaseTool inputs."""
 

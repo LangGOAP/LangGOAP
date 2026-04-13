@@ -106,6 +106,56 @@ class TestGoapifyToolExecute:
         assert result.get("touched") is True
 
 
+class TestGoapifyToolResultKey:
+    """result_key bridges the tool return value into world_state."""
+
+    def test_default_no_result_key_returns_effects_only(self) -> None:
+        spec = goapify_tool(greet, effects={"greeted": True})
+        assert spec.execute is not None
+        result = spec.execute({"name": "Alice"})
+        assert set(result.keys()) == {"greeted"}
+
+    def test_result_key_stored_alongside_effects(self) -> None:
+        spec = goapify_tool(
+            greet,
+            effects={"greeted": True},
+            result_key="greeting_text",
+        )
+        assert spec.execute is not None
+        result = spec.execute({"name": "Bob"})
+        assert result["greeted"] is True
+        assert result["greeting_text"] == "hello Bob"
+
+    def test_result_key_absent_from_action_spec_effects(self) -> None:
+        """result_key must not pollute ActionSpec.effects — planning is boolean."""
+        spec = goapify_tool(
+            greet,
+            effects={"greeted": True},
+            result_key="greeting_text",
+        )
+        assert "greeting_text" not in dict(spec.effects)
+
+    def test_result_key_captures_numeric_output(self) -> None:
+        spec = goapify_tool(
+            double_number,
+            effects={"doubled": True},
+            result_key="doubled_value",
+        )
+        assert spec.execute is not None
+        result = spec.execute({"x": 6})
+        assert result["doubled"] is True
+        assert result["doubled_value"] == 12
+
+    def test_result_key_none_is_the_same_as_omitting_it(self) -> None:
+        spec_none = goapify_tool(greet, effects={"greeted": True}, result_key=None)
+        spec_omit = goapify_tool(greet, effects={"greeted": True})
+        assert spec_none.execute is not None
+        assert spec_omit.execute is not None
+        r_none = spec_none.execute({"name": "X"})
+        r_omit = spec_omit.execute({"name": "X"})
+        assert r_none == r_omit
+
+
 class TestGoapifyToolRejects:
     def test_rejects_non_base_tool(self) -> None:
         def not_a_tool(x: int) -> int:
