@@ -17,6 +17,12 @@ from langgraph.graph import END
 from langgraph.types import Command, interrupt
 
 from langgoap.actions import ActionSpec
+from langgoap.conditions import (
+    AsyncConditionResolver,
+    ConditionResolver,
+    aresolve_conditions,
+    resolve_conditions,
+)
 from langgoap.goals import GoalSpec, MultiGoal
 from langgoap.graph.state import ActionResult, GoapState
 from langgoap.guards import (
@@ -35,12 +41,6 @@ from langgoap.history import (
 from langgoap.planner.astar import plan as astar_plan
 from langgoap.planner.explain import explain_no_plan
 from langgoap.planner.types import Plan
-from langgoap.conditions import (
-    AsyncConditionResolver,
-    ConditionResolver,
-    aresolve_conditions,
-    resolve_conditions,
-)
 from langgoap.sensors import (
     AsyncSensor,
     Sensor,
@@ -450,7 +450,9 @@ class GoapPlanner:
             for a in self.actions:
                 resolver_keys.extend(a.preconditions.keys())
                 resolver_keys.extend(a.effects.keys())
-            ws = await aresolve_conditions(self._resolvers, list(set(resolver_keys)), ws)
+            ws = await aresolve_conditions(
+                self._resolvers, list(set(resolver_keys)), ws
+            )
             state = {**state, "world_state": ws}
 
         goal = state.get("goal")

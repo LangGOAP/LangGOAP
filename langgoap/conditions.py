@@ -115,7 +115,6 @@ class AsyncConditionResolver(Protocol):
         ...  # pragma: no cover
 
 
-
 # ---------------------------------------------------------------------------
 # Concrete resolvers
 # ---------------------------------------------------------------------------
@@ -171,9 +170,7 @@ class FunctionalConditionResolver:
                 return _to_status(asyncio.run(result))
         return _to_status(result)
 
-    async def aresolve(
-        self, key: str, world_state: dict[str, Any]
-    ) -> ConditionStatus:
+    async def aresolve(self, key: str, world_state: dict[str, Any]) -> ConditionStatus:
         result = self._fn(key, world_state)
         if asyncio.iscoroutine(result):
             return _to_status(await result)

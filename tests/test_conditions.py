@@ -18,7 +18,6 @@ from langgoap.conditions import (
     resolve_conditions,
 )
 
-
 # ---------------------------------------------------------------------------
 # ConditionStatus
 # ---------------------------------------------------------------------------
@@ -348,14 +347,16 @@ class TestGoapPlannerResolverIntegration:
         # With resolver, ready=True is injected → planning succeeds
         resolver = FunctionalConditionResolver(
             "inject_ready",
-            lambda k, ws: ConditionStatus.TRUE if k == "ready" else ConditionStatus.UNKNOWN,
+            lambda k, ws: (
+                ConditionStatus.TRUE if k == "ready" else ConditionStatus.UNKNOWN
+            ),
         )
         planner = GoapPlanner([action], resolvers=[resolver])
         state: GoapState = {"world_state": {}, "goal": goal}
         result = planner(state)
-        assert result.get("plan") is not None, (
-            "Planner should have found a plan after resolver filled 'ready'"
-        )
+        assert (
+            result.get("plan") is not None
+        ), "Planner should have found a plan after resolver filled 'ready'"
 
     @pytest.mark.asyncio
     async def test_async_resolver_fills_missing_precondition(self) -> None:
@@ -372,7 +373,9 @@ class TestGoapPlannerResolverIntegration:
         goal = GoalSpec(conditions={"result": True})
         resolver = FunctionalConditionResolver(
             "inject_enabled",
-            lambda k, ws: ConditionStatus.TRUE if k == "enabled" else ConditionStatus.UNKNOWN,
+            lambda k, ws: (
+                ConditionStatus.TRUE if k == "enabled" else ConditionStatus.UNKNOWN
+            ),
         )
         planner = GoapPlanner([action], resolvers=[resolver])
         state: GoapState = {"world_state": {}, "goal": goal}

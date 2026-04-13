@@ -813,7 +813,9 @@ class TestParetoPlans:
     def test_no_objectives_returns_all_feasible_sorted_by_cost(self) -> None:
         """When goal has no objectives, all feasible plans are returned sorted by cost."""
         p_cheap = make_plan(make_action("cheap", eff={"done": True}))
-        p_expensive = make_plan(make_action("expensive", eff={"done": True}, resources={"cost": 100.0}))
+        p_expensive = make_plan(
+            make_action("expensive", eff={"done": True}, resources={"cost": 100.0})
+        )
         goal = GoalSpec(conditions={"done": True})
         frontier = pareto_plans([p_expensive, p_cheap], goal)
         assert len(frontier) == 2
@@ -829,4 +831,3 @@ class TestParetoPlans:
         frontier = pareto_plans(plans, goal)
         for _, meta in frontier:
             assert meta.plans_evaluated == 4
-

@@ -683,7 +683,6 @@ def optimize_plans(
     return plans[0], meta
 
 
-
 # ---------------------------------------------------------------------------
 # Public API — pareto_plans (Pareto-optimal plan enumeration)
 # ---------------------------------------------------------------------------
