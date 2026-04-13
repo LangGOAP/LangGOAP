@@ -119,6 +119,7 @@ class TestFunctionalConditionResolver:
     def test_resolve_raises_type_error_for_async_callable(self) -> None:
         """resolve() must raise TypeError instead of silently trying to run the
         coroutine in a thread pool.  The caller should use aresolve() instead."""
+
         async def async_fn(k: str, ws: dict[str, Any]) -> bool:
             return True
 

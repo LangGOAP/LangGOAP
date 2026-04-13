@@ -1037,7 +1037,7 @@ class TestIsBetterPlan:
         must win.  Before the fix both were treated as equivalent because
         total_cost was compared instead of the native score."""
         better_soft = _plan_with_score(5.0, HardSoftScore(hard=0.0, soft=-1.0))
-        worse_soft  = _plan_with_score(5.0, HardSoftScore(hard=0.0, soft=-10.0))
+        worse_soft = _plan_with_score(5.0, HardSoftScore(hard=0.0, soft=-10.0))
         assert _is_better_plan(better_soft, worse_soft) is True
         assert _is_better_plan(worse_soft, better_soft) is False
 
@@ -1046,7 +1046,7 @@ class TestIsBetterPlan:
         plan whose soft score is significantly worse.  This is the information
         loss that total_cost-only comparison caused."""
         high_quality = _plan_with_score(7.0, HardSoftScore(hard=0.0, soft=-2.0))
-        low_quality  = _plan_with_score(4.0, HardSoftScore(hard=0.0, soft=-50.0))
+        low_quality = _plan_with_score(4.0, HardSoftScore(hard=0.0, soft=-50.0))
         assert _is_better_plan(high_quality, low_quality) is True
         assert _is_better_plan(low_quality, high_quality) is False
 
@@ -1062,22 +1062,26 @@ class TestIsBetterPlan:
     def test_cross_subtype_feasible_falls_back_to_total_cost(self) -> None:
         """F1/F3: cross-subtype comparison (SimpleScore vs HardSoftScore) must
         not raise TypeError and must fall back to total_cost."""
-        cheap_simple   = _plan_with_score(2.0, SimpleScore(scalar=2.0))
-        pricey_hss     = _plan_with_score(8.0, HardSoftScore(hard=0.0, soft=-1.0))
+        cheap_simple = _plan_with_score(2.0, SimpleScore(scalar=2.0))
+        pricey_hss = _plan_with_score(8.0, HardSoftScore(hard=0.0, soft=-1.0))
         assert _is_better_plan(cheap_simple, pricey_hss) is True
         assert _is_better_plan(pricey_hss, cheap_simple) is False
 
     def test_bendable_score_soft_breaks_tie(self) -> None:
         """F1: same-type feasible BendableScore plans use native comparison."""
-        better = _plan_with_score(4.0, BendableScore(hard_levels=(0.0,), soft_levels=(-1.0,)))
-        worse  = _plan_with_score(4.0, BendableScore(hard_levels=(0.0,), soft_levels=(-9.0,)))
+        better = _plan_with_score(
+            4.0, BendableScore(hard_levels=(0.0,), soft_levels=(-1.0,))
+        )
+        worse = _plan_with_score(
+            4.0, BendableScore(hard_levels=(0.0,), soft_levels=(-9.0,))
+        )
         assert _is_better_plan(better, worse) is True
         assert _is_better_plan(worse, better) is False
 
     def test_bendable_score_mismatched_shape_falls_back_to_cost(self) -> None:
         """F3: BendableScore shape mismatch raises TypeError → total_cost fallback."""
-        two_hard  = _plan_with_score(3.0, BendableScore(hard_levels=(0.0, 0.0)))
-        one_hard  = _plan_with_score(7.0, BendableScore(hard_levels=(0.0,)))
+        two_hard = _plan_with_score(3.0, BendableScore(hard_levels=(0.0, 0.0)))
+        one_hard = _plan_with_score(7.0, BendableScore(hard_levels=(0.0,)))
         # Both feasible, shape mismatch → cost tiebreaker; 3.0 < 7.0 so two_hard wins
         assert _is_better_plan(two_hard, one_hard) is True
         assert _is_better_plan(one_hard, two_hard) is False
