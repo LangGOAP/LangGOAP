@@ -19,6 +19,14 @@ from langgraph.types import Command, interrupt
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec, MultiGoal
 from langgoap.graph.state import ActionResult, GoapState
+from langgoap.guards import (
+    ActionGuard,
+    AsyncActionGuard,
+    GuardResult,
+    has_blocking_failure,
+    run_guards_async,
+    run_guards_sync,
+)
 from langgoap.history import (
     ExecutionRecord,
     StoreExecutionHistory,
@@ -537,6 +545,31 @@ def _build_failure(
     }
 
 
+def _build_guard_block(
+    action: ActionSpec,
+    guard_results: list[GuardResult],
+    state_before: dict[str, Any],
+    world_state: dict[str, Any],
+) -> dict[str, Any]:
+    """Build a failure result dict for a BLOCK-severity guard failure.
+
+    Immediately blacklists the action (failure_count = max_retries + 1) so
+    the observer's blacklist logic trips on the first guard block regardless
+    of ``action.max_retries``.  A guard block is a policy decision, not a
+    transient flake, so retries would be wrong.
+    """
+    blocking = [r for r in guard_results if not r.passed]
+    reason = "; ".join(r.message for r in blocking) if blocking else "guard_blocked"
+    result = _build_failure(
+        action,
+        RuntimeError(f"guard_blocked: {reason}"),
+        state_before,
+        world_state,
+    )
+    result["action_failure_counts"] = {action.name: action.max_retries + 1}
+    return result
+
+
 def _is_approved(resume_value: Any) -> bool:
     """Interpret a ``Command(resume=...)`` value as an approval decision.
 
@@ -665,10 +698,23 @@ class GoapExecutor:
     Args:
         tracer: Optional :class:`PlanningTracer` invoked around each
             action execution.
+        guards: Optional list of :class:`~langgoap.guards.ActionGuard` or
+            :class:`~langgoap.guards.AsyncActionGuard` objects evaluated
+            *before* each action executes.  A ``WARN``-severity failure is
+            logged but execution continues.  A ``BLOCK``-severity failure
+            aborts the action and immediately blacklists it (equivalent to
+            ``max_retries + 1`` failures), triggering replanning via the
+            observer.
     """
 
-    def __init__(self, *, tracer: PlanningTracer | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        tracer: PlanningTracer | None = None,
+        guards: list[ActionGuard | AsyncActionGuard] | None = None,
+    ) -> None:
         self._tracer: PlanningTracer = tracer or NullTracer()
+        self._guards: list[ActionGuard | AsyncActionGuard] = guards or []
 
     def __call__(self, state: GoapState) -> dict[str, Any]:
         prep = _prepare_execution(state)
@@ -685,6 +731,16 @@ class GoapExecutor:
 
         _safe_tracer_call(self._tracer, "on_action_start", action, world_state)
         state_before = dict(world_state)
+
+        # GuardRails: run all registered guards before executing.
+        if self._guards:
+            guard_results = run_guards_sync(self._guards, action, world_state)
+            if has_blocking_failure(guard_results):
+                result = _build_guard_block(
+                    action, guard_results, state_before, world_state
+                )
+                _safe_tracer_call(self._tracer, "on_action_complete", result)
+                return result
 
         # Human-in-the-loop gate: interrupt() raises GraphInterrupt on
         # first pass (checkpointer persists state); returns the resume
@@ -745,6 +801,16 @@ class GoapExecutor:
         await _safe_tracer_acall(self._tracer, "aon_action_start", action, world_state)
         state_before = dict(world_state)
 
+        # GuardRails: run all registered guards before executing (async path).
+        if self._guards:
+            guard_results = await run_guards_async(self._guards, action, world_state)
+            if has_blocking_failure(guard_results):
+                result = _build_guard_block(
+                    action, guard_results, state_before, world_state
+                )
+                await _safe_tracer_acall(self._tracer, "aon_action_complete", result)
+                return result
+
         denial = _check_human_approval(action, world_state, state_before)
         if denial is not None:
             await _safe_tracer_acall(self._tracer, "aon_action_complete", denial)
@@ -780,6 +846,239 @@ async def async_execute_action(action: ActionSpec, world_state: dict[str, Any]) 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, action.execute, world_state)
     return None
+
+
+def _find_parallel_group(
+    plan_actions: tuple[ActionSpec, ...],
+    current_step: int,
+    deps: dict[int, list[int]] | None = None,
+) -> list[int]:
+    """Return the maximal set of plan indices that can run in parallel from *current_step*.
+
+    Uses the CSP dependency graph: action j is added to the group as long as it
+    does not depend (transitively or directly) on any action already in the
+    group.  The group always contains *current_step* as its first element.
+
+    Args:
+        plan_actions: All actions in the plan (full tuple, not a slice).
+        current_step: Index of the first action to include.
+        deps: Pre-computed dependency graph (output of
+            :func:`~langgoap.planner.csp.build_dependency_graph`).  When
+            ``None``, computed on-the-fly.  Pass this to avoid redundant
+            graph construction across waves of the same plan.
+
+    Returns:
+        A list of action indices (all >= current_step) that can execute in
+        parallel.  A single-element list means no parallelism is available at
+        this step.
+    """
+    if current_step >= len(plan_actions):
+        return []
+
+    if deps is None:
+        from langgoap.planner.csp import build_dependency_graph
+
+        deps = build_dependency_graph(plan_actions)
+
+    group: list[int] = [current_step]
+    group_set: set[int] = {current_step}
+
+    for j in range(current_step + 1, len(plan_actions)):
+        # Stop if j depends on any action already in the group.
+        if any(d in group_set for d in deps[j]):
+            break
+        group.append(j)
+        group_set.add(j)
+
+    return group
+
+
+class ParallelGoapExecutor:
+    """LangGraph node that executes independent plan actions in parallel.
+
+    When a plan contains a sequence of actions that share no precondition/effect
+    dependencies, they form a *parallel wave*.  This executor detects the maximal
+    wave starting at ``current_step`` and runs all wave members concurrently:
+
+    * **Async path** (:meth:`acall`): uses :func:`asyncio.gather` for true
+      concurrency.  Mixed sync/async callables are handled via
+      :func:`async_execute_action` (sync callables are offloaded to
+      :func:`asyncio.loop.run_in_executor`).
+    * **Sync path** (:meth:`__call__`): executes wave actions sequentially in the
+      same thread (Python's GIL limits true parallelism here).  Users gain fewer
+      observer round-trips — the full wave completes in a single node invocation.
+
+    On success the merged world-state update advances ``current_step`` to the
+    start of the next wave.  On failure (any action raises) the wave aborts, no
+    effects are applied, and the first failing action is blacklisted (triggering
+    replanning via the observer).
+
+    Args:
+        tracer: Optional :class:`~langgoap.tracing.PlanningTracer` invoked for
+            each action in the wave.
+        guards: Optional list of :class:`~langgoap.guards.ActionGuard` /
+            :class:`~langgoap.guards.AsyncActionGuard` evaluated before each
+            action.  A ``BLOCK`` failure aborts that action and the whole wave.
+    """
+
+    def __init__(
+        self,
+        *,
+        tracer: PlanningTracer | None = None,
+        guards: list[ActionGuard | AsyncActionGuard] | None = None,
+    ) -> None:
+        self._tracer: PlanningTracer = tracer or NullTracer()
+        self._guards: list[ActionGuard | AsyncActionGuard] = guards or []
+        # Cache the dependency graph by plan-actions identity so it is
+        # computed once per plan rather than once per wave.
+        self._dep_cache: tuple[int, dict[int, list[int]]] | None = None
+
+    def _get_deps(self, plan_actions: tuple[ActionSpec, ...]) -> dict[int, list[int]]:
+        """Return the dependency graph, caching by object identity."""
+        key = id(plan_actions)
+        if self._dep_cache is not None and self._dep_cache[0] == key:
+            return self._dep_cache[1]
+        from langgoap.planner.csp import build_dependency_graph
+
+        deps = build_dependency_graph(plan_actions)
+        self._dep_cache = (key, deps)
+        return deps
+
+    # ------------------------------------------------------------------
+    # Sync path
+    # ------------------------------------------------------------------
+
+    def __call__(self, state: GoapState) -> dict[str, Any]:
+        prep = _prepare_execution(state)
+        if isinstance(prep, dict):
+            return prep
+        world_state, plan_obj, current_step, _first_action = prep
+
+        deps = self._get_deps(plan_obj.actions)
+        group = _find_parallel_group(plan_obj.actions, current_step, deps)
+        merged_world: dict[str, Any] = dict(world_state)
+        all_results: list[ActionResult] = []
+
+        for idx in group:
+            action = plan_obj.actions[idx]
+            logger.info(
+                "ParallelExecutor: running action %r (wave idx %d/%d)",
+                action.name,
+                group.index(idx) + 1,
+                len(group),
+            )
+            _safe_tracer_call(self._tracer, "on_action_start", action, merged_world)
+            state_before = dict(merged_world)
+
+            # Guards
+            if self._guards:
+                guard_results = run_guards_sync(self._guards, action, merged_world)
+                if has_blocking_failure(guard_results):
+                    result = _build_guard_block(
+                        action, guard_results, state_before, merged_world
+                    )
+                    _safe_tracer_call(self._tracer, "on_action_complete", result)
+                    return result
+
+            try:
+                if action.aexecute is not None and action.execute is None:
+                    raise RuntimeError(
+                        f"Action {action.name!r} is async-only. Use ainvoke()."
+                    )
+                raw = (
+                    action.execute(merged_world) if action.execute is not None else None
+                )
+                _apply_result(raw, action, merged_world)
+                action_result = _build_success(action, idx, state_before, merged_world)
+            except Exception as exc:
+                action_result = _build_failure(action, exc, state_before, merged_world)
+                _safe_tracer_call(self._tracer, "on_action_complete", action_result)
+                return action_result
+
+            _safe_tracer_call(self._tracer, "on_action_complete", action_result)
+            if "execution_history" in action_result:
+                all_results.extend(action_result["execution_history"])
+
+        return {
+            "world_state": merged_world,
+            "current_step": max(group) + 1,
+            "execution_history": all_results,
+        }
+
+    # ------------------------------------------------------------------
+    # Async path
+    # ------------------------------------------------------------------
+
+    async def acall(self, state: GoapState) -> dict[str, Any]:
+        """Async variant — executes the wave actions concurrently via asyncio.gather."""
+        prep = _prepare_execution(state)
+        if isinstance(prep, dict):
+            return prep
+        world_state, plan_obj, current_step, _first_action = prep
+
+        deps = self._get_deps(plan_obj.actions)
+        group = _find_parallel_group(plan_obj.actions, current_step, deps)
+
+        async def _run_one(idx: int) -> dict[str, Any]:
+            action = plan_obj.actions[idx]
+            # Each parallel action gets a snapshot of the world-state as it
+            # was at the start of this wave (independent actions don't see
+            # each other's in-progress effects).
+            ws_snapshot = dict(world_state)
+
+            await _safe_tracer_acall(
+                self._tracer, "aon_action_start", action, ws_snapshot
+            )
+            state_before = dict(ws_snapshot)
+
+            if self._guards:
+                guard_results = await run_guards_async(
+                    self._guards, action, ws_snapshot
+                )
+                if has_blocking_failure(guard_results):
+                    result = _build_guard_block(
+                        action, guard_results, state_before, ws_snapshot
+                    )
+                    await _safe_tracer_acall(
+                        self._tracer, "aon_action_complete", result
+                    )
+                    return result
+
+            try:
+                raw = await async_execute_action(action, ws_snapshot)
+                _apply_result(raw, action, ws_snapshot)
+                result = _build_success(action, idx, state_before, ws_snapshot)
+            except Exception as exc:
+                result = _build_failure(action, exc, state_before, ws_snapshot)
+
+            await _safe_tracer_acall(self._tracer, "aon_action_complete", result)
+            return result
+
+        raw_results: list[Any] = list(
+            await asyncio.gather(
+                *(_run_one(idx) for idx in group), return_exceptions=False
+            )
+        )
+
+        # Check for any failures
+        for r in raw_results:
+            if isinstance(r, dict) and r.get("status") == "action_failed":
+                return r  # abort wave, let observer handle replanning
+
+        # Merge all effects into a single world_state update
+        merged_world = dict(world_state)
+        all_results: list[ActionResult] = []
+        for r in raw_results:
+            if "world_state" in r:
+                merged_world.update(r["world_state"])
+            if "execution_history" in r:
+                all_results.extend(r["execution_history"])
+
+        return {
+            "world_state": merged_world,
+            "current_step": max(group) + 1,
+            "execution_history": all_results,
+        }
 
 
 def _get_last_failed_action(state: GoapState) -> str | None:

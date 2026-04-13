@@ -66,7 +66,15 @@ class AStarStrategy:
     Delegates to :func:`langgoap.planner.astar.plan`.  Use this when a
     goal has neither constraints nor objectives and CSP overhead is
     unwanted.
+
+    Args:
+        time_budget_ms: Optional wall-clock budget in milliseconds.  When
+            set, A* returns the best complete plan found within the budget
+            (anytime behaviour).  ``None`` means run until exhaustion.
     """
+
+    def __init__(self, *, time_budget_ms: float | None = None) -> None:
+        self._time_budget_ms = time_budget_ms
 
     def plan(
         self,
@@ -76,7 +84,13 @@ class AStarStrategy:
         *,
         blacklisted_actions: list[str] | None = None,
     ) -> Plan | None:
-        return astar_plan(start, goal, actions, blacklisted_actions=blacklisted_actions)
+        return astar_plan(
+            start,
+            goal,
+            actions,
+            blacklisted_actions=blacklisted_actions,
+            time_budget_ms=self._time_budget_ms,
+        )
 
 
 class CSPRefinementStrategy:
@@ -209,10 +223,68 @@ class LazyDecompositionStrategy:
         )
 
 
+class AnytimePlanningStrategy:
+    """Return the best plan found within a wall-clock time budget.
+
+    Wraps an inner strategy (default: :class:`AStarStrategy`) and applies
+    a hard deadline.  When the inner strategy finishes before the budget
+    expires, the result is returned immediately.  When it exceeds the
+    budget, the best complete plan found so far is returned (which may be
+    ``None`` if no complete plan was discovered before the deadline).
+
+    For :class:`AStarStrategy`, anytime behaviour is natively supported via
+    the ``time_budget_ms`` constructor parameter.  This strategy is more
+    useful when wrapping black-box strategies that do not expose a budget
+    knob — it uses :mod:`concurrent.futures` to enforce the deadline.
+
+    Args:
+        time_budget_ms: Wall-clock budget in milliseconds.
+        inner:          Strategy to wrap.  Defaults to
+                        :class:`AStarStrategy` (which natively handles the
+                        budget more efficiently).
+    """
+
+    def __init__(
+        self,
+        time_budget_ms: float,
+        *,
+        inner: PlanningStrategy | None = None,
+    ) -> None:
+        self._budget_ms = time_budget_ms
+        self._inner: PlanningStrategy = inner or AStarStrategy(
+            time_budget_ms=time_budget_ms
+        )
+
+    def plan(
+        self,
+        start: PlanningState,
+        goal: GoalSpec,
+        actions: list[ActionSpec],
+        *,
+        blacklisted_actions: list[str] | None = None,
+    ) -> Plan | None:
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                self._inner.plan,
+                start,
+                goal,
+                actions,
+                blacklisted_actions=blacklisted_actions,
+            )
+            try:
+                return future.result(timeout=self._budget_ms / 1000.0)
+            except concurrent.futures.TimeoutError:
+                future.cancel()
+                return None
+
+
 __all__ = [
-    "PlanningStrategy",
     "AStarStrategy",
+    "AnytimePlanningStrategy",
     "CSPRefinementStrategy",
     "LazyDecompositionStrategy",
+    "PlanningStrategy",
     "TwoPhasePipelineStrategy",
 ]

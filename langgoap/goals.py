@@ -54,6 +54,45 @@ class ConstraintSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class SoftGoal:
+    """An optional goal condition with a utility weight (oversubscription planning).
+
+    Hard goal conditions (:attr:`GoalSpec.conditions`) *must* be satisfied for
+    a plan to be valid.  Soft goals are optional — the planner prefers plans
+    that achieve them but will not fail if they cannot be satisfied.
+
+    Attributes:
+        conditions: Target conditions for this soft goal.  Accepted as a
+            plain ``dict``; silently wrapped in :class:`~types.MappingProxyType`.
+        weight: Non-negative utility weight (default ``1.0``).  Higher values
+            make this goal more valuable; the planner maximises the total
+            achieved weight across all soft goals when selecting among plans.
+        name: Optional human-readable identifier used in logging and
+            :class:`~langgoap.planner.csp.CSPMetadata` objective keys.
+            Defaults to ``str(conditions)`` when empty.
+    """
+
+    conditions: MappingProxyType[str, Any] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+    weight: float = 1.0
+    name: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.conditions, MappingProxyType):
+            object.__setattr__(
+                self, "conditions", MappingProxyType(dict(self.conditions))
+            )
+        if self.weight < 0:
+            raise ValueError(f"SoftGoal.weight must be >= 0, got {self.weight}")
+
+    @property
+    def label(self) -> str:
+        """Return name if set, else a compact conditions string."""
+        return self.name or str(dict(self.conditions))
+
+
+@dataclass(frozen=True, slots=True)
 class GoalSpec:
     """Specification of a GOAP goal.
 
@@ -74,6 +113,7 @@ class GoalSpec:
     replan_strategy: ReplanStrategy = ReplanStrategy.ON_DEVIATION
     objectives: MappingProxyType[str, ObjectiveDirection] | None = None
     constraints: tuple[ConstraintSpec, ...] = field(default_factory=tuple)
+    soft_goals: tuple[SoftGoal, ...] = field(default_factory=tuple)
     priority: int = 0
     max_replans: int = 10
     """Maximum number of replanning cycles before the observer gives up.
@@ -101,6 +141,9 @@ class GoalSpec:
         # Normalise constraints: accept list or tuple from callers.
         if not isinstance(self.constraints, tuple):
             object.__setattr__(self, "constraints", tuple(self.constraints))
+        # Normalise soft_goals: accept list or tuple from callers.
+        if not isinstance(self.soft_goals, tuple):
+            object.__setattr__(self, "soft_goals", tuple(self.soft_goals))
 
     def __repr__(self) -> str:
         parts = [f"conditions={dict(self.conditions)!r}"]
@@ -110,6 +153,8 @@ class GoalSpec:
             parts.append(f"objectives={dict(self.objectives)!r}")
         if self.constraints:
             parts.append(f"constraints={self.constraints!r}")
+        if self.soft_goals:
+            parts.append(f"soft_goals={self.soft_goals!r}")
         if self.priority:
             parts.append(f"priority={self.priority!r}")
         if self.max_replans != 10:

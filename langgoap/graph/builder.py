@@ -18,6 +18,7 @@ from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec, MultiGoal
 from langgoap.graph.nodes import GoapExecutor, GoapObserver, GoapPlanner
 from langgoap.graph.state import GoapState
+from langgoap.guards import ActionGuard, AsyncActionGuard
 from langgoap.history import StoreExecutionHistory
 from langgoap.sensors import AsyncSensor, Sensor
 from langgoap.serde import install_langgoap_serde
@@ -73,12 +74,14 @@ class GoapGraph:
         tracer: PlanningTracer | None = None,
         history: StoreExecutionHistory | None = None,
         sensors: list[Sensor | AsyncSensor] | None = None,
+        guards: list[ActionGuard | AsyncActionGuard] | None = None,
     ) -> None:
         self.actions = actions
         self._strategy = strategy
         self._tracer = tracer
         self._history = history
         self._sensors = sensors
+        self._guards = guards
 
     def compile(
         self,
@@ -128,7 +131,7 @@ class GoapGraph:
             tracer=self._tracer,
             sensors=self._sensors,
         )
-        executor = GoapExecutor(tracer=self._tracer)
+        executor = GoapExecutor(tracer=self._tracer, guards=self._guards)
         observer = GoapObserver(
             self.actions, tracer=self._tracer, history=self._history
         )

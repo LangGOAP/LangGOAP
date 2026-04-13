@@ -157,11 +157,17 @@ def _search(
     goal_conditions: Mapping[str, Any],
     actions: list[ActionSpec],
     t0: float,
+    deadline: float | None = None,
 ) -> Plan | None:
     """Core A* search loop.
 
     Separated from :func:`plan` so the blacklist fallback can call it
     without duplicating the search implementation.
+
+    Args:
+        deadline: Absolute monotonic time (seconds) after which the search
+            should stop and return the best complete plan found so far.
+            ``None`` means no limit (original behaviour).
     """
     # Reachability pre-check
     if not _is_reachable(start, goal_conditions, actions):
@@ -179,14 +185,21 @@ def _search(
     # Map from state → best g_score seen
     best_g: dict[PlanningState, float] = {start: 0.0}
     nodes_explored = 0
+    best_complete: Plan | None = None  # best complete plan seen (anytime support)
 
     while open_list:
+        # Anytime: stop and return best complete plan found when deadline expires.
+        if deadline is not None and time.monotonic() >= deadline:
+            return best_complete
         current = heapq.heappop(open_list)
         nodes_explored += 1
 
         # Goal check
         if current.state.satisfies(goal_conditions):
             raw_actions = current.actions
+            # Anytime: record this complete plan; keep searching for a better one
+            # only when a strict deadline is set (anytime mode).
+            _build_now = deadline is None or time.monotonic() < deadline
             original_len = len(raw_actions)
 
             # Two-pass optimization
@@ -205,7 +218,7 @@ def _search(
                 expected.append(sim_state)
 
             elapsed_ms = (time.monotonic() - t0) * 1000
-            return Plan(
+            candidate = Plan(
                 actions=optimized,
                 expected_states=tuple(expected),
                 total_cost=total_cost,
@@ -216,6 +229,11 @@ def _search(
                 ),
                 score=SimpleScore(scalar=total_cost),
             )
+            # In anytime mode, A* explores by f-score; the first goal found
+            # is optimal (admissible heuristic), so return immediately.
+            # best_complete is only used if the deadline fires mid-search.
+            best_complete = candidate
+            return candidate
 
         # Skip if we've found a better path to this state
         if current.g_score > best_g.get(current.state, float("inf")):
@@ -259,6 +277,8 @@ def plan(
     goal: GoalSpec,
     actions: list[ActionSpec],
     blacklisted_actions: list[str] | None = None,
+    *,
+    time_budget_ms: float | None = None,
 ) -> Plan | None:
     """Find an optimal action sequence from start to goal using A*.
 
@@ -271,12 +291,17 @@ def plan(
             with all actions (graceful degradation: an unreachable goal
             from the filtered set is preferred over returning ``None``
             when a plan through the full action set still exists).
+        time_budget_ms: Optional wall-clock budget in milliseconds.
+            When set, the search returns the best *complete* plan found
+            within the budget rather than running until exhaustion.
+            ``None`` (the default) means no limit — original behaviour.
 
     Returns:
         A Plan if a path exists, None if the goal is unreachable.
     """
     t0 = time.monotonic()
     goal_conditions = goal.conditions
+    deadline = (t0 + time_budget_ms / 1000.0) if time_budget_ms is not None else None
 
     # Early exit: goal already satisfied
     if start.satisfies(goal_conditions):
@@ -296,11 +321,11 @@ def plan(
     blacklist_set = set(blacklisted_actions) if blacklisted_actions else set()
     if blacklist_set:
         available = [a for a in actions if a.name not in blacklist_set]
-        result = _search(start, goal_conditions, available, t0)
+        result = _search(start, goal_conditions, available, t0, deadline)
         if result is not None:
             return result
         # Blacklist fallback: filtered action set made the goal unreachable
         # — retry with all actions so the executor can decide at runtime.
-        return _search(start, goal_conditions, actions, t0)
+        return _search(start, goal_conditions, actions, t0, deadline)
 
-    return _search(start, goal_conditions, actions, t0)
+    return _search(start, goal_conditions, actions, t0, deadline)

@@ -8,10 +8,25 @@ from langgoap.constraints import (
     ConstraintBuilder,
     ConstraintChain,
 )
-from langgoap.goals import ConstraintSpec, Goal, GoalSpec, MultiGoal
+from langgoap.goals import ConstraintSpec, Goal, GoalSpec, MultiGoal, SoftGoal
 from langgoap.graph.builder import GoapGraph
-from langgoap.graph.nodes import GoapExecutor, GoapObserver, GoapPlanner
+from langgoap.graph.nodes import (
+    GoapExecutor,
+    GoapObserver,
+    GoapPlanner,
+    ParallelGoapExecutor,
+)
 from langgoap.graph.state import ActionResult, GoapState
+from langgoap.guards import (
+    ActionGuard,
+    AsyncActionGuard,
+    FunctionalGuard,
+    GuardResult,
+    GuardSeverity,
+    has_blocking_failure,
+    run_guards_async,
+    run_guards_sync,
+)
 from langgoap.history import (
     ExecutionRecord,
     StoreExecutionHistory,
@@ -40,6 +55,7 @@ from langgoap.planner.explain import (
 )
 from langgoap.planner.pipeline import plan as pipeline_plan
 from langgoap.planner.strategy import (
+    AnytimePlanningStrategy,
     AStarStrategy,
     CSPRefinementStrategy,
     LazyDecompositionStrategy,
@@ -92,6 +108,7 @@ __all__ = [
     "Goal",
     "GoalSpec",
     "MultiGoal",
+    "SoftGoal",
     # Constraint builder
     "BuilderOutput",
     "ChainOutput",
@@ -112,6 +129,7 @@ __all__ = [
     "GoapPlanner",
     "GoapExecutor",
     "GoapObserver",
+    "ParallelGoapExecutor",
     "GoapState",
     "ActionResult",
     # Planning
@@ -123,9 +141,19 @@ __all__ = [
     # Planning strategies
     "PlanningStrategy",
     "AStarStrategy",
+    "AnytimePlanningStrategy",
     "CSPRefinementStrategy",
     "LazyDecompositionStrategy",
     "TwoPhasePipelineStrategy",
+    # Guards
+    "ActionGuard",
+    "AsyncActionGuard",
+    "FunctionalGuard",
+    "GuardResult",
+    "GuardSeverity",
+    "has_blocking_failure",
+    "run_guards_async",
+    "run_guards_sync",
     # Scores
     "Score",
     "SimpleScore",

@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from langgoap.planner.types import Plan
 
 from langgoap.actions import ActionSpec
-from langgoap.goals import ConstraintSpec, GoalSpec
+from langgoap.goals import ConstraintSpec, GoalSpec, SoftGoal
 from langgoap.types import ObjectiveDirection
 
 logger = logging.getLogger(__name__)
@@ -295,6 +295,13 @@ def validate_plan(
     if goal.objectives is not None:
         for obj_key in goal.objectives:
             obj_values[obj_key] = totals.get(obj_key, 0.0)
+
+    # Evaluate soft goals against the plan's final expected state
+    if goal.soft_goals and plan.expected_states:
+        final_state = plan.expected_states[-1]
+        for sg in goal.soft_goals:
+            achieved = final_state.satisfies(sg.conditions)
+            obj_values[f"soft_goal:{sg.label}"] = sg.weight if achieved else 0.0
 
     status = CSPStatus.FEASIBLE if all_hard_satisfied else CSPStatus.INFEASIBLE
 
@@ -565,7 +572,24 @@ def optimize_plans(
                     # Maximizing → negative coefficient (solver minimizes -value)
                     objective_terms.append(-resource_vars[obj_key])
 
-    combined_terms: list[Any] = list(objective_terms) + list(soft_violation_terms)
+    # Soft goals: maximise weighted achievement (binary per plan × weight).
+    # A soft goal is satisfied by plan i if its conditions are all true in the
+    # plan's final expected state.
+    soft_goal_terms: list[Any] = []
+    if goal.soft_goals:
+        for sg in goal.soft_goals:
+            weight_scaled = max(int(sg.weight * scale), 1)
+            for i, p in enumerate(plans):
+                achieved = bool(
+                    p.expected_states and p.expected_states[-1].satisfies(sg.conditions)
+                )
+                if achieved:
+                    # Subtract (negative in minimise) to reward achieving this goal
+                    soft_goal_terms.append(-selected[i] * weight_scaled)
+
+    combined_terms: list[Any] = (
+        list(objective_terms) + list(soft_violation_terms) + list(soft_goal_terms)
+    )
     if combined_terms:
         model.minimize(sum(combined_terms))
     else:
