@@ -6,12 +6,13 @@ and observer nodes wired together for the GOAP execution loop.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import RunnableConfig, RunnableLambda
 from langgraph.graph import START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.types import Checkpointer
 
 from langgoap.actions import ActionSpec
@@ -118,8 +119,11 @@ class GoapGraph:
         # checkpointer so frozen dataclasses serialize cleanly.  Skipped
         # silently when no checkpointer is provided — no-ops don't need
         # a custom serde because state never hits disk.
-        if checkpointer is not None and checkpointer is not False:
-            install_langgoap_serde(checkpointer)  # type: ignore[arg-type]
+        # isinstance narrows Checkpointer (= BaseCheckpointSaver | None |
+        # Literal[False]) to BaseCheckpointSaver, satisfying install_langgoap_serde's
+        # parameter type without a cast or type: ignore.
+        if isinstance(checkpointer, BaseCheckpointSaver):
+            install_langgoap_serde(checkpointer)
 
         builder = StateGraph(GoapState)
 
@@ -196,8 +200,9 @@ class GoapGraph:
             "goal": goal,
             "world_state": world_state or {},
         }
-        # compiled.invoke returns dict[str, Any]; cast to GoapState for callers.
-        return compiled.invoke(input_state, config=config)  # type: ignore[return-value]
+        # The compiled graph's invoke() is typed as returning dict[str, Any];
+        # cast to GoapState because we own the graph's output schema entirely.
+        return cast(GoapState, compiled.invoke(input_state, config=config))
 
     async def ainvoke(
         self,
@@ -225,7 +230,7 @@ class GoapGraph:
             "goal": goal,
             "world_state": world_state or {},
         }
-        return await compiled.ainvoke(input_state, config=config)  # type: ignore[return-value]
+        return cast(GoapState, await compiled.ainvoke(input_state, config=config))
 
     def invoke_nl(
         self,

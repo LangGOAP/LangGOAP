@@ -157,17 +157,14 @@ class FunctionalConditionResolver:
     def resolve(self, key: str, world_state: dict[str, Any]) -> ConditionStatus:
         result = self._fn(key, world_state)
         if asyncio.iscoroutine(result):
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    import concurrent.futures
-
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                        future = pool.submit(asyncio.run, result)
-                        return _to_status(future.result())
-                return _to_status(loop.run_until_complete(result))
-            except RuntimeError:
-                return _to_status(asyncio.run(result))
+            # Close the unawaited coroutine to avoid a ResourceWarning before
+            # raising — the coroutine will never be awaited from this path.
+            result.close()
+            raise TypeError(
+                f"FunctionalConditionResolver {self._name!r}: the wrapped "
+                "callable returned a coroutine but resolve() is synchronous. "
+                "Either pass a sync callable or call aresolve() instead."
+            )
         return _to_status(result)
 
     async def aresolve(self, key: str, world_state: dict[str, Any]) -> ConditionStatus:

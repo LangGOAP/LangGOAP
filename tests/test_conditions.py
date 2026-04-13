@@ -116,6 +116,16 @@ class TestFunctionalConditionResolver:
         r = _make_resolver(True)
         assert await r.aresolve("x", {}) == ConditionStatus.TRUE
 
+    def test_resolve_raises_type_error_for_async_callable(self) -> None:
+        """resolve() must raise TypeError instead of silently trying to run the
+        coroutine in a thread pool.  The caller should use aresolve() instead."""
+        async def async_fn(k: str, ws: dict[str, Any]) -> bool:
+            return True
+
+        r = FunctionalConditionResolver("async_check", async_fn)
+        with pytest.raises(TypeError, match="aresolve"):
+            r.resolve("x", {})
+
     @pytest.mark.asyncio
     async def test_aresolve_coerces_async_callable(self) -> None:
         async def async_fn(k: str, ws: dict[str, Any]) -> bool:
