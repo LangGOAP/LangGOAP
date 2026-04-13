@@ -41,6 +41,7 @@ from langgoap.history import (
 from langgoap.planner.astar import plan as astar_plan
 from langgoap.planner.explain import explain_no_plan
 from langgoap.planner.types import Plan
+from langgoap.score import SimpleScore
 from langgoap.sensors import (
     AsyncSensor,
     Sensor,
@@ -90,6 +91,71 @@ def _planning_keys(actions: list[ActionSpec], goal: GoalSpec) -> set[str]:
         keys.update(action.preconditions.keys())
         keys.update(action.effects.keys())
     return keys
+
+
+def _is_better_plan(candidate: Plan, best: Plan) -> bool:
+    """Feasibility-first comparison for MultiGoal ``any`` mode.
+
+    Uses three-tier ordering so that CSP soft-score information is never
+    silently discarded when sub-goals are compared:
+
+    **Tier 1 — Feasibility**
+        A feasible plan always beats an infeasible one, regardless of cost
+        or objective value.
+
+    **Tier 2 — Native score comparison**
+        When both plans share the same concrete :class:`~langgoap.score.Score`
+        subtype, the subtype's own comparison is used.  Sign conventions
+        differ between subtypes and are handled explicitly:
+
+        * :class:`~langgoap.score.SimpleScore` — *lower* scalar is better
+          (A* minimises path cost; ``scalar`` equals ``total_cost``).
+        * :class:`~langgoap.score.HardSoftScore` /
+          :class:`~langgoap.score.BendableScore` — *higher* (less-negative)
+          is better (OptaPlanner lexicographic convention; ``hard == 0`` is
+          optimal).
+
+        Using native comparison preserves CSP soft-score information: a
+        ``HardSoftScore(hard=0, soft=-1)`` plan correctly beats a
+        ``HardSoftScore(hard=0, soft=-10)`` plan even when both have the
+        same ``total_cost``.
+
+        A :class:`TypeError` raised by cross-subtype comparisons or
+        mismatched :class:`~langgoap.score.BendableScore` shapes falls
+        through to tier 3.
+
+    **Tier 3 — total_cost fallback**
+        ``total_cost`` (a plain ``float``, always present on every
+        :class:`~langgoap.planner.types.Plan`) breaks ties when tier 2
+        cannot resolve them.
+
+        Among *infeasible* plans this picks the cheapest rather than the
+        *least* infeasible (i.e. the plan whose ``hard`` score is closest
+        to zero).  This is acceptable because MultiGoal ``any`` reports
+        ``no_plan`` when *every* sub-goal is infeasible regardless of which
+        infeasible candidate is selected.  A future improvement could
+        compare ``hard`` scores directly for the infeasible-vs-infeasible
+        case; for now the simpler ``total_cost`` tiebreaker is documented
+        here rather than silently applied.
+    """
+    c_feasible = candidate.score.is_feasible()
+    b_feasible = best.score.is_feasible()
+    if c_feasible != b_feasible:
+        return c_feasible
+    # Tier 2: same-subtype native comparison preserves soft-score information.
+    # TypeError fires on cross-subtype or mismatched BendableScore shapes.
+    try:
+        if isinstance(candidate.score, SimpleScore):
+            # SimpleScore: lower scalar is better (cost minimisation).
+            return candidate.score < best.score
+        # HardSoftScore / BendableScore: higher (less-negative) is better.
+        # mypy sees Score (base class) here; __gt__ is defined on every
+        # concrete subclass but not on Score itself — hence the ignore.
+        return candidate.score > best.score  # type: ignore[operator]
+    except TypeError:
+        pass
+    # Tier 3: cross-subtype fallback — total_cost is a uniform float proxy.
+    return candidate.total_cost < best.total_cost
 
 
 class GoapPlanner:
@@ -257,12 +323,14 @@ class GoapPlanner:
                         dict(effective_goal.conditions),
                     )
             else:  # "any"
-                # Enumerate sub-goals, plan each, pick the cheapest feasible.
-                # TODO: replace ``total_cost`` with ``plan.score`` comparison
-                # so that mixed-feasibility alternatives (hard violations)
-                # lose to feasible ones regardless of path cost.  Blocked on
-                # cross-subclass Score comparison (``SimpleScore`` vs
-                # ``HardSoftScore``) which currently raises ``TypeError``.
+                # Enumerate sub-goals, plan each, pick the best feasible.
+                # Feasibility-first: a feasible plan always beats an
+                # infeasible one regardless of cost.  Among plans with the
+                # same feasibility status, lower total_cost wins.  Using
+                # total_cost (a plain float) avoids the cross-subclass
+                # TypeError that Score.__lt__ raises when comparing e.g.
+                # SimpleScore (from pure A*) against HardSoftScore (from
+                # the CSP pipeline).
                 best_idx = -1
                 best_plan: Plan | None = None
                 for i, sg in enumerate(raw_goal.goals):
@@ -271,7 +339,7 @@ class GoapPlanner:
                     candidate = self._plan_single(sub_start, sg, blacklisted)
                     if candidate is None:
                         continue
-                    if best_plan is None or candidate.total_cost < best_plan.total_cost:
+                    if best_plan is None or _is_better_plan(candidate, best_plan):
                         best_idx = i
                         best_plan = candidate
                 if best_plan is None:
