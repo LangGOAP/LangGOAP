@@ -45,6 +45,22 @@ from langgoap.actions import ActionSpec
 EffectValidator = Callable[[dict[str, Any], dict[str, Any]], bool]
 
 
+def _tool_input(tool: BaseTool, state: dict[str, Any]) -> dict[str, Any]:
+    """Filter *state* to the keys declared in *tool*'s args schema.
+
+    Tools with no ``args_schema`` (zero-arg tools) receive an empty dict,
+    which ``StructuredTool.invoke`` / ``StructuredTool.ainvoke`` accept.
+    Supports both Pydantic v2 (``.model_fields``) and v1 (``.__fields__``).
+    """
+    schema = tool.args_schema
+    if schema is None:
+        return {}
+    fields = getattr(schema, "model_fields", None)
+    if fields is None:
+        fields = getattr(schema, "__fields__", {})
+    return {k: state[k] for k in fields if k in state}
+
+
 def goapify_tool(
     tool: BaseTool,
     *,
@@ -92,12 +108,19 @@ def goapify_tool(
                 )
                 # After execution: world_state["search_results"] == <raw output>
 
+            ``result_key`` must not overlap with any key in ``effects`` —
+            a collision would silently overwrite the planning flag with raw
+            tool output, corrupting the world state A* reasons over.
+
     Returns:
         A frozen :class:`ActionSpec` ready to feed into
         :class:`~langgoap.graph.builder.GoapGraph`.
 
     Raises:
-        TypeError: If ``tool`` is not a :class:`BaseTool` instance.
+        TypeError:  If ``tool`` is not a :class:`BaseTool` instance.
+        ValueError: If ``result_key`` matches a key already declared in
+            ``effects``.  This would silently overwrite the planning flag
+            with raw tool output at execution time.
     """
     if not isinstance(tool, BaseTool):
         raise TypeError(
@@ -108,30 +131,36 @@ def goapify_tool(
 
     declared_effects = dict(effects or {})
     declared_preconditions = dict(preconditions or {})
+
+    # Guard: a result_key that matches an effects key would silently overwrite
+    # the planning flag with raw tool output at execution time.
+    if result_key is not None and result_key in declared_effects:
+        raise ValueError(
+            f"goapify_tool: result_key={result_key!r} collides with a key "
+            f"already declared in effects. Use a distinct key so that the "
+            f"planning flag and the tool's runtime output do not overwrite "
+            f"each other in world_state."
+        )
+
     _result_key = result_key  # capture in closure
 
-    def _execute(state: dict[str, Any]) -> dict[str, Any]:
-        # Filter the state dict down to the keys the tool declares in
-        # its args_schema.  Tools with no args_schema (zero-arg tools)
-        # receive an empty dict, which StructuredTool accepts.
-        tool_input: dict[str, Any] = {}
-        schema = tool.args_schema
-        if schema is not None:
-            # Pydantic v2: .model_fields; v1: .__fields__ fallback.
-            fields = getattr(schema, "model_fields", None)
-            if fields is None:
-                fields = getattr(schema, "__fields__", {})
-            tool_input = {k: state[k] for k in fields if k in state}
-
-        raw_output = tool.invoke(tool_input)
-
+    def _merge(raw_output: Any) -> dict[str, Any]:
+        """Merge declared effects with the optional result_key output."""
         update = dict(declared_effects)
         if _result_key is not None:
-            # Store the tool's raw return value alongside the effect flags.
-            # The executor merges the whole dict into world_state, so both
-            # the planning flags and the runtime output land in world_state.
             update[_result_key] = raw_output
         return update
+
+    def _execute(state: dict[str, Any]) -> dict[str, Any]:
+        raw_output = tool.invoke(_tool_input(tool, state))
+        return _merge(raw_output)
+
+    async def _aexecute(state: dict[str, Any]) -> dict[str, Any]:
+        # BaseTool.ainvoke is part of the Runnable contract and is always
+        # available; for sync-only tools it delegates to a thread executor
+        # internally.
+        raw_output = await tool.ainvoke(_tool_input(tool, state))
+        return _merge(raw_output)
 
     return ActionSpec(
         name=tool.name,
@@ -139,6 +168,7 @@ def goapify_tool(
         effects=declared_effects,
         cost=cost,
         execute=_execute,
+        aexecute=_aexecute,
         effect_validator=effect_validator,
         max_retries=max_retries,
         resources=resources,

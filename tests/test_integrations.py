@@ -288,6 +288,111 @@ class TestGoapifyToolResultKey:
         assert r1 is not r2
 
 
+class TestGoapifyToolCollisionValidation:
+    """result_key must not collide with an effects key (silent overwrite guard)."""
+
+    def test_result_key_same_as_effect_raises(self) -> None:
+        with pytest.raises(ValueError, match="collides"):
+            goapify_tool(greet, effects={"greeted": True}, result_key="greeted")
+
+    def test_result_key_overlapping_one_of_many_effects_raises(self) -> None:
+        with pytest.raises(ValueError, match="collides"):
+            goapify_tool(
+                greet,
+                effects={"greeted": True, "logged": True},
+                result_key="logged",
+            )
+
+    def test_result_key_not_in_effects_does_not_raise(self) -> None:
+        # Should construct without error
+        action = goapify_tool(
+            greet,
+            effects={"greeted": True},
+            result_key="greeting_text",
+        )
+        assert action.name == "greet"
+
+    def test_result_key_none_with_same_name_effect_does_not_raise(self) -> None:
+        # result_key=None means no capture — no collision possible
+        action = goapify_tool(greet, effects={"greeted": True}, result_key=None)
+        assert action.name == "greet"
+
+    def test_collision_error_message_names_the_key(self) -> None:
+        with pytest.raises(ValueError, match="result_key='greeted'"):
+            goapify_tool(greet, effects={"greeted": True}, result_key="greeted")
+
+
+class TestGoapifyToolAexecute:
+    """goapify_tool must populate aexecute for the async execution path."""
+
+    def test_aexecute_is_not_none(self) -> None:
+        action = goapify_tool(greet, effects={"greeted": True})
+        assert action.aexecute is not None
+
+    def test_aexecute_is_not_none_with_result_key(self) -> None:
+        action = goapify_tool(
+            greet, effects={"greeted": True}, result_key="greeting_text"
+        )
+        assert action.aexecute is not None
+
+    @pytest.mark.asyncio
+    async def test_aexecute_returns_effects(self) -> None:
+        action = goapify_tool(greet, effects={"greeted": True})
+        assert action.aexecute is not None
+        result = await action.aexecute({"name": "Alice"})
+        assert result == {"greeted": True}
+
+    @pytest.mark.asyncio
+    async def test_aexecute_captures_result_key(self) -> None:
+        action = goapify_tool(
+            greet,
+            effects={"greeted": True},
+            result_key="greeting_text",
+        )
+        assert action.aexecute is not None
+        result = await action.aexecute({"name": "Bob"})
+        assert result["greeted"] is True
+        assert result["greeting_text"] == "Hello, Bob!"
+
+    @pytest.mark.asyncio
+    async def test_aexecute_matches_sync_execute_output(self) -> None:
+        """Async and sync paths must produce identical results."""
+        action = goapify_tool(
+            greet,
+            effects={"greeted": True},
+            result_key="greeting_text",
+        )
+        assert action.execute is not None
+        assert action.aexecute is not None
+        sync_result = action.execute({"name": "Carol"})
+        async_result = await action.aexecute({"name": "Carol"})
+        assert sync_result == async_result
+
+    @pytest.mark.asyncio
+    async def test_aexecute_numeric_result_key(self) -> None:
+        action = goapify_tool(
+            add_numbers,
+            effects={"sum_ready": True},
+            result_key="sum_value",
+        )
+        assert action.aexecute is not None
+        result = await action.aexecute({"a": 5, "b": 3})
+        assert result["sum_ready"] is True
+        assert result["sum_value"] == 8
+
+    @pytest.mark.asyncio
+    async def test_aexecute_zero_arg_tool(self) -> None:
+        action = goapify_tool(
+            noop_tool,
+            effects={"noop_done": True},
+            result_key="noop_output",
+        )
+        assert action.aexecute is not None
+        result = await action.aexecute({})
+        assert result["noop_done"] is True
+        assert result["noop_output"] == "done"
+
+
 class TestGoapifyToolTypeError:
     """goapify_tool rejects non-BaseTool inputs."""
 

@@ -26,7 +26,7 @@ def double_number(x: int) -> int:
 @tool
 def greet(name: str) -> str:
     """Return a greeting."""
-    return f"hello {name}"
+    return f"Hello, {name}!"
 
 
 class TestGoapifyToolBasic:
@@ -124,7 +124,7 @@ class TestGoapifyToolResultKey:
         assert spec.execute is not None
         result = spec.execute({"name": "Bob"})
         assert result["greeted"] is True
-        assert result["greeting_text"] == "hello Bob"
+        assert result["greeting_text"] == "Hello, Bob!"
 
     def test_result_key_absent_from_action_spec_effects(self) -> None:
         """result_key must not pollute ActionSpec.effects — planning is boolean."""
@@ -154,6 +154,60 @@ class TestGoapifyToolResultKey:
         r_none = spec_none.execute({"name": "X"})
         r_omit = spec_omit.execute({"name": "X"})
         assert r_none == r_omit
+
+
+class TestGoapifyToolCollisionValidation:
+    """Construction-time guard: result_key must not overlap with effects keys."""
+
+    def test_colliding_result_key_raises_value_error(self) -> None:
+        with pytest.raises(ValueError, match="collides"):
+            goapify_tool(greet, effects={"greeted": True}, result_key="greeted")
+
+    def test_non_colliding_result_key_does_not_raise(self) -> None:
+        action = goapify_tool(
+            greet, effects={"greeted": True}, result_key="greeting_text"
+        )
+        assert action.name == "greet"
+
+    def test_result_key_none_never_raises(self) -> None:
+        action = goapify_tool(greet, effects={"greeted": True}, result_key=None)
+        assert action.name == "greet"
+
+
+class TestGoapifyToolAexecuteIntegration:
+    """aexecute must be set and produce output identical to the sync path."""
+
+    def test_aexecute_present_by_default(self) -> None:
+        action = goapify_tool(greet, effects={"greeted": True})
+        assert action.aexecute is not None
+
+    @pytest.mark.asyncio
+    async def test_aexecute_returns_effects_only_without_result_key(self) -> None:
+        action = goapify_tool(greet, effects={"greeted": True})
+        assert action.aexecute is not None
+        result = await action.aexecute({"name": "Alice"})
+        assert result == {"greeted": True}
+
+    @pytest.mark.asyncio
+    async def test_aexecute_captures_result_key(self) -> None:
+        action = goapify_tool(
+            greet, effects={"greeted": True}, result_key="greeting_text"
+        )
+        assert action.aexecute is not None
+        result = await action.aexecute({"name": "Bob"})
+        assert result["greeted"] is True
+        assert result["greeting_text"] == "Hello, Bob!"
+
+    @pytest.mark.asyncio
+    async def test_aexecute_output_matches_sync_execute(self) -> None:
+        action = goapify_tool(
+            double_number, effects={"doubled": True}, result_key="doubled_value"
+        )
+        assert action.execute is not None
+        assert action.aexecute is not None
+        sync_result = action.execute({"x": 7})
+        async_result = await action.aexecute({"x": 7})
+        assert sync_result == async_result
 
 
 class TestGoapifyToolRejects:
