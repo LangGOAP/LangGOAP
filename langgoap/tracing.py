@@ -63,11 +63,30 @@ class PlanningTracer(Protocol):
 
     def on_action_start(self, action: Any, state: Any) -> None: ...
 
-    def on_action_complete(self, result: Any) -> None: ...
+    def on_action_complete(self, result: Any) -> None:
+        """Called immediately after an action node returns.
+
+        ``result`` is the :class:`~langgoap.graph.state.GoapState` update
+        dict produced by :class:`~langgoap.graph.nodes.GoapExecutor`.  Key
+        fields to inspect:
+
+        * ``result.get("status")`` — ``"executing"`` on success,
+          ``"action_failed"`` on failure.
+        * ``result.get("execution_history", [])`` — list of
+          :class:`~langgoap.graph.state.ActionResult` objects for the
+          current planning round.
+        * ``result.get("world_state")`` — updated world state after the
+          action ran.
+
+        Implementations must **never** raise.
+        """
+        ...
 
     def on_replan(self, reason: str, new_plan: Any) -> None: ...
 
     def on_goal_achieved(self, final_state: Any) -> None: ...
+
+    def on_sensor_complete(self, sensor_name: str, updates: Any) -> None: ...
 
     # ------------------------------------------------------------------
     # Async hooks (parity with CLAUDE.md dual-implementation pattern)
@@ -87,6 +106,8 @@ class PlanningTracer(Protocol):
     async def aon_replan(self, reason: str, new_plan: Any) -> None: ...
 
     async def aon_goal_achieved(self, final_state: Any) -> None: ...
+
+    async def aon_sensor_complete(self, sensor_name: str, updates: Any) -> None: ...
 
 
 class NullTracer:
@@ -116,6 +137,9 @@ class NullTracer:
     def on_goal_achieved(self, final_state: Any) -> None:
         pass
 
+    def on_sensor_complete(self, sensor_name: str, updates: Any) -> None:
+        pass
+
     async def aon_plan_start(self, goal: Any, state: Any, strategy_name: str) -> None:
         pass
 
@@ -135,6 +159,9 @@ class NullTracer:
         pass
 
     async def aon_goal_achieved(self, final_state: Any) -> None:
+        pass
+
+    async def aon_sensor_complete(self, sensor_name: str, updates: Any) -> None:
         pass
 
 
@@ -168,6 +195,9 @@ class LoggingTracer:
     def on_goal_achieved(self, final_state: Any) -> None:
         logger.info("goal_achieved final_state=%r", final_state)
 
+    def on_sensor_complete(self, sensor_name: str, updates: Any) -> None:
+        logger.info("sensor_complete name=%s updates=%r", sensor_name, updates)
+
     async def aon_plan_start(self, goal: Any, state: Any, strategy_name: str) -> None:
         self.on_plan_start(goal, state, strategy_name)
 
@@ -189,6 +219,9 @@ class LoggingTracer:
     async def aon_goal_achieved(self, final_state: Any) -> None:
         self.on_goal_achieved(final_state)
 
+    async def aon_sensor_complete(self, sensor_name: str, updates: Any) -> None:
+        self.on_sensor_complete(sensor_name, updates)
+
 
 class MultiTracer:
     """Fan a single event out to multiple tracers.
@@ -201,6 +234,20 @@ class MultiTracer:
 
     def __init__(self, tracers: list[PlanningTracer]) -> None:
         self._tracers = list(tracers)
+
+    @property
+    def reflections(self) -> list[Any]:
+        """Aggregate reflections from every inner tracer that exposes them.
+
+        Enables :class:`~langgoap.graph.nodes.GoapPlanner` to surface
+        reflection context into :class:`~langgoap.graph.state.GoapState`
+        transparently when a :class:`~langgoap.reflexion.ReflexionTracer`
+        is composed inside a ``MultiTracer``.
+        """
+        result: list[Any] = []
+        for t in self._tracers:
+            result.extend(getattr(t, "reflections", []))
+        return result
 
     def _fan_sync(self, method: str, *args: Any) -> None:
         for t in self._tracers:
@@ -247,6 +294,9 @@ class MultiTracer:
     def on_goal_achieved(self, final_state: Any) -> None:
         self._fan_sync("on_goal_achieved", final_state)
 
+    def on_sensor_complete(self, sensor_name: str, updates: Any) -> None:
+        self._fan_sync("on_sensor_complete", sensor_name, updates)
+
     async def aon_plan_start(self, goal: Any, state: Any, strategy_name: str) -> None:
         await self._fan_async("aon_plan_start", goal, state, strategy_name)
 
@@ -267,6 +317,9 @@ class MultiTracer:
 
     async def aon_goal_achieved(self, final_state: Any) -> None:
         await self._fan_async("aon_goal_achieved", final_state)
+
+    async def aon_sensor_complete(self, sensor_name: str, updates: Any) -> None:
+        await self._fan_async("aon_sensor_complete", sensor_name, updates)
 
 
 def _utc_now() -> datetime:
@@ -602,6 +655,17 @@ class LangSmithTracer:
             outputs={"status": "goal_achieved", "final_state": _jsonable(final_state)}
         )
 
+    def on_sensor_complete(self, sensor_name: str, updates: Any) -> None:
+        """Record a sensor completion event as metadata on the root LangSmith run."""
+        if self._disabled or self._client is None or self._root_run_id is None:
+            return
+        self._safe(
+            "update_run",
+            self._client.update_run,
+            self._root_run_id,
+            extra={"metadata": {f"sensor_{sensor_name}": _jsonable(updates)}},
+        )
+
     # ------------------------------------------------------------------
     # Async hooks — langsmith.Client is thread-safe and uses its own
     # background sender thread, so delegating to the sync hooks is
@@ -628,6 +692,9 @@ class LangSmithTracer:
 
     async def aon_goal_achieved(self, final_state: Any) -> None:
         self.on_goal_achieved(final_state)
+
+    async def aon_sensor_complete(self, sensor_name: str, updates: Any) -> None:
+        self.on_sensor_complete(sensor_name, updates)
 
 
 __all__ = [

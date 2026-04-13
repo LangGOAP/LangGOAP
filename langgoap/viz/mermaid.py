@@ -121,6 +121,29 @@ def render_mermaid(
             status = "OK" if usage.satisfied else "VIOLATED"
             lines.append(f"    %%   {usage.key}: {usage.total:g}{bound} [{status}]")
 
+    # Infeasibility explanation as a note
+    if plan.metadata.csp is not None and plan.metadata.csp.explanation is not None:
+        explanation = plan.metadata.csp.explanation
+        note_lines = ["INFEASIBLE PLAN"]
+        for sf in explanation.resource_shortfalls:
+            if sf.available_max is not None:
+                note_lines.append(
+                    f"{sf.key}: {sf.required:g}/{sf.available_max:g} "
+                    f"(overrun: {sf.overrun:g})"
+                )
+            elif sf.available_min is not None:
+                note_lines.append(
+                    f"{sf.key}: {sf.required:g}>={sf.available_min:g} "
+                    f"(shortfall: {sf.overrun:g})"
+                )
+        if explanation.suggestion:
+            note_lines.append(explanation.suggestion)
+        # Build the Mermaid note block anchored to the first action
+        if node_ids:
+            note_content = "<br/>".join(note_lines)
+            lines.append("")
+            lines.append(f"    note right of {node_ids[0]}: {note_content}")
+
     return "\n".join(lines) + "\n"
 
 

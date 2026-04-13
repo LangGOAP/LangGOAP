@@ -109,6 +109,9 @@ class CSPMetadata:
             if no scheduling was performed.
         plans_evaluated: Number of candidate plans evaluated.
         scale_factor: Integer scaling factor used for CP-SAT (float → int).
+        explanation: Explanation of why the plan is infeasible, or ``None``
+            when the plan is feasible or when no explanation has been
+            computed.
     """
 
     status: CSPStatus
@@ -121,6 +124,7 @@ class CSPMetadata:
     makespan: timedelta | None = None
     plans_evaluated: int = 0
     scale_factor: int = 1000
+    explanation: Any = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.objective_values, MappingProxyType):
@@ -305,6 +309,17 @@ def validate_plan(
     if schedule_meta is not None and schedule_meta.status == CSPStatus.INFEASIBLE:
         final_status = CSPStatus.INFEASIBLE
 
+    # Compute infeasibility explanation when INFEASIBLE
+    explanation = None
+    if final_status == CSPStatus.INFEASIBLE:
+        from langgoap.planner.explain import explain_infeasibility
+
+        meta_for_explain = CSPMetadata(
+            status=final_status,
+            resource_usage=tuple(usage_list),
+        )
+        explanation = explain_infeasibility(plan, goal, meta_for_explain)
+
     elapsed = (time.monotonic() - t0) * 1000
     return CSPMetadata(
         status=final_status,
@@ -315,6 +330,7 @@ def validate_plan(
         makespan=schedule_meta.makespan if schedule_meta else None,
         plans_evaluated=1,
         scale_factor=scale,
+        explanation=explanation,
     )
 
 

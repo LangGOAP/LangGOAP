@@ -31,15 +31,31 @@ from langgoap.interpreter import (
 )
 from langgoap.planner.astar import plan
 from langgoap.planner.csp import CSPMetadata, CSPStatus, ResourceUsage, ScheduleEntry
+from langgoap.planner.explain import (
+    InfeasibilityExplanation,
+    NoPlanExplanation,
+    ResourceShortfall,
+    explain_infeasibility,
+    explain_no_plan,
+)
 from langgoap.planner.pipeline import plan as pipeline_plan
 from langgoap.planner.strategy import (
     AStarStrategy,
     CSPRefinementStrategy,
+    LazyDecompositionStrategy,
     PlanningStrategy,
     TwoPhasePipelineStrategy,
 )
 from langgoap.planner.types import Plan, PlanMetadata
+from langgoap.reflexion import Reflection, ReflexionTracer
 from langgoap.score import BendableScore, HardSoftScore, Score, SimpleScore
+from langgoap.sensors import (
+    AsyncSensor,
+    FunctionalSensor,
+    Sensor,
+    run_sensors_async,
+    run_sensors_sync,
+)
 from langgoap.serde import LangGoapSerializer, install_langgoap_serde
 from langgoap.state import PlanningState
 from langgoap.tracing import (
@@ -108,6 +124,7 @@ __all__ = [
     "PlanningStrategy",
     "AStarStrategy",
     "CSPRefinementStrategy",
+    "LazyDecompositionStrategy",
     "TwoPhasePipelineStrategy",
     # Scores
     "Score",
@@ -119,6 +136,12 @@ __all__ = [
     "CSPStatus",
     "ResourceUsage",
     "ScheduleEntry",
+    # Plan explanation
+    "InfeasibilityExplanation",
+    "NoPlanExplanation",
+    "ResourceShortfall",
+    "explain_infeasibility",
+    "explain_no_plan",
     # Types
     "CostFunction",
     "Maximize",
@@ -142,6 +165,15 @@ __all__ = [
     "ExecutionRecord",
     "StoreExecutionHistory",
     "compute_goal_hash",
+    # Sensors
+    "Sensor",
+    "AsyncSensor",
+    "FunctionalSensor",
+    "run_sensors_sync",
+    "run_sensors_async",
+    # Reflexion
+    "Reflection",
+    "ReflexionTracer",
     # Serde
     "LangGoapSerializer",
     "install_langgoap_serde",

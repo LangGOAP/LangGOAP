@@ -92,6 +92,36 @@ def render_ascii(
         if plan.metadata.csp.makespan is not None:
             lines.append(f"  makespan: {plan.metadata.csp.makespan.total_seconds():g}s")
 
+    # Infeasibility explanation
+    if plan.metadata.csp is not None and plan.metadata.csp.explanation is not None:
+        explanation = plan.metadata.csp.explanation
+        lines.append("")
+        lines.append("Infeasibility Explanation:")
+        if explanation.conflicting_constraints:
+            lines.append("  Conflicting constraints:")
+            for c in explanation.conflicting_constraints:
+                bound = ""
+                if c.max is not None:
+                    bound = f"max={c.max:g}"
+                if c.min is not None:
+                    bound = f"min={c.min:g}" if not bound else f"{bound}, min={c.min:g}"
+                lines.append(f"    - {c.key} ({bound}, weight={c.weight:g})")
+        if explanation.resource_shortfalls:
+            lines.append("  Resource shortfalls:")
+            for sf in explanation.resource_shortfalls:
+                if sf.available_max is not None:
+                    lines.append(
+                        f"    - {sf.key}: {sf.required:g} / {sf.available_max:g} "
+                        f"(overrun: {sf.overrun:g})"
+                    )
+                elif sf.available_min is not None:
+                    lines.append(
+                        f"    - {sf.key}: {sf.required:g} >= {sf.available_min:g} "
+                        f"(shortfall: {sf.overrun:g})"
+                    )
+        if explanation.suggestion:
+            lines.append(f"  Suggestion: {explanation.suggestion}")
+
     return "\n".join(lines) + "\n"
 
 

@@ -69,6 +69,19 @@ class GoapState(TypedDict, total=False):
         When ``goal`` is a :class:`MultiGoal` running in ``sequential``
         mode, the 0-based index of the sub-goal being worked on.
         Defaults to 0.
+    ``no_plan_explanation``
+        Serialised :class:`~langgoap.planner.explain.NoPlanExplanation`
+        (via ``.to_dict()``) produced when A* returns ``None``.  ``None``
+        when a plan was found.  Use
+        :meth:`~langgoap.planner.explain.NoPlanExplanation.from_dict` to
+        reconstruct the object.
+    ``reflection_context``
+        Ordered list of verbal reflection summaries produced by
+        :class:`~langgoap.reflexion.ReflexionTracer` after action failures.
+        Each entry is a human-readable string of the form
+        ``"[action_name] reflection → suggestion"``.  Set by the planner
+        node on each planning round so downstream LLM-evaluated conditions
+        can read them without coupling directly to the tracer.
     """
 
     world_state: dict[str, Any]
@@ -82,3 +95,5 @@ class GoapState(TypedDict, total=False):
     blacklisted_actions: list[str]
     action_failure_counts: dict[str, int]
     current_subgoal_index: int
+    no_plan_explanation: dict[str, Any] | None
+    reflection_context: list[str]

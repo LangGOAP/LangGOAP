@@ -6,7 +6,7 @@ and observer nodes wired together for the GOAP execution loop.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import RunnableConfig, RunnableLambda
@@ -19,8 +19,12 @@ from langgoap.goals import GoalSpec, MultiGoal
 from langgoap.graph.nodes import GoapExecutor, GoapObserver, GoapPlanner
 from langgoap.graph.state import GoapState
 from langgoap.history import StoreExecutionHistory
+from langgoap.sensors import AsyncSensor, Sensor
 from langgoap.serde import install_langgoap_serde
 from langgoap.tracing import PlanningTracer
+
+if TYPE_CHECKING:
+    from langgoap.planner.strategy import PlanningStrategy
 
 
 class GoapGraph:
@@ -45,6 +49,15 @@ class GoapGraph:
             world_state={"a": True},
         )
 
+    **Custom planning strategy**::
+
+        from langgoap.planner.strategy import LazyDecompositionStrategy
+        graph = GoapGraph(
+            actions=[action1, action2, ...],
+            strategy=LazyDecompositionStrategy(lookahead=2),
+        )
+        result = graph.invoke(goal=goal, world_state={})
+
     The graph structure is::
 
         START → planner → executor → observer ──→ END
@@ -56,12 +69,16 @@ class GoapGraph:
         self,
         actions: list[ActionSpec],
         *,
+        strategy: PlanningStrategy | None = None,
         tracer: PlanningTracer | None = None,
         history: StoreExecutionHistory | None = None,
+        sensors: list[Sensor | AsyncSensor] | None = None,
     ) -> None:
         self.actions = actions
+        self._strategy = strategy
         self._tracer = tracer
         self._history = history
+        self._sensors = sensors
 
     def compile(
         self,
@@ -105,7 +122,12 @@ class GoapGraph:
         # variant under ``invoke``.  Without this wiring, the planner
         # and observer would only ever see the sync ``__call__`` path
         # and their async tracer hooks would never fire (audit NS2).
-        planner = GoapPlanner(self.actions, tracer=self._tracer)
+        planner = GoapPlanner(
+            self.actions,
+            strategy=self._strategy,
+            tracer=self._tracer,
+            sensors=self._sensors,
+        )
         executor = GoapExecutor(tracer=self._tracer)
         observer = GoapObserver(
             self.actions, tracer=self._tracer, history=self._history

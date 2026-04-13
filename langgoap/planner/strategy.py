@@ -25,13 +25,16 @@ worked example of a custom strategy.
 
 from __future__ import annotations
 
+import time
+from dataclasses import replace
 from typing import Protocol, runtime_checkable
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
 from langgoap.planner.astar import plan as astar_plan
 from langgoap.planner.pipeline import plan as pipeline_plan
-from langgoap.planner.types import Plan
+from langgoap.planner.types import Plan, PlanMetadata
+from langgoap.score import SimpleScore
 from langgoap.state import PlanningState
 
 
@@ -134,9 +137,82 @@ class TwoPhasePipelineStrategy:
         )
 
 
+class LazyDecompositionStrategy:
+    """ADaPT-style incremental planning.
+
+    Plans only the first ``lookahead`` actions at each planning round.
+    After execution, the observer triggers replanning from the updated
+    world state.  The overall behaviour emerges from the GOAP loop's
+    existing replan machinery.
+
+    Works with any inner strategy (A*, TwoPhase, custom).  When the full
+    plan has fewer actions than ``lookahead``, the full plan is returned
+    unchanged.
+
+    Args:
+        lookahead: Maximum number of actions to keep per planning round.
+            ``1`` gives pure ADaPT behaviour (plan one, execute one,
+            replan); higher values trade more speculative planning for
+            fewer replan cycles.
+        inner: Inner planning strategy.  Defaults to
+            :class:`AStarStrategy` when ``None``.
+    """
+
+    def __init__(
+        self,
+        *,
+        lookahead: int = 1,
+        inner: PlanningStrategy | None = None,
+    ) -> None:
+        if lookahead < 1:
+            raise ValueError(f"lookahead must be >= 1, got {lookahead}")
+        self._lookahead = lookahead
+        self._inner: PlanningStrategy = inner or AStarStrategy()
+
+    def plan(
+        self,
+        start: PlanningState,
+        goal: GoalSpec,
+        actions: list[ActionSpec],
+        *,
+        blacklisted_actions: list[str] | None = None,
+    ) -> Plan | None:
+        full_plan = self._inner.plan(
+            start, goal, actions, blacklisted_actions=blacklisted_actions
+        )
+        if full_plan is None:
+            return None
+
+        # No truncation needed if the plan is already short enough
+        if len(full_plan) <= self._lookahead:
+            return full_plan
+
+        # Truncate to the first `lookahead` actions
+        truncated_actions = full_plan.actions[: self._lookahead]
+
+        # Recompute expected states and cost for the truncated plan
+        expected: list[PlanningState] = []
+        sim_state = start
+        total_cost = 0.0
+        for a in truncated_actions:
+            total_cost += a.get_cost(sim_state.to_dict())
+            sim_state = sim_state.apply(a.effects)
+            expected.append(sim_state)
+
+        # Preserve the inner strategy's metadata
+        return Plan(
+            actions=truncated_actions,
+            expected_states=tuple(expected),
+            total_cost=total_cost,
+            metadata=full_plan.metadata,
+            score=SimpleScore(scalar=total_cost),
+        )
+
+
 __all__ = [
     "PlanningStrategy",
     "AStarStrategy",
     "CSPRefinementStrategy",
+    "LazyDecompositionStrategy",
     "TwoPhasePipelineStrategy",
 ]

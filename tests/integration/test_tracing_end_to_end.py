@@ -45,6 +45,9 @@ class _RecordingTracer:
     def on_goal_achieved(self, final_state: Any) -> None:
         self.calls.append("on_goal_achieved")
 
+    def on_sensor_complete(self, sensor_name: str, updates: Any) -> None:
+        self.calls.append("on_sensor_complete")
+
     async def aon_plan_start(self, goal: Any, state: Any, strategy_name: str) -> None:
         self.calls.append("aon_plan_start")
 
@@ -65,6 +68,9 @@ class _RecordingTracer:
 
     async def aon_goal_achieved(self, final_state: Any) -> None:
         self.calls.append("aon_goal_achieved")
+
+    async def aon_sensor_complete(self, sensor_name: str, updates: Any) -> None:
+        self.calls.append("aon_sensor_complete")
 
 
 def _actions() -> list[ActionSpec]:

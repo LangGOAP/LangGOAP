@@ -25,7 +25,14 @@ from langgoap.history import (
     compute_goal_hash,
 )
 from langgoap.planner.astar import plan as astar_plan
+from langgoap.planner.explain import explain_no_plan
 from langgoap.planner.types import Plan
+from langgoap.sensors import (
+    AsyncSensor,
+    Sensor,
+    run_sensors_async,
+    run_sensors_sync,
+)
 from langgoap.state import PlanningState
 from langgoap.tracing import NullTracer, PlanningTracer
 from langgoap.types import ReplanStrategy
@@ -95,10 +102,12 @@ class GoapPlanner:
         *,
         strategy: PlanningStrategy | None = None,
         tracer: PlanningTracer | None = None,
+        sensors: list[Sensor | AsyncSensor] | None = None,
     ) -> None:
         self.actions = actions
         self._strategy = strategy
         self._tracer: PlanningTracer = tracer or NullTracer()
+        self._sensors: list[Sensor | AsyncSensor] = list(sensors) if sensors else []
 
     def _strategy_name(self, goal: GoalSpec | MultiGoal | None) -> str:
         """Human-readable label passed to ``on_plan_start``."""
@@ -293,8 +302,11 @@ class GoapPlanner:
                 )
 
         if result is None:
+            no_plan_expl = explain_no_plan(start, effective_goal, self.actions)
             logger.warning(
-                "A* found no plan for goal %s", dict(effective_goal.conditions)
+                "A* found no plan for goal %s — %s",
+                dict(effective_goal.conditions),
+                no_plan_expl.suggestion,
             )
             return (
                 {
@@ -302,6 +314,7 @@ class GoapPlanner:
                     "status": "no_plan",
                     "current_step": 0,
                     "replan_count": replan_count,
+                    "no_plan_explanation": no_plan_expl.to_dict(),
                     **extra_updates,
                 },
                 was_replan,
@@ -318,6 +331,8 @@ class GoapPlanner:
             "status": "executing",
             "current_step": 0,
             "replan_count": replan_count,
+            # Clear any stale no-plan explanation from a previous failed attempt.
+            "no_plan_explanation": None,
             **extra_updates,
         }
         if used_blacklisted:
@@ -325,9 +340,45 @@ class GoapPlanner:
             # gets a fresh start instead of being immediately re-blacklisted.
             updates["blacklisted_actions"] = []
             updates["action_failure_counts"] = {}
+        # Surface reflections from a ReflexionTracer (or MultiTracer containing
+        # one) into GoapState so downstream components (e.g. PromptConditions)
+        # can read them without coupling to the tracer directly.
+        reflections = getattr(self._tracer, "reflections", None)
+        if reflections:
+            updates["reflection_context"] = [
+                f"[{r.action_name}] {r.reflection} → {r.suggestion}"
+                for r in reflections
+            ]
         return updates, was_replan
 
+    def _run_sensors_sync(self, state: GoapState) -> dict[str, Any] | None:
+        """Run sensors and return world_state update, or None if no sensors."""
+        if not self._sensors:
+            return None
+        world_state = dict(state.get("world_state", {}))
+        sensor_results = run_sensors_sync(self._sensors, world_state)
+        for sensor_name, updates in sensor_results:
+            _safe_tracer_call(self._tracer, "on_sensor_complete", sensor_name, updates)
+        return world_state
+
+    async def _run_sensors_async(self, state: GoapState) -> dict[str, Any] | None:
+        """Run sensors async and return world_state update, or None if no sensors."""
+        if not self._sensors:
+            return None
+        world_state = dict(state.get("world_state", {}))
+        sensor_results = await run_sensors_async(self._sensors, world_state)
+        for sensor_name, updates in sensor_results:
+            await _safe_tracer_acall(
+                self._tracer, "aon_sensor_complete", sensor_name, updates
+            )
+        return world_state
+
     def __call__(self, state: GoapState) -> dict[str, Any]:
+        # Run sensors before planning
+        sensor_ws = self._run_sensors_sync(state)
+        if sensor_ws is not None:
+            state = {**state, "world_state": sensor_ws}
+
         goal = state.get("goal")
         world_state = state.get("world_state", {})
         strategy_name = self._strategy_name(goal)
@@ -351,10 +402,18 @@ class GoapPlanner:
             _safe_tracer_call(self._tracer, "on_replan", reason, plan)
         else:
             _safe_tracer_call(self._tracer, "on_plan_complete", plan, duration_ms)
+        # If sensors updated world_state, propagate it to the output
+        if sensor_ws is not None and "world_state" not in updates:
+            updates["world_state"] = sensor_ws
         return updates
 
     async def acall(self, state: GoapState) -> dict[str, Any]:
         """Async entry point — fires async tracer hooks."""
+        # Run sensors before planning
+        sensor_ws = await self._run_sensors_async(state)
+        if sensor_ws is not None:
+            state = {**state, "world_state": sensor_ws}
+
         goal = state.get("goal")
         world_state = state.get("world_state", {})
         strategy_name = self._strategy_name(goal)
@@ -380,6 +439,9 @@ class GoapPlanner:
             await _safe_tracer_acall(
                 self._tracer, "aon_plan_complete", plan, duration_ms
             )
+        # If sensors updated world_state, propagate it to the output
+        if sensor_ws is not None and "world_state" not in updates:
+            updates["world_state"] = sensor_ws
         return updates
 
 
