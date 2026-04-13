@@ -15,6 +15,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Checkpointer
 
 from langgoap.actions import ActionSpec
+from langgoap.conditions import AsyncConditionResolver, ConditionResolver
 from langgoap.goals import GoalSpec, MultiGoal
 from langgoap.graph.nodes import GoapExecutor, GoapObserver, GoapPlanner
 from langgoap.graph.state import GoapState
@@ -75,6 +76,7 @@ class GoapGraph:
         history: StoreExecutionHistory | None = None,
         sensors: list[Sensor | AsyncSensor] | None = None,
         guards: list[ActionGuard | AsyncActionGuard] | None = None,
+        resolvers: list[ConditionResolver | AsyncConditionResolver] | None = None,
     ) -> None:
         self.actions = actions
         self._strategy = strategy
@@ -82,6 +84,7 @@ class GoapGraph:
         self._history = history
         self._sensors = sensors
         self._guards = guards
+        self._resolvers = resolvers
 
     def compile(
         self,
@@ -130,6 +133,7 @@ class GoapGraph:
             strategy=self._strategy,
             tracer=self._tracer,
             sensors=self._sensors,
+            resolvers=self._resolvers,
         )
         executor = GoapExecutor(tracer=self._tracer, guards=self._guards)
         observer = GoapObserver(

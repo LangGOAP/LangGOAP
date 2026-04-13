@@ -35,6 +35,12 @@ from langgoap.history import (
 from langgoap.planner.astar import plan as astar_plan
 from langgoap.planner.explain import explain_no_plan
 from langgoap.planner.types import Plan
+from langgoap.conditions import (
+    AsyncConditionResolver,
+    ConditionResolver,
+    aresolve_conditions,
+    resolve_conditions,
+)
 from langgoap.sensors import (
     AsyncSensor,
     Sensor,
@@ -111,11 +117,15 @@ class GoapPlanner:
         strategy: PlanningStrategy | None = None,
         tracer: PlanningTracer | None = None,
         sensors: list[Sensor | AsyncSensor] | None = None,
+        resolvers: list[ConditionResolver | AsyncConditionResolver] | None = None,
     ) -> None:
         self.actions = actions
         self._strategy = strategy
         self._tracer: PlanningTracer = tracer or NullTracer()
         self._sensors: list[Sensor | AsyncSensor] = list(sensors) if sensors else []
+        self._resolvers: list[ConditionResolver | AsyncConditionResolver] = (
+            list(resolvers) if resolvers else []
+        )
 
     def _strategy_name(self, goal: GoalSpec | MultiGoal | None) -> str:
         """Human-readable label passed to ``on_plan_start``."""
@@ -387,6 +397,17 @@ class GoapPlanner:
         if sensor_ws is not None:
             state = {**state, "world_state": sensor_ws}
 
+        # Run condition resolvers to fill in UNKNOWN/missing keys
+        if self._resolvers:
+            ws = dict(state.get("world_state", {}))
+            # Collect all action precondition/effect keys (goal-independent)
+            resolver_keys: list[str] = []
+            for a in self.actions:
+                resolver_keys.extend(a.preconditions.keys())
+                resolver_keys.extend(a.effects.keys())
+            ws = resolve_conditions(self._resolvers, list(set(resolver_keys)), ws)
+            state = {**state, "world_state": ws}
+
         goal = state.get("goal")
         world_state = state.get("world_state", {})
         strategy_name = self._strategy_name(goal)
@@ -421,6 +442,16 @@ class GoapPlanner:
         sensor_ws = await self._run_sensors_async(state)
         if sensor_ws is not None:
             state = {**state, "world_state": sensor_ws}
+
+        # Run condition resolvers (async path)
+        if self._resolvers:
+            ws = dict(state.get("world_state", {}))
+            resolver_keys: list[str] = []
+            for a in self.actions:
+                resolver_keys.extend(a.preconditions.keys())
+                resolver_keys.extend(a.effects.keys())
+            ws = await aresolve_conditions(self._resolvers, list(set(resolver_keys)), ws)
+            state = {**state, "world_state": ws}
 
         goal = state.get("goal")
         world_state = state.get("world_state", {})

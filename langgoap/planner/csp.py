@@ -681,3 +681,163 @@ def optimize_plans(
     )
     # Return the first plan with infeasible metadata
     return plans[0], meta
+
+
+
+# ---------------------------------------------------------------------------
+# Public API — pareto_plans (Pareto-optimal plan enumeration)
+# ---------------------------------------------------------------------------
+
+
+def _dominates(
+    a_obj: dict[str, float],
+    b_obj: dict[str, float],
+    objectives: "MappingProxyType[str, Any]",
+) -> bool:
+    """Return True if plan-A dominates plan-B on all objectives.
+
+    A dominates B when A is at least as good on every objective AND strictly
+    better on at least one.  "Better" is direction-dependent:
+    MINIMIZE → lower is better, MAXIMIZE → higher is better.
+    """
+    from langgoap.types import ObjectiveDirection
+
+    at_least_as_good_count = 0
+    strictly_better_count = 0
+    for key, direction in objectives.items():
+        a_val = a_obj.get(key, 0.0)
+        b_val = b_obj.get(key, 0.0)
+        if direction == ObjectiveDirection.MINIMIZE:
+            if a_val > b_val:
+                return False
+            if a_val < b_val:
+                strictly_better_count += 1
+        else:  # MAXIMIZE
+            if a_val < b_val:
+                return False
+            if a_val > b_val:
+                strictly_better_count += 1
+        at_least_as_good_count += 1
+    return at_least_as_good_count > 0 and strictly_better_count > 0
+
+
+def pareto_plans(
+    plans: list["Plan"],
+    goal: GoalSpec,
+    *,
+    scale: int = 1000,
+    max_frontier: int | None = None,
+) -> list[tuple["Plan", CSPMetadata]]:
+    """Enumerate the Pareto-optimal subset of candidate plans.
+
+    From a finite set of candidate plans, returns the non-dominated subset
+    (Pareto frontier) ordered by primary objective value.  A plan A
+    *dominates* plan B when A is at least as good on **all** objectives and
+    strictly better on **at least one**.
+
+    Hard constraints are respected: plans violating any hard
+    :class:`~langgoap.goals.ConstraintSpec` are excluded from the frontier
+    entirely before dominance is computed.
+
+    When ``goal.objectives`` is empty or ``None``, every feasible plan is
+    non-dominated (no objective can distinguish them) and the full feasible
+    set is returned (subject to *max_frontier*) sorted by plan cost.
+
+    Args:
+        plans:         Candidate plans.  Typically produced by running A*
+                       with different starting states, action subsets, or by
+                       :class:`~langgoap.planner.strategy.LazyDecompositionStrategy`.
+        goal:          Goal spec with constraints and objectives.
+        scale:         Integer scaling factor for resource computations
+                       (forwarded to :func:`validate_plan`).
+        max_frontier:  Cap on the number of returned frontier plans.  The
+                       ``max_frontier`` plans with the best primary-objective
+                       value are kept.  ``None`` returns all non-dominated
+                       plans.
+
+    Returns:
+        A list of ``(Plan, CSPMetadata)`` tuples for non-dominated plans,
+        ordered by the primary (first) objective value.  Empty when all
+        plans are infeasible or the input list is empty.
+
+    Raises:
+        ValueError: When *plans* is empty.
+    """
+    if not plans:
+        raise ValueError("pareto_plans: plans list must not be empty")
+
+    t0 = time.monotonic()
+
+    # Step 1: validate all plans against hard constraints and collect metadata
+    feasible: list[tuple["Plan", CSPMetadata]] = []
+    for p in plans:
+        meta = validate_plan(p, goal, scale=scale)
+        if meta.status != CSPStatus.INFEASIBLE:
+            feasible.append((p, meta))
+
+    if not feasible:
+        return []
+
+    # Step 2: compute objective values for every feasible plan
+    plan_obj_values: list[dict[str, float]] = []
+    for p, meta in feasible:
+        obj: dict[str, float] = dict(meta.objective_values)
+        # Also include resource totals that match objective keys but weren't
+        # in meta.objective_values (e.g. from the pure-Python fast path)
+        if goal.objectives:
+            totals = compute_resource_totals(p.actions)
+            for key in goal.objectives:
+                if key not in obj:
+                    obj[key] = totals.get(key, 0.0)
+        plan_obj_values.append(obj)
+
+    # Step 3: find the non-dominated subset
+    if not goal.objectives:
+        # No objectives — all feasible plans are non-dominated; sort by cost
+        frontier = sorted(feasible, key=lambda t: t[0].total_cost)
+        if max_frontier is not None:
+            frontier = frontier[:max_frontier]
+        return frontier
+
+    n = len(feasible)
+    dominated = [False] * n
+    for i in range(n):
+        for j in range(n):
+            if i == j or dominated[j]:
+                continue
+            if _dominates(plan_obj_values[j], plan_obj_values[i], goal.objectives):
+                dominated[i] = True
+                break
+
+    frontier_items = [
+        (feasible[i], plan_obj_values[i]) for i in range(n) if not dominated[i]
+    ]
+
+    # Step 4: sort by primary objective
+    primary_key, primary_dir = next(iter(goal.objectives.items()))
+    from langgoap.types import ObjectiveDirection
+
+    reverse_sort = primary_dir == ObjectiveDirection.MAXIMIZE
+    frontier_items.sort(key=lambda t: t[1].get(primary_key, 0.0), reverse=reverse_sort)
+
+    frontier = [item for item, _ in frontier_items]
+    if max_frontier is not None:
+        frontier = frontier[:max_frontier]
+
+    # Annotate each metadata with total solver_time_ms for the whole call
+    elapsed_ms = (time.monotonic() - t0) * 1000
+    result: list[tuple["Plan", CSPMetadata]] = []
+    for p, meta in frontier:
+        annotated = CSPMetadata(
+            status=meta.status,
+            solver_time_ms=elapsed_ms,
+            resource_usage=meta.resource_usage,
+            objective_values=meta.objective_values,
+            schedule=meta.schedule,
+            makespan=meta.makespan,
+            plans_evaluated=len(plans),
+            scale_factor=scale,
+            explanation=meta.explanation,
+        )
+        result.append((p, annotated))
+    return result

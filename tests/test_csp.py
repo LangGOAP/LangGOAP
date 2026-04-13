@@ -15,6 +15,7 @@ from langgoap import (
     GoalSpec,
     Maximize,
     Minimize,
+    ObjectiveDirection,
     ResourceUsage,
     ScheduleEntry,
 )
@@ -659,3 +660,173 @@ class TestOptimizePlans:
         # plan with lower cost.
         assert meta.status in (CSPStatus.OPTIMAL, CSPStatus.FEASIBLE)
         assert chosen.action_names == ["high_gpu_low_cost"]
+
+
+# ---------------------------------------------------------------------------
+# pareto_plans
+# ---------------------------------------------------------------------------
+
+
+from langgoap.planner.csp import pareto_plans
+
+
+class TestParetoPlans:
+    """Tests for pareto_plans() — Pareto-optimal plan enumeration."""
+
+    # Helper: build an action with named resource totals
+    @staticmethod
+    def _plan_with_resources(**resources: float) -> Plan:
+        name = "_".join(f"{k}{v}" for k, v in resources.items())
+        action = make_action(name, eff={"done": True}, resources=resources)
+        return make_plan(action)
+
+    def test_raises_on_empty_plans(self) -> None:
+        goal = GoalSpec(conditions={"done": True})
+        with pytest.raises(ValueError, match="must not be empty"):
+            pareto_plans([], goal)
+
+    def test_single_plan_always_on_frontier(self) -> None:
+        p = self._plan_with_resources(cost=10.0, quality=5.0)
+        goal = GoalSpec(
+            conditions={"done": True},
+            objectives=MappingProxyType({"cost": ObjectiveDirection.MINIMIZE}),
+        )
+        frontier = pareto_plans([p], goal)
+        assert len(frontier) == 1
+        assert frontier[0][0] is p
+
+    def test_dominated_plan_excluded(self) -> None:
+        """Plan A (cost=5, quality=8) dominates plan B (cost=8, quality=5)
+        on both MINIMIZE cost and MAXIMIZE quality."""
+        a = self._plan_with_resources(cost=5.0, quality=8.0)
+        b = self._plan_with_resources(cost=8.0, quality=5.0)
+        goal = GoalSpec(
+            conditions={"done": True},
+            objectives=MappingProxyType(
+                {
+                    "cost": ObjectiveDirection.MINIMIZE,
+                    "quality": ObjectiveDirection.MAXIMIZE,
+                }
+            ),
+        )
+        frontier = pareto_plans([a, b], goal)
+        names = [f[0].action_names for f in frontier]
+        # Only A should be on the frontier — B is strictly dominated
+        assert ["cost5.0_quality8.0"] in names
+        assert ["cost8.0_quality5.0"] not in names
+
+    def test_two_incomparable_plans_both_on_frontier(self) -> None:
+        """A (low cost, low quality) and B (high cost, high quality) are
+        incomparable — neither dominates the other."""
+        a = self._plan_with_resources(cost=3.0, quality=2.0)
+        b = self._plan_with_resources(cost=9.0, quality=9.0)
+        goal = GoalSpec(
+            conditions={"done": True},
+            objectives=MappingProxyType(
+                {
+                    "cost": ObjectiveDirection.MINIMIZE,
+                    "quality": ObjectiveDirection.MAXIMIZE,
+                }
+            ),
+        )
+        frontier = pareto_plans([a, b], goal)
+        assert len(frontier) == 2
+
+    def test_infeasible_plan_excluded_from_frontier(self) -> None:
+        """A plan violating a hard constraint must not appear on the frontier."""
+        feasible = self._plan_with_resources(cost=5.0)
+        infeasible = self._plan_with_resources(cost=50.0)
+        goal = GoalSpec(
+            conditions={"done": True},
+            constraints=(ConstraintSpec(key="cost", max=10.0, level="hard"),),
+            objectives=MappingProxyType({"cost": ObjectiveDirection.MINIMIZE}),
+        )
+        frontier = pareto_plans([feasible, infeasible], goal)
+        assert len(frontier) == 1
+        assert frontier[0][0] is feasible
+
+    def test_all_infeasible_returns_empty(self) -> None:
+        a = self._plan_with_resources(cost=100.0)
+        b = self._plan_with_resources(cost=200.0)
+        goal = GoalSpec(
+            conditions={"done": True},
+            constraints=(ConstraintSpec(key="cost", max=10.0, level="hard"),),
+            objectives=MappingProxyType({"cost": ObjectiveDirection.MINIMIZE}),
+        )
+        frontier = pareto_plans([a, b], goal)
+        assert frontier == []
+
+    def test_max_frontier_cap_applied(self) -> None:
+        """max_frontier caps the number of returned plans.
+
+        cost=i, quality=i gives a true trade-off: lower cost means lower
+        quality and vice-versa.  None of the 10 plans dominates another on
+        (MINIMIZE cost, MAXIMIZE quality) because improving cost always
+        worsens quality.  All 10 land on the frontier; max_frontier=3
+        trims to 3.
+        """
+        # cost=i (minimize), quality=i (maximize) →
+        # each plan trades cost for quality: none dominates another.
+        plans = [
+            self._plan_with_resources(cost=float(i), quality=float(i))
+            for i in range(10)
+        ]
+        goal = GoalSpec(
+            conditions={"done": True},
+            objectives=MappingProxyType(
+                {
+                    "cost": ObjectiveDirection.MINIMIZE,
+                    "quality": ObjectiveDirection.MAXIMIZE,
+                }
+            ),
+        )
+        frontier = pareto_plans(plans, goal, max_frontier=3)
+        assert len(frontier) == 3
+
+    def test_sorted_by_primary_objective_minimize(self) -> None:
+        """Frontier is sorted ascending on MINIMIZE objective."""
+        p1 = self._plan_with_resources(cost=9.0)
+        p2 = self._plan_with_resources(cost=2.0)
+        p3 = self._plan_with_resources(cost=5.0)
+        goal = GoalSpec(
+            conditions={"done": True},
+            objectives=MappingProxyType({"cost": ObjectiveDirection.MINIMIZE}),
+        )
+        frontier = pareto_plans([p1, p2, p3], goal)
+        costs = [f[1].objective_values.get("cost", f[0].total_cost) for f in frontier]
+        assert costs == sorted(costs)
+
+    def test_sorted_by_primary_objective_maximize(self) -> None:
+        """Frontier is sorted descending on MAXIMIZE objective."""
+        p1 = self._plan_with_resources(quality=3.0)
+        p2 = self._plan_with_resources(quality=7.0)
+        p3 = self._plan_with_resources(quality=1.0)
+        goal = GoalSpec(
+            conditions={"done": True},
+            objectives=MappingProxyType({"quality": ObjectiveDirection.MAXIMIZE}),
+        )
+        frontier = pareto_plans([p1, p2, p3], goal)
+        # With a single MAXIMIZE objective, all plans are non-dominated; sorted desc
+        qualities = [f[0].total_cost for f in frontier]  # use plan order as proxy
+        assert frontier[0][0] is p2  # highest quality first
+
+    def test_no_objectives_returns_all_feasible_sorted_by_cost(self) -> None:
+        """When goal has no objectives, all feasible plans are returned sorted by cost."""
+        p_cheap = make_plan(make_action("cheap", eff={"done": True}))
+        p_expensive = make_plan(make_action("expensive", eff={"done": True}, resources={"cost": 100.0}))
+        goal = GoalSpec(conditions={"done": True})
+        frontier = pareto_plans([p_expensive, p_cheap], goal)
+        assert len(frontier) == 2
+        # Cheaper plan first
+        assert frontier[0][0].total_cost <= frontier[1][0].total_cost
+
+    def test_metadata_includes_plans_evaluated_count(self) -> None:
+        plans = [self._plan_with_resources(cost=float(i)) for i in range(4)]
+        goal = GoalSpec(
+            conditions={"done": True},
+            objectives=MappingProxyType({"cost": ObjectiveDirection.MINIMIZE}),
+        )
+        frontier = pareto_plans(plans, goal)
+        for _, meta in frontier:
+            assert meta.plans_evaluated == 4
+

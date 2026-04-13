@@ -2,6 +2,15 @@
 
 from langgoap._version import __version__
 from langgoap.actions import ActionSpec, GoapAction, goap_action
+from langgoap.conditions import (
+    AsyncConditionResolver,
+    ConditionResolver,
+    ConditionStatus,
+    FunctionalConditionResolver,
+    PromptConditionResolver,
+    aresolve_conditions,
+    resolve_conditions,
+)
 from langgoap.constraints import (
     BuilderOutput,
     ChainOutput,
@@ -45,7 +54,13 @@ from langgoap.interpreter import (
     InterpretedObjective,
 )
 from langgoap.planner.astar import plan
-from langgoap.planner.csp import CSPMetadata, CSPStatus, ResourceUsage, ScheduleEntry
+from langgoap.planner.csp import (
+    CSPMetadata,
+    CSPStatus,
+    ResourceUsage,
+    ScheduleEntry,
+    pareto_plans,
+)
 from langgoap.planner.explain import (
     InfeasibilityExplanation,
     NoPlanExplanation,
@@ -54,6 +69,7 @@ from langgoap.planner.explain import (
     explain_no_plan,
 )
 from langgoap.planner.pipeline import plan as pipeline_plan
+from langgoap.planner.repair import RepairStrategy
 from langgoap.planner.strategy import (
     AnytimePlanningStrategy,
     AStarStrategy,
@@ -103,6 +119,14 @@ __all__ = [
     "ActionSpec",
     "GoapAction",
     "goap_action",
+    # Conditions (three-valued logic + LLM-evaluated conditions)
+    "AsyncConditionResolver",
+    "ConditionResolver",
+    "ConditionStatus",
+    "FunctionalConditionResolver",
+    "PromptConditionResolver",
+    "aresolve_conditions",
+    "resolve_conditions",
     # Goals
     "ConstraintSpec",
     "Goal",
@@ -144,6 +168,7 @@ __all__ = [
     "AnytimePlanningStrategy",
     "CSPRefinementStrategy",
     "LazyDecompositionStrategy",
+    "RepairStrategy",
     "TwoPhasePipelineStrategy",
     # Guards
     "ActionGuard",
@@ -164,6 +189,7 @@ __all__ = [
     "CSPStatus",
     "ResourceUsage",
     "ScheduleEntry",
+    "pareto_plans",
     # Plan explanation
     "InfeasibilityExplanation",
     "NoPlanExplanation",
