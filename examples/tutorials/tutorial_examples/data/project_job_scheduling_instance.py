@@ -1,12 +1,9 @@
-r"""Multi-mode RCPSP instance derived from OptaPlanner's example.
+r"""Multi-mode RCPSP instance derived from standard benchmark data.
 
 Provenance
 ----------
-Structurally adapted from
-``research/repos/incubator-kie-optaplanner/optaplanner-examples/data/
-projectjobscheduling/import/j10.mm/j1011_7.mm`` — one of the 10-job
-multi-mode instances in OptaPlanner's ``projectjobscheduling`` example,
-which itself ports the PSPLIB / RCPSP benchmark suite.
+Derived from the PSPLIB / RCPSP benchmark suite (specifically a
+10-job multi-mode instance, ``j1011_7.mm``).
 
 The original instance has 12 jobs (10 real + source + sink) with 3
 modes each and 2 renewable + 2 non-renewable resources.  This

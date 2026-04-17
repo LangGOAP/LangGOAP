@@ -110,9 +110,9 @@ concrete shipping artifact.
 |:-------------|:------------------|
 | Planning, optimization, and NL interpretation core | `csp.py`, `interpreter.py`, `score.py`, `strategy.py`, async parity across all graph nodes |
 | Low-code LangGraph path | `integrations/prebuilt.py`, `integrations/tools.py`, `integrations/subgraph.py` — all three layers |
-| OptaPlanner-style scoring + GOAP + LangGraph | `score.py`, `constraints.py`, `planner/strategy.py`, `docs/optaplanner_mapping.md` |
+| Tiered scoring + GOAP + LangGraph | `score.py`, `constraints.py`, `planner/strategy.py`, `docs/optaplanner_mapping.md` |
 | Tutorial catalog | 15 notebooks under `examples/tutorials/` + 1:1 integration tests |
-| OptaPlanner example GOAPifications | Notebooks 4–8 (cloud balancing, vehicle routing, nurse rostering, project job scheduling, task assigning) with data fixtures under `tutorial_examples/data/` |
+| Benchmark GOAPifications | Notebooks 4–8 (cloud balancing, vehicle routing, nurse rostering, project job scheduling, task assigning) with data fixtures under `tutorial_examples/data/` |
 
 ## Residual / Deferred Items
 

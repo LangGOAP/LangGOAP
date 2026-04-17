@@ -5,7 +5,7 @@ description = "Goal-Oriented Action Planning framework for LangGraph with constr
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.10,<3.15"
+requires-python = ">=3.10"
 authors = [
     { name = "Brian Sam-Bodden", email = "bsb@integrallis.com" },
     { name = "Integrallis Software", email = "info@integrallis.com" },
@@ -33,10 +33,10 @@ classifiers = [
 dependencies = [
     "langgraph>=1.0.0,<2.0.0",
     "langgraph-checkpoint>=4.0.0,<5.0.0",
+    "ortools>=9.8",
 ]
 
 [project.optional-dependencies]
-optimization = ["ortools>=9.8"]
 checkpoint-postgres = ["langgraph-checkpoint-postgres>=3.0.0,<4.0.0"]
 checkpoint-redis = ["langgraph-checkpoint-redis>=0.4.0,<1.0.0"]
 
@@ -86,6 +86,7 @@ markers = [
 ]
 filterwarnings = [
     "ignore::DeprecationWarning:testcontainers.core.waiting_utils",
+    "ignore:'asyncio.iscoroutinefunction' is deprecated:DeprecationWarning:langchain_core",
 ]
 
 [tool.black]

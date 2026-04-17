@@ -37,7 +37,7 @@ What this tutorial spotlights
    ``ConstraintBuilder`` variant, and the integration test pins that
    the two produce structurally equivalent
    :class:`~langgoap.goals.GoalSpec` instances.  This is the
-   OptaPlanner ``ConstraintProvider`` analogue and the reason
+   fluent constraint-provider pattern and the reason
    ``GoalSpec.from_builder`` exists.
 
 GOAP modelling

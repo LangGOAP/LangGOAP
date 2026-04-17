@@ -20,8 +20,6 @@ from langgoap.goals import GoalSpec
 from langgoap.planner.astar import plan as astar_plan
 from langgoap.state import PlanningState
 
-ortools = pytest.importorskip("ortools")
-
 
 def _run_pipeline(
     actions: list[ActionSpec],

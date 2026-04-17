@@ -44,8 +44,6 @@ from langgoap.score import HardSoftScore
 from langgoap.state import PlanningState
 from langgoap.viz import render_ascii_gantt
 
-pytest.importorskip("ortools", reason="temporal match cellar tutorial exercises CP-SAT")
-
 # ---------------------------------------------------------------------------
 # Pinned totals — derived from the domain constants, *not* duplicated.
 # ---------------------------------------------------------------------------

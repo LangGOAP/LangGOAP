@@ -24,7 +24,7 @@ runnable documentation; the integration test is the source of truth.
 ### Tier 2 — Intermediate workflows
 
 4. [`cloud_balancing.ipynb`](cloud_balancing.ipynb) — VM bin-packing with
-   CSP resource constraints (from OptaPlanner examples).
+   CSP resource constraints (standard benchmark problem).
 5. [`vehicle_routing.ipynb`](vehicle_routing.ipynb) — delivery routing with
    capacity constraints and temporal windows.
 6. [`nurse_rostering.ipynb`](nurse_rostering.ipynb) — shift assignment with

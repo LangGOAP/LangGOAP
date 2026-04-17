@@ -26,7 +26,7 @@ Complete end-to-end walkthroughs across three tiers of complexity.
 3. `hungry_agent.ipynb` — natural-language goal + cost-driven action
    selection.
 
-**Tier 2 — OptaPlanner GOAPifications + workflow agents**
+**Tier 2 — Constraint optimization + workflow agents**
 
 4. `cloud_balancing.ipynb` — VM bin-packing with the `create_goap_agent`
    one-liner.
@@ -79,7 +79,7 @@ tutorials/hungry_agent
 ```{toctree}
 :hidden:
 :maxdepth: 1
-:caption: Tier 2 — OptaPlanner GOAPifications + workflow agents
+:caption: Tier 2 — Constraint optimization + workflow agents
 
 tutorials/cloud_balancing
 tutorials/vehicle_routing

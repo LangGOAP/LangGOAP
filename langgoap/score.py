@@ -1,6 +1,6 @@
 """Score hierarchy for plan evaluation.
 
-LangGoap's Score hierarchy is modelled on OptaPlanner's ``Score`` types:
+LangGoap uses a tiered score hierarchy for comparing plans:
 
 * :class:`SimpleScore` — one scalar; used when a plan has no constraint
   context (e.g. after pure A* planning).
@@ -17,8 +17,8 @@ Sign convention:
     violations contribute negative values; maximize objectives contribute
     positive values.
 
-This matches OptaPlanner's ``penalize(amount)`` / ``reward(amount)``
-convention where rewards can be positive and penalties are negative.
+Rewards can be positive and penalties are negative (penalize/reward
+convention).
 
 Comparison is lexicographic within one subclass; comparing across
 subclasses raises ``TypeError`` to force callers to stay within a single

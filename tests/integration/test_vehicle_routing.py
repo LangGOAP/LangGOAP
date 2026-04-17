@@ -1,8 +1,8 @@
 r"""Integration test for the Vehicle Routing tutorial (Tier 2).
 
 Exercises the full A\* → CSP pipeline on a 2-vehicle / 4-customer
-subset of OptaPlanner's ``cvrp-32customers`` instance.  The CSP
-phase is expected to:
+subset of a standard CVRP benchmark instance.  The CSP phase is
+expected to:
 
 - Enforce per-vehicle ``load_<v>`` hard capacity constraints
 - Build a precedence chain per vehicle from shared ``<v>_at_<loc>``
@@ -14,7 +14,7 @@ phase is expected to:
 Helpers live in ``examples/tutorials/tutorial_examples/vehicle_routing.py``
 and the instance fixture is at
 ``examples/tutorials/tutorial_examples/data/vehicle_routing_instance.py``
-(provenance: OptaPlanner ``cvrp-32customers``).
+(derived from standard benchmark data).
 """
 
 from __future__ import annotations
@@ -36,8 +36,6 @@ from tutorial_examples.vehicle_routing import (
 from langgoap import ConstraintSpec, CSPStatus, GoalSpec, GoapGraph
 from langgoap.planner.pipeline import plan as pipeline_plan
 from langgoap.state import PlanningState
-
-pytest.importorskip("ortools", reason="vehicle routing tutorial exercises CP-SAT")
 
 
 class TestVehicleRoutingFeasible:

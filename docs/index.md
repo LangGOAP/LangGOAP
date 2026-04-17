@@ -63,7 +63,7 @@ tool executes and re-plans on failure — no free-form ReAct loop.
   CP-SAT refines or replaces it when the goal has constraints or
   objectives.
 - **Score hierarchy**: `SimpleScore`, `HardSoftScore`, `BendableScore`
-  with OptaPlanner-aligned sign convention.
+  with hard/soft sign convention (`hard <= 0` for feasibility).
 - **Fluent `ConstraintBuilder`** for hard/soft resource constraints and
   weighted objectives.
 - **Temporal scheduling** with CP-SAT `IntervalVar` and Gantt rendering.
@@ -80,10 +80,9 @@ tool executes and re-plans on failure — no free-form ReAct loop.
 
 ```bash
 pip install langgoap
-pip install "langgoap[optimization]"   # add OR-Tools CP-SAT
 ```
 
-Requires Python 3.10+.
+Requires Python 3.10+. OR-Tools CP-SAT is included as a core dependency.
 
 ## Documentation layout
 

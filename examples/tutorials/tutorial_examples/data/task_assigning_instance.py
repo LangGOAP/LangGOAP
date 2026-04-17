@@ -1,18 +1,15 @@
-r"""Task Assigning instance derived from OptaPlanner's example.
+r"""Task Assigning instance derived from standard benchmark data.
 
 Provenance
 ----------
-Structurally adapted from
-``research/repos/incubator-kie-optaplanner/optaplanner-examples/data/
-taskassigning/unsolved/24tasks-8employees.json`` and the domain model at
-``research/repos/.../taskassigning/domain/{Task,Employee,Affinity,Priority}.java``.
+Derived from reference benchmark data for the task-assigning problem
+(24 tasks x 8 employees x 6 skills x 4 task types, scored with a
+``BendableScore`` of 1 hard level + 4 soft levels).
 
-OptaPlanner's instance has 24 tasks × 8 employees × 6 skills × 4
-task types scored with a ``BendableScore`` (1 hard level + 4 soft
-levels).  We collapse the problem to **6 tasks × 3 employees × 4
-skills × 4 task types** and squash OptaPlanner's multi-level soft
-score into a single weighted ``weighted_delay`` resource so the
-current LangGoap ``HardSoftScore`` covers it.  The mapping is:
+We collapse the problem to **6 tasks x 3 employees x 4 skills x 4
+task types** and squash the multi-level soft score into a single
+weighted ``weighted_delay`` resource so the current LangGoap
+``HardSoftScore`` covers it.  The mapping is:
 
 - **Hard constraint — no missing skills** → skill matching at
   action-build time (unqualified employees have no action to take
@@ -57,7 +54,7 @@ Entities
       t5  steel  compliance      MINOR
       t6  paper  root_cause      MINOR
 
-Affinity (employee → task type, using OptaPlanner's enum):
+Affinity (employee -> task type, using the affinity model):
   HIGH=1 (natural fit), MEDIUM=2, LOW=3, NONE=no entry (skill filter already
   blocks unqualified pairs so NONE is effectively unreachable here).
 """
@@ -152,9 +149,9 @@ TASKS: tuple[Task, ...] = (
 # Priority weights
 # ---------------------------------------------------------------------------
 
-# OptaPlanner uses separate soft levels per priority.  We flatten that into a
-# single weighted_delay resource by multiplying the effective duration by a
-# priority weight — critical tasks are the most expensive to delay.
+# The original benchmark uses separate soft levels per priority.  We flatten
+# that into a single weighted_delay resource by multiplying the effective
+# duration by a priority weight — critical tasks are the most expensive to delay.
 PRIORITY_WEIGHT: dict[str, int] = {
     "critical": 4,
     "major": 2,

@@ -36,7 +36,7 @@ CATALOG: dict[str, list[str]] = {
         "directory_handler.ipynb",
         "robot_navigation.ipynb",
         "hungry_agent.ipynb",
-        # Tier 2 — OptaPlanner GOAPifications + workflow agents
+        # Tier 2 — Constraint optimization + workflow agents
         "cloud_balancing.ipynb",
         "vehicle_routing.ipynb",
         "nurse_rostering.ipynb",

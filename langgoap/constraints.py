@@ -1,7 +1,7 @@
 """Fluent builder for CSP constraints and objectives.
 
 Lets users construct ``ConstraintSpec`` tuples and objective maps in a
-readable style inspired by OptaPlanner's ``ConstraintProvider``::
+readable fluent style::
 
     from langgoap.constraints import ConstraintBuilder
 

@@ -1,9 +1,8 @@
 """Planning strategy hierarchy.
 
-OptaPlanner defines a `Solver` that runs one or more `Phase` instances
-(construction heuristic → local search → …).  LangGoap mirrors that
-idea with the :class:`PlanningStrategy` Protocol.  A strategy takes a
-start state, a goal, and a list of actions, and returns a single
+LangGoap supports pluggable planning strategies via the
+:class:`PlanningStrategy` Protocol.  A strategy takes a start state,
+a goal, and a list of actions, and returns a single
 :class:`~langgoap.planner.types.Plan` (or ``None``).
 
 Concrete strategies:
@@ -19,8 +18,7 @@ Concrete strategies:
   module.
 
 A strategy is typed as a Protocol so user code can subclass or duck-
-type any implementation.  See ``docs/optaplanner_mapping.md`` for a
-worked example of a custom strategy.
+type any implementation.
 """
 
 from __future__ import annotations

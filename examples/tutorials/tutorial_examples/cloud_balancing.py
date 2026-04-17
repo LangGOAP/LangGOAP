@@ -1,9 +1,9 @@
-"""Cloud Balancing — OptaPlanner-style bin-packing in LangGoap.
+"""Cloud Balancing — the classic cloud-balancing bin-packing problem in LangGoap.
 
-Translates OptaPlanner's ``CloudBalancing`` example into a GOAP
-problem: every process must be assigned to exactly one computer, no
-computer may exceed its cpu / memory / network capacity, and the
-total USD cost of the assignment should be minimized.
+Models the cloud-balancing assignment problem as a GOAP problem: every
+process must be assigned to exactly one computer, no computer may
+exceed its cpu / memory / network capacity, and the total USD cost
+of the assignment should be minimized.
 
 GOAP modelling
 --------------

@@ -17,9 +17,8 @@ plan **is** a compiled `StateGraph`.
 - **Constraint satisfaction and optimization via OR-Tools CP-SAT**
   (`langgoap.planner.csp`). Hard/soft resource constraints, weighted
   multi-objective optimization, temporal scheduling with `IntervalVar`,
-  multi-plan selection with `BoolVar`, and a pure-Python fast path when
-  ortools is not installed. Install the optional extra with
-  `pip install langgoap[optimization]`.
+  multi-plan selection with `BoolVar`, and a pure-Python fast path for
+  simple resource validation.
 - **Natural-language goal interpretation** (`langgoap.interpreter`).
   Provider-agnostic `GoalInterpreter` backed by `BaseChatModel`
   structured output. `GoapGraph.invoke_nl()` / `ainvoke_nl()` accept a
@@ -37,9 +36,8 @@ plan **is** a compiled `StateGraph`.
 - **Error recovery**: the observer tracks per-action failures,
   blacklists actions that exceed a configurable threshold, and the
   planner filters out blacklisted actions with a fallback re-plan.
-- **Graceful ortools fallback** via `_require_ortools()` with a clear
-  `ImportError` message. CSP features degrade cleanly when the extra is
-  missing.
+- **OR-Tools CP-SAT** is a core dependency — constraint optimization,
+  temporal scheduling, and multi-plan selection are always available.
 
 ### Low-code path for existing LangGraph applications
 
@@ -64,7 +62,7 @@ implemented in `langgoap.integrations`:
   `blacklisted_actions`, `execution_history`) stay private; the parent
   graph sees only the declared `input_key` and `output_key`.
 
-### OptaPlanner-style scoring unified with GOAP and LangGraph
+### Tiered scoring unified with GOAP and LangGraph
 
 - **Score hierarchy** (`langgoap.score`): `Score` ← `SimpleScore` /
   `HardSoftScore` / `BendableScore`. Every subclass exposes a
@@ -90,9 +88,9 @@ implemented in `langgoap.integrations`:
   `PlanningStrategy` Protocol with concrete `AStarStrategy`,
   `CSPRefinementStrategy`, and `TwoPhasePipelineStrategy`. User-defined
   strategies conform to the Protocol and are accepted by
-  `GoapPlanner(strategy=...)`. OptaPlanner's `Move`/`Phase`/
-  `ScoreDirector` concepts map to CP-SAT internals — see
-  `docs/optaplanner_mapping.md` for the full table.
+  `GoapPlanner(strategy=...)`. Move, phase, and score-director
+  concepts from constraint-solver literature map to CP-SAT internals —
+  see `docs/optaplanner_mapping.md` for the full table.
 - **Two-phase pipeline** (`langgoap.planner.pipeline`): A* produces a
   candidate plan, then CSP (if the goal has constraints or
   objectives) refines or replaces it with a better alternative.
@@ -115,7 +113,7 @@ shared `examples/tutorials/tutorial_examples/` package.
    cost-driven action selection on the classic "I'm tired and hungry"
    example.
 
-**Tier 2 — OptaPlanner GOAPifications + workflow agents**
+**Tier 2 — Constraint optimization + workflow agents**
 
 4. `cloud_balancing.ipynb` — VM bin-packing with resource constraints,
    `create_goap_agent` one-liner.
@@ -146,15 +144,15 @@ shared `examples/tutorials/tutorial_examples/` package.
     NL intake, A* → CSP, hard/soft scoring, temporal scheduling,
     visualization, and tracing.
 
-### OptaPlanner example GOAPifications
+### Benchmark GOAPifications
 
 Notebooks 4–8 in the Tier 2 list are direct GOAPifications of
-OptaPlanner example problems (cloud balancing, vehicle routing, nurse
+standard benchmark problems (cloud balancing, vehicle routing, nurse
 rostering, project job scheduling, task assigning). Every instance is
 derived from a small fixture committed under
 `examples/tutorials/tutorial_examples/data/` with provenance headers.
-`docs/optaplanner_mapping.md` explains how each OptaPlanner concept
-maps to a LangGoap class.
+`docs/optaplanner_mapping.md` explains how constraint-solver concepts
+map to LangGoap classes.
 
 ### Observability, history, and visualization
 
@@ -272,7 +270,7 @@ recursive HTN-style decomposition, learned cost functions from
 execution history, bundled OpenTelemetry adapter (LangSmith adapter
 ships in-tree as `LangSmithTracer`),
 multi-agent peer coordination beyond sequential `MultiGoal`, interactive
-HTML/D3 visualization, custom `Move`/`Phase`/`Tabu`/`SimulatedAnnealing`
+HTML/D3 visualization, custom move/phase/tabu/simulated-annealing
 classes (CP-SAT implements these at a lower level), `CostNormalizer`
 (`DESIGN.md` §14.1 — superseded by the Score hierarchy),
 strict `WorldState` `TypedDict` schema enforcement (`DESIGN.md` §14.2

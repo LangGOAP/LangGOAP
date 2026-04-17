@@ -1,11 +1,8 @@
-"""Vehicle routing instance derived from OptaPlanner's CVRP example.
+"""Vehicle routing instance derived from standard CVRP benchmark data.
 
 Provenance
 ----------
-Adapted from
-``research/repos/incubator-kie-optaplanner/optaplanner-examples/data/
-vehiclerouting/import/cvrp-32customers.vrp`` (CVRPLIB's ``A-n32-k5``
-instance).
+Derived from the CVRPLIB ``A-n32-k5`` benchmark instance.
 
 The original instance has 32 customers and 5 vehicles.  This fixture
 keeps the first 4 customers (c2, c3, c4, c5) and 2 vehicles so the
@@ -21,7 +18,7 @@ exercising:
   a dependency chain (location flows forward in space) and CP-SAT
   schedules both chains in parallel, yielding a real two-lane Gantt.
 
-The full OptaPlanner instance supports time windows (``cvrptw-*.vrp``
+The full benchmark instance supports time windows (``cvrptw-*.vrp``
 fixtures).  LangGoap's CSP scheduler currently optimizes precedence
 + duration + makespan only, so time windows are deliberately out of
 scope for this tutorial.  The demands and capacities below are

@@ -28,12 +28,6 @@ from langgoap.state import PlanningState
 from tests.benchmarks.conftest import linear_chain
 
 # ---------------------------------------------------------------------------
-# Skip guard
-# ---------------------------------------------------------------------------
-
-ortools = pytest.importorskip("ortools", reason="langgoap[optimization] not installed")
-
-# ---------------------------------------------------------------------------
 # Helpers — build plans with resource annotations
 # ---------------------------------------------------------------------------
 

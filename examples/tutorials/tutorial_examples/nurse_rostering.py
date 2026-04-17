@@ -1,10 +1,10 @@
-r"""Nurse Rostering — OptaPlanner's NRP scaled to a one-day demo.
+r"""Nurse Rostering — a standard nurse rostering problem scaled to a one-day demo.
 
-Translates a 1-day / 3-shift / 4-nurse subset of OptaPlanner's
-``nurserostering`` Sprint instance into GOAP.  Every shift must be
-covered by a nurse who holds the required skill and no nurse may
-work two shifts in the same day.  Nurses have per-shift preference
-costs (lower = happier) and A\* minimizes total unhappiness.
+Models a 1-day / 3-shift / 4-nurse subset of the classic INRC nurse
+rostering problem as GOAP.  Every shift must be covered by a nurse
+who holds the required skill and no nurse may work two shifts in the
+same day.  Nurses have per-shift preference costs (lower = happier)
+and A\* minimizes total unhappiness.
 
 GOAP modelling
 --------------

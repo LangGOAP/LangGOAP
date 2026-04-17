@@ -41,8 +41,8 @@ class Plan:
         expected_states: The world state expected after each action.
         total_cost: Sum of action costs along the plan.
         metadata: Planning algorithm statistics.
-        score: OptaPlanner-style :class:`~langgoap.score.Score`.  A*-only
-            plans carry a :class:`~langgoap.score.SimpleScore` equal to
+        score: :class:`~langgoap.score.Score` for the plan.  A*-only plans
+            carry a :class:`~langgoap.score.SimpleScore` equal to
             ``total_cost``; after CSP evaluation, the pipeline replaces
             this with a :class:`~langgoap.score.HardSoftScore` whose
             ``hard`` level is 0.0 for feasible plans and whose ``soft``

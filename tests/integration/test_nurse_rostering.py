@@ -2,7 +2,7 @@ r"""Integration test for the Nurse Rostering tutorial (Tier 2).
 
 Exercises the full NL → GoalInterpreter → A\* → CSP → scoring
 pipeline on a 4-nurse / 3-shift / 1-day instance derived from
-OptaPlanner's ``nurserostering`` Sprint example.
+standard benchmark data.
 
 The test battery verifies:
 
@@ -26,7 +26,7 @@ Helpers live in
 ``examples/tutorials/tutorial_examples/nurse_rostering.py`` and the
 instance fixture is at
 ``examples/tutorials/tutorial_examples/data/nurse_rostering_instance.py``
-(provenance: OptaPlanner ``sprint01_1week.xml``).
+(derived from standard benchmark data).
 """
 
 from __future__ import annotations
@@ -54,9 +54,6 @@ from langgoap.planner.pipeline import plan as pipeline_plan
 from langgoap.score import HardSoftScore
 from langgoap.state import PlanningState
 from tests.conftest import FakeStructuredModel
-
-pytest.importorskip("ortools", reason="nurse rostering tutorial exercises CP-SAT")
-
 
 # The optimal assignment by preference cost:
 #   carol→morning(1)  +  alice→afternoon(0)  +  dave→night(0)

@@ -7,9 +7,8 @@ exist, the CSP is skipped entirely (zero overhead).
 Architecture:
   A* planner → CSP optimizer → Optimized Plan
 
-The pure-Python fast path handles simple resource validation without importing
-ortools. CP-SAT is only loaded for temporal scheduling and multi-plan
-optimization.
+Resource validation uses a pure-Python fast path (no solver invocation).
+CP-SAT is used for temporal scheduling and multi-plan optimization.
 """
 
 from __future__ import annotations
@@ -21,6 +20,8 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
+
+from ortools.sat.python import cp_model as _cp_model
 
 if TYPE_CHECKING:
     from langgoap.planner.types import Plan
@@ -154,23 +155,6 @@ class CSPMetadata:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-
-def _require_ortools() -> Any:
-    """Lazy-import ortools CP-SAT solver.
-
-    Raises ``ImportError`` with a clear message pointing to the
-    ``langgoap[optimization]`` extra.
-    """
-    try:
-        from ortools.sat.python import cp_model
-
-        return cp_model
-    except ImportError:
-        raise ImportError(
-            "OR-Tools is required for CSP optimization. "
-            "Install it with: pip install langgoap[optimization]"
-        ) from None
 
 
 def compute_resource_totals(
@@ -376,7 +360,7 @@ def schedule_plan(
             scale_factor=scale,
         )
 
-    cp_model = _require_ortools()
+    cp_model = _cp_model
 
     model = cp_model.CpModel()
     n = len(plan.actions)
@@ -487,7 +471,7 @@ def optimize_plans(
         raise ValueError("No plans to optimize")
 
     t0 = time.monotonic()
-    cp_model = _require_ortools()
+    cp_model = _cp_model
 
     model = cp_model.CpModel()
     n = len(plans)

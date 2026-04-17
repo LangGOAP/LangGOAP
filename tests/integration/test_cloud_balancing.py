@@ -1,6 +1,6 @@
 """Integration test for the Cloud Balancing tutorial (Tier 2).
 
-Exercises the full A* → CSP pipeline on an OptaPlanner-derived
+Exercises the full A* → CSP pipeline on a benchmark-derived
 bin-packing instance.  The CSP phase is expected to:
 
 - Aggregate per-server cpu/mem/net usage across the chosen plan
@@ -11,7 +11,7 @@ bin-packing instance.  The CSP phase is expected to:
 Helpers live in ``examples/tutorials/tutorial_examples/cloud_balancing.py``
 and the instance fixture is at
 ``examples/tutorials/tutorial_examples/data/cloud_balancing_instance.py``
-(provenance: OptaPlanner ``2computers-6processes.json``).
+(derived from standard benchmark data).
 """
 
 from __future__ import annotations
@@ -28,8 +28,6 @@ from langgoap import ConstraintSpec, CSPStatus, GoalSpec, GoapGraph
 from langgoap.goals import ObjectiveDirection
 from langgoap.planner.pipeline import plan as pipeline_plan
 from langgoap.state import PlanningState
-
-pytest.importorskip("ortools", reason="cloud balancing tutorial exercises CP-SAT")
 
 
 class TestCloudBalancingFeasible:

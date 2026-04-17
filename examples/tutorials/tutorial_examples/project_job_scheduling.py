@@ -1,7 +1,7 @@
-r"""Project Job Scheduling — OptaPlanner's MRCPSP in LangGoap.
+r"""Project Job Scheduling — the Multi-mode RCPSP in LangGoap.
 
-Adapts OptaPlanner's multi-mode Resource-Constrained Project Scheduling
-Problem (MRCPSP) example into GOAP.  Each job has one or more modes
+Models the multi-mode Resource-Constrained Project Scheduling Problem
+(MRCPSP) as GOAP.  Each job has one or more modes
 (fast-expensive vs slow-cheap), A\* picks the mode combination that
 minimizes total work, and the CSP phase:
 

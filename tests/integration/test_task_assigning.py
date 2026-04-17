@@ -1,8 +1,7 @@
 r"""Integration test for the Task Assigning tutorial (Tier 2).
 
 Exercises the full A\* → CSP pipeline on a ticket-routing instance
-derived from OptaPlanner's ``taskassigning`` example.  The test
-battery verifies:
+derived from standard benchmark data.  The test battery verifies:
 
 - **Skill matching** — unqualified employees have no action for a
   task whose required skill they lack.
@@ -26,7 +25,7 @@ Helpers live in
 ``examples/tutorials/tutorial_examples/task_assigning.py`` and the
 instance fixture is at
 ``examples/tutorials/tutorial_examples/data/task_assigning_instance.py``
-(provenance: OptaPlanner ``24tasks-8employees.json`` compacted to
+(derived from reference benchmark data, compacted to
 6 tasks / 3 employees / 4 skills).
 """
 
@@ -56,9 +55,6 @@ from langgoap.planner.pipeline import plan as pipeline_plan
 from langgoap.score import HardSoftScore
 from langgoap.state import PlanningState
 from tests.conftest import FakeStructuredModel
-
-pytest.importorskip("ortools", reason="task assigning tutorial exercises CP-SAT")
-
 
 # Optimal assignment by weighted delay:
 #   alice → t1 (sales_strategy CRIT, HIGH, 4*4*1 = 16)

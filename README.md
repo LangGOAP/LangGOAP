@@ -38,14 +38,10 @@ Built by [Integrallis Software](https://integrallis.com).
 
 ```bash
 pip install langgoap
-
-# Add CP-SAT constraint optimization (recommended for Tier 2+ tutorials):
-pip install "langgoap[optimization]"
 ```
 
-Requires Python 3.10+. OR-Tools is an **optional** dependency; core
-A\* planning works without it and CSP features degrade gracefully with
-a clear `ImportError` when invoked.
+Requires Python 3.10+. OR-Tools CP-SAT is included as a core dependency
+for constraint optimization, temporal scheduling, and multi-plan selection.
 
 ---
 
@@ -180,7 +176,7 @@ and Layer B (`goapify_tool`) on real problems.
 
 - **`Score` hierarchy** — `SimpleScore`, `HardSoftScore`,
   `BendableScore`. Lexicographic comparison, sign convention matches
-  OptaPlanner (`hard ≤ 0`).
+  a penalize/reward convention (`hard ≤ 0`).
 - **Fluent `ConstraintBuilder`** — `for_each_action().where(...)
   .sum_resource("gpu_hours").bounded(max=budget).penalize(level="hard",
   weight=1.0).as_constraint("gpu_budget")`.
@@ -255,7 +251,7 @@ domain data live in the shared
 - (2) `robot_navigation.ipynb` — A\* primer from `unified-planning`.
 - (3) `hungry_agent.ipynb` — NL goal interpreter walk-through.
 
-### Tier 2 — OptaPlanner GOAPifications + workflow agents
+### Tier 2 — Constraint optimization + workflow agents
 
 - (4) `cloud_balancing.ipynb` — VM bin-packing with the one-liner.
 - (5) `vehicle_routing.ipynb` — capacity-constrained routing with Gantt.
@@ -282,18 +278,33 @@ by their corresponding integration tests under `tests/integration/`.
 
 ---
 
-## Relationship to OptaPlanner
+## Inspiration
 
-LangGoap does **not** re-implement OptaPlanner's `Move` / `Phase` /
-`ScoreDirector` / `Tabu` / `SimulatedAnnealing` machinery — OR-Tools
-CP-SAT already implements the equivalent search at a lower, more
-efficient level via branch-and-bound with no-good learning,
-propagation, and restart. Instead, LangGoap exposes a coherent Python
-surface that maps OptaPlanner concepts onto CP-SAT and the LangChain
-ecosystem.
+LangGoap builds on ideas and implementations from several projects:
 
-See [`docs/optaplanner_mapping.md`](docs/optaplanner_mapping.md) for
-the full class-to-concept mapping and a worked custom-strategy example.
+- **[GOAP](https://alumni.media.mit.edu/~jorkin/gdc2006_orkin_jeff_fear.pdf)** (Jeff Orkin / F.E.A.R.) — Goal-Oriented Action Planning, the
+  classical game-AI technique that drives LangGoap's A\* planner.
+- **[Embabel](https://github.com/embabel/embabel-agent)** — first to
+  apply GOAP planning to agentic LLM workflows, demonstrating that
+  declarative goals + action preconditions/effects can replace
+  hand-wired routing graphs.
+- **[OptaPlanner](https://www.optaplanner.org/)** — the Score hierarchy
+  (`HardSoftScore`, `BendableScore`) and fluent `ConstraintBuilder`
+  pattern are adapted from OptaPlanner's constraint-solving API. See
+  [`docs/optaplanner_mapping.md`](docs/optaplanner_mapping.md) for the
+  full concept mapping.
+- **[OR-Tools CP-SAT](https://developers.google.com/optimization/cp/cp_solver)** —
+  constraint solver backing LangGoap's CSP pipeline for resource
+  validation, temporal scheduling, and multi-plan optimization.
+- **[GOApy](https://github.com/leopoldmaillard/GOApy)** — pure Python
+  GOAP implementation used as a reference for A\* search correctness.
+- **[unified-planning](https://github.com/aiplan4eu/unified-planning)** —
+  formal AI planning concepts (temporal, numeric, PDDL interop) that
+  informed LangGoap's action/effect model.
+- **[LangGraph](https://langchain-ai.github.io/langgraph/)** — the
+  runtime substrate. LangGoap plans compile to real `StateGraph`
+  instances and integrate natively with checkpointers, stores, and the
+  rest of the LangChain ecosystem.
 
 ---
 
@@ -333,7 +344,6 @@ package is internal and subject to change.
 ## Reference
 
 - **Changelog**: [`CHANGELOG.md`](CHANGELOG.md)
-- **OptaPlanner mapping**: [`docs/optaplanner_mapping.md`](docs/optaplanner_mapping.md)
 - **LangGraph**: <https://langchain-ai.github.io/langgraph/>
 - **OR-Tools CP-SAT**: <https://developers.google.com/optimization/cp/cp_solver>
 

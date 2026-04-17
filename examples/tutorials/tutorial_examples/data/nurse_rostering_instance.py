@@ -1,13 +1,11 @@
-"""Nurse rostering instance derived from OptaPlanner's NRP example.
+"""Nurse rostering instance derived from standard benchmark data.
 
 Provenance
 ----------
-Structurally adapted from
-``research/repos/incubator-kie-optaplanner/optaplanner-examples/data/
-nurserostering/import/sprint01_1week.xml`` — the classic INRC Sprint
-instance (10 nurses, 4 shift types, 1 week).  This tutorial fixture
-collapses the problem to **1 day / 3 shifts / 4 nurses** so the
-solver runs instantly while still exercising:
+Derived from the classic INRC Sprint benchmark instance (10 nurses,
+4 shift types, 1 week).  This tutorial fixture collapses the problem
+to **1 day / 3 shifts / 4 nurses** so the solver runs instantly
+while still exercising:
 
 - **Skill matching** — each shift requires a specific skill and only
   nurses possessing that skill can be assigned.
@@ -17,8 +15,7 @@ solver runs instantly while still exercising:
   no nurse can work two shifts in the same day (enforced via the
   ``nurse_<name>_available`` precondition).
 
-Original OptaPlanner concepts that are **out of scope** for this
-tutorial:
+Standard NRP concepts that are **out of scope** for this tutorial:
 
 - Multi-day patterns and consecutive-work-day limits — the fixture
   is a single day.

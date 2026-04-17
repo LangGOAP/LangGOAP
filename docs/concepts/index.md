@@ -63,16 +63,15 @@ The CP-SAT layer supports:
 - **Multi-plan selection** — `BoolVar` per candidate, lexicographic
   objective with user-supplied weights.
 
-OR-Tools is an **optional** dependency. Core A\* planning works
-without it, and the CSP entry points raise a clear `ImportError`
-via `_require_ortools()` when the `optimization` extra is missing.
+OR-Tools CP-SAT is a core dependency, installed automatically with
+`pip install langgoap`.
 
 ## Score hierarchy
 
 Every finished plan carries a `Score`:
 
 - `SimpleScore(value)` — scalar cost, used by A\*-only plans.
-- `HardSoftScore(hard, soft)` — OptaPlanner-aligned sign convention.
+- `HardSoftScore(hard, soft)` — hard/soft sign convention.
   `hard <= 0` (feasible plan → `hard == 0`); `soft` has no sign
   restriction, so both penalties and rewards are expressible.
 - `BendableScore(hard_levels, soft_levels)` — layered scores for
@@ -111,7 +110,7 @@ the planner — observability is a hard invariant.
 - {doc}`../api/index` — public API reference.
 - {doc}`../examples/index` — runnable tutorial notebooks.
 - The `optaplanner_mapping.md` document in the repository root
-  explains how OptaPlanner concepts map onto CP-SAT primitives.
+  explains how constraint-solver concepts map onto CP-SAT primitives.
 
 ```{toctree}
 :maxdepth: 2

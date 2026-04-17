@@ -1,27 +1,26 @@
-"""Cloud balancing instance derived from OptaPlanner's 2-computer/6-process example.
+"""Cloud balancing instance derived from standard benchmark data.
 
 Provenance
 ----------
-Adapted from
-``research/repos/incubator-kie-optaplanner/optaplanner-examples/data/
-cloudbalancing/unsolved/2computers-6processes.json``.
+Derived from a standard 2-computer / 6-process cloud-balancing
+benchmark instance.
 
-The full OptaPlanner instance has 6 processes; this fixture keeps 4 of
-them (p0, p1, p2, p5) so the CSP pipeline solves in well under a
-second while still exercising forced assignments (p1 requires more
-memory than ``server_small`` can provide, so it is pinned to
+The full benchmark has 6 processes; this fixture keeps 4 of them
+(p0, p1, p2, p5) so the CSP pipeline solves in well under a second
+while still exercising forced assignments (p1 requires more memory
+than ``server_small`` can provide, so it is pinned to
 ``server_big``) and flexible choices (p0, p2, p5 all fit on either
 server).
 
 The per-action ``cost_usd`` value is a *simplification* for the
-tutorial: OptaPlanner's base-cost-per-computer model would require
+tutorial: the original base-cost-per-computer model would require
 non-linear activation constraints that CP-SAT cannot express
 directly.  Each ``assign`` action instead charges an amortized
 per-process rate — ``480`` on ``server_big``, ``66`` on
-``server_small`` — obtained by dividing the original OptaPlanner
-``cost`` fields by 10.  The relative ordering (big is pricier than
-small) is preserved so the optimizer still has a meaningful
-objective to minimize.
+``server_small`` — obtained by dividing the original ``cost`` fields
+by 10.  The relative ordering (big is pricier than small) is
+preserved so the optimizer still has a meaningful objective to
+minimize.
 """
 
 from __future__ import annotations
@@ -47,7 +46,7 @@ class Process:
 
 
 # ---------------------------------------------------------------------------
-# 2-computer / 4-process instance (subset of OptaPlanner's 2x6 example)
+# 2-computer / 4-process instance (subset of the standard 2x6 benchmark)
 # ---------------------------------------------------------------------------
 
 SERVERS: tuple[Computer, ...] = (

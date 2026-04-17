@@ -69,9 +69,6 @@ from langgoap.testing import FakeStructuredModel
 from langgoap.tracing import LoggingTracer
 from langgoap.viz import render_ascii_gantt
 
-pytest.importorskip("ortools", reason="flexible job shop tutorial exercises CP-SAT")
-
-
 # ---------------------------------------------------------------------------
 # Expected action-name constants — pinned so any rename of the factory's
 # naming scheme surfaces in a single place.

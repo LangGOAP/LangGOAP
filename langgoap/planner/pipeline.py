@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 def _score_from_csp(plan: Plan, goal: GoalSpec, meta: CSPMetadata) -> HardSoftScore:
     """Build a :class:`HardSoftScore` from CSP metadata.
 
-    The sign convention matches OptaPlanner's ``penalize(amount)``:
+    The sign convention follows a penalize/reward pattern:
 
     * ``hard`` starts at ``0.0`` and each hard-constraint violation
       subtracts ``violation_amount * weight``.  A feasible plan has
@@ -201,16 +201,7 @@ def plan(
         return _augment_plan(primary, goal, csp_meta)
 
     # Phase 3: CP-SAT multi-plan optimization
-    try:
-        best_plan, opt_meta = optimize_plans(alternatives, goal)
-    except ImportError:
-        # ortools not installed — return first alternative with basic validation
-        logger.warning("ortools not available for multi-plan optimization")
-        for alt in alternatives:
-            alt_meta = validate_plan(alt, goal)
-            if alt_meta.status in (CSPStatus.FEASIBLE, CSPStatus.OPTIMAL):
-                return _augment_plan(alt, goal, alt_meta)
-        return _augment_plan(primary, goal, csp_meta)
+    best_plan, opt_meta = optimize_plans(alternatives, goal)
 
     if opt_meta.status in (CSPStatus.FEASIBLE, CSPStatus.OPTIMAL):
         logger.info(

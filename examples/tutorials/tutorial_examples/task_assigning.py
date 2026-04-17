@@ -1,12 +1,10 @@
-r"""Task Assigning — OptaPlanner's ticket routing in LangGoap.
+r"""Task Assigning — the task-assigning problem in LangGoap.
 
-Translates a compact subset of OptaPlanner's
-[TaskAssigning](https://github.com/apache/incubator-kie-optaplanner/tree/main/optaplanner-examples/src/main/java/org/optaplanner/examples/taskassigning)
-example into GOAP.  Each task must be assigned to exactly one
-employee; skill matching is a hard constraint (filtered at
-action-build time) and the soft objective is a flattened weighted
-delay that folds OptaPlanner's four bendable-score soft levels into
-a single scalar the CSP phase can minimize.
+Models the task-assigning problem as GOAP.  Each task must be
+assigned to exactly one employee; skill matching is a hard constraint
+(filtered at action-build time) and the soft objective is a flattened
+weighted delay that folds four bendable-score soft levels into a
+single scalar the CSP phase can minimize.
 
 GOAP modelling
 --------------
@@ -40,9 +38,9 @@ ConstraintBuilder integration
 -----------------------------
 
 :func:`task_assigning_goal_fluent` demonstrates the fluent
-:class:`~langgoap.constraints.ConstraintBuilder` — the OptaPlanner
-``ConstraintProvider`` analogue — for constructing the same goal in
-a readable, chained style.
+:class:`~langgoap.constraints.ConstraintBuilder` — a fluent
+constraint-provider pattern — for constructing the same goal in a
+readable, chained style.
 """
 
 from __future__ import annotations
@@ -125,7 +123,7 @@ def task_assigning_actions(
                 continue
             if (employee.name, task.task_type) not in AFFINITY:
                 # No affinity configured → treat as unreachable for this
-                # tutorial (matches OptaPlanner's Affinity.NONE semantics,
+                # tutorial (matches the affinity model's NONE semantics,
                 # which simply makes the multiplier huge).
                 continue
             actions.append(_assign_action(employee, task))

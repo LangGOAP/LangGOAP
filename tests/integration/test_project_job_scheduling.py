@@ -1,8 +1,7 @@
 r"""Integration test for the Project Job Scheduling tutorial (Tier 2).
 
 Exercises the full A\* → CSP pipeline on an MRCPSP instance derived
-from OptaPlanner's ``projectjobscheduling`` example.  The CSP phase
-is expected to:
+from standard benchmark data.  The CSP phase is expected to:
 
 - Respect the precedence DAG extracted from effect→precondition
   matching in ``planner/csp.py::build_dependency_graph``.
@@ -18,7 +17,7 @@ Helpers live in
 ``examples/tutorials/tutorial_examples/project_job_scheduling.py`` and
 the instance fixture is at
 ``examples/tutorials/tutorial_examples/data/project_job_scheduling_instance.py``
-(provenance: OptaPlanner ``j10.mm/j1011_7.mm``).
+(derived from reference benchmark data).
 """
 
 from __future__ import annotations

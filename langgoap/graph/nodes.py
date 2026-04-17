@@ -112,8 +112,7 @@ def _is_better_plan(candidate: Plan, best: Plan) -> bool:
           (A* minimises path cost; ``scalar`` equals ``total_cost``).
         * :class:`~langgoap.score.HardSoftScore` /
           :class:`~langgoap.score.BendableScore` — *higher* (less-negative)
-          is better (OptaPlanner lexicographic convention; ``hard == 0`` is
-          optimal).
+          is better (lexicographic convention; ``hard == 0`` is feasible).
 
         Using native comparison preserves CSP soft-score information: a
         ``HardSoftScore(hard=0, soft=-1)`` plan correctly beats a
@@ -238,36 +237,18 @@ class GoapPlanner:
         dispatch can share planning logic without duplication.
         """
         if self._strategy is not None:
-            try:
-                return self._strategy.plan(
-                    start,
-                    goal,
-                    self.actions,
-                    blacklisted_actions=blacklisted,
-                )
-            except ImportError:
-                logger.warning(
-                    "Configured strategy requires ortools which is not "
-                    "installed. Falling back to pure A*."
-                )
-                return astar_plan(
-                    start, goal, self.actions, blacklisted_actions=blacklisted
-                )
+            return self._strategy.plan(
+                start,
+                goal,
+                self.actions,
+                blacklisted_actions=blacklisted,
+            )
         if goal.constraints or goal.objectives is not None:
-            try:
-                from langgoap.planner.pipeline import plan as pipeline_plan
+            from langgoap.planner.pipeline import plan as pipeline_plan
 
-                return pipeline_plan(
-                    start, goal, self.actions, blacklisted_actions=blacklisted
-                )
-            except ImportError:
-                logger.warning(
-                    "CSP constraints/objectives specified but ortools not "
-                    "installed. Falling back to pure A*."
-                )
-                return astar_plan(
-                    start, goal, self.actions, blacklisted_actions=blacklisted
-                )
+            return pipeline_plan(
+                start, goal, self.actions, blacklisted_actions=blacklisted
+            )
         return astar_plan(start, goal, self.actions, blacklisted_actions=blacklisted)
 
     def _plan_core(self, state: GoapState) -> tuple[dict[str, Any], bool]:

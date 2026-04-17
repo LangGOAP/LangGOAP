@@ -1,8 +1,7 @@
-r"""Vehicle Routing — OptaPlanner CVRP adapted for A\* + CSP scheduling.
+r"""Vehicle Routing — the Capacitated Vehicle Routing Problem (CVRP) in LangGoap.
 
-Translates a 2-vehicle / 4-customer subset of OptaPlanner's
-``cvrp-32customers`` instance into GOAP.  Each vehicle has a
-pre-assigned set of customers (clustering happens outside the
+Models a 2-vehicle / 4-customer CVRP subset as GOAP.  Each vehicle
+has a pre-assigned set of customers (clustering happens outside the
 planner in this tutorial); A\* searches the ordering within each
 vehicle's route, and the CSP phase schedules the two routes in
 parallel and renders them as a Gantt.
