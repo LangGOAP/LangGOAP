@@ -239,68 +239,24 @@ def validate_plan(
             scale_factor=scale,
         )
 
-    # Compute resource totals
     totals = compute_resource_totals(plan.actions)
-
-    # Build resource usage and check constraints.  Hard violations mark
-    # the plan INFEASIBLE; soft violations are recorded but do not.
-    constraint_map: dict[str, ConstraintSpec] = {c.key: c for c in goal.constraints}
-    usage_list: list[ResourceUsage] = []
-    all_hard_satisfied = True
-
-    # Process all constrained keys
-    for key, constraint in constraint_map.items():
-        total = totals.get(key, 0.0)
-        satisfied = True
-        if constraint.max is not None and total > constraint.max:
-            satisfied = False
-        if constraint.min is not None and total < constraint.min:
-            satisfied = False
-        if not satisfied and constraint.level == "hard":
-            all_hard_satisfied = False
-        usage_list.append(
-            ResourceUsage(
-                key=key,
-                total=total,
-                constraint_min=constraint.min,
-                constraint_max=constraint.max,
-                satisfied=satisfied,
-                level=constraint.level,
-            )
-        )
-
-    # Also include resource keys that have no constraints (informational)
-    for key, total in totals.items():
-        if key not in constraint_map:
-            usage_list.append(ResourceUsage(key=key, total=total, level="info"))
-
-    # Compute objective values
-    obj_values: dict[str, float] = {}
-    if goal.objectives is not None:
-        for obj_key in goal.objectives:
-            obj_values[obj_key] = totals.get(obj_key, 0.0)
-
-    # Evaluate soft goals against the plan's final expected state
-    if goal.soft_goals and plan.expected_states:
-        final_state = plan.expected_states[-1]
-        for sg in goal.soft_goals:
-            achieved = final_state.satisfies(sg.conditions)
-            obj_values[f"soft_goal:{sg.label}"] = sg.weight if achieved else 0.0
+    usage_list, all_hard_satisfied = _compute_resource_usage(totals, goal)
+    obj_values = _compute_objective_values(totals, plan, goal)
 
     status = CSPStatus.FEASIBLE if all_hard_satisfied else CSPStatus.INFEASIBLE
 
-    # Check if any actions have durations → schedule
+    # Schedule only when actions carry durations and no hard resource
+    # constraint is already violated (scheduling a known-infeasible plan
+    # wastes solver time).
     schedule_meta: CSPMetadata | None = None
-    has_durations = any(a.duration is not None for a in plan.actions)
-    if has_durations and all_hard_satisfied:
+    if all_hard_satisfied and any(a.duration is not None for a in plan.actions):
         schedule_meta = schedule_plan(plan, scale=scale)
 
-    # Merge resource and scheduling statuses: scheduling failure overrides feasible.
+    # Scheduling failure overrides a feasible resource check.
     final_status = status
     if schedule_meta is not None and schedule_meta.status == CSPStatus.INFEASIBLE:
         final_status = CSPStatus.INFEASIBLE
 
-    # Compute infeasibility explanation when INFEASIBLE
     explanation = None
     if final_status == CSPStatus.INFEASIBLE:
         from langgoap.planner.explain import explain_infeasibility
@@ -323,6 +279,58 @@ def validate_plan(
         scale_factor=scale,
         explanation=explanation,
     )
+
+
+def _compute_resource_usage(
+    totals: dict[str, float], goal: GoalSpec
+) -> tuple[list[ResourceUsage], bool]:
+    """Classify every resource against its constraint, returning usage + hard-sat flag.
+
+    Hard violations mark the plan INFEASIBLE; soft violations are recorded
+    but do not.  Resource keys that have no declared constraint are returned
+    with ``level="info"`` for downstream reporting.
+    """
+    constraint_map: dict[str, ConstraintSpec] = {c.key: c for c in goal.constraints}
+    usage_list: list[ResourceUsage] = []
+    all_hard_satisfied = True
+    for key, constraint in constraint_map.items():
+        total = totals.get(key, 0.0)
+        satisfied = not (
+            (constraint.max is not None and total > constraint.max)
+            or (constraint.min is not None and total < constraint.min)
+        )
+        if not satisfied and constraint.level == "hard":
+            all_hard_satisfied = False
+        usage_list.append(
+            ResourceUsage(
+                key=key,
+                total=total,
+                constraint_min=constraint.min,
+                constraint_max=constraint.max,
+                satisfied=satisfied,
+                level=constraint.level,
+            )
+        )
+    for key, total in totals.items():
+        if key not in constraint_map:
+            usage_list.append(ResourceUsage(key=key, total=total, level="info"))
+    return usage_list, all_hard_satisfied
+
+
+def _compute_objective_values(
+    totals: dict[str, float], plan: Plan, goal: GoalSpec
+) -> dict[str, float]:
+    """Collect objective resource totals and evaluate soft goals."""
+    obj_values: dict[str, float] = {}
+    if goal.objectives is not None:
+        for obj_key in goal.objectives:
+            obj_values[obj_key] = totals.get(obj_key, 0.0)
+    if goal.soft_goals and plan.expected_states:
+        final_state = plan.expected_states[-1]
+        for sg in goal.soft_goals:
+            achieved = final_state.satisfies(sg.conditions)
+            obj_values[f"soft_goal:{sg.label}"] = sg.weight if achieved else 0.0
+    return obj_values
 
 
 # ---------------------------------------------------------------------------
@@ -352,7 +360,6 @@ def schedule_plan(
     """
     t0 = time.monotonic()
 
-    # No durations → skip
     if not any(a.duration is not None for a in plan.actions):
         return CSPMetadata(
             status=CSPStatus.SKIPPED,
@@ -361,82 +368,93 @@ def schedule_plan(
         )
 
     cp_model = _cp_model
-
     model = cp_model.CpModel()
-    n = len(plan.actions)
+    durations_ms = _scaled_durations_ms(plan, scale)
+    starts, makespan = _build_schedule_vars(model, plan, durations_ms)
 
-    # Scale durations to integer milliseconds
-    durations_ms: list[int] = []
+    solver = cp_model.CpSolver()
+    solver_status = solver.solve(model)
+    elapsed = (time.monotonic() - t0) * 1000
+
+    if solver_status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        return CSPMetadata(
+            status=CSPStatus.INFEASIBLE,
+            solver_time_ms=elapsed,
+            scale_factor=scale,
+        )
+
+    schedule_entries = _decode_schedule(plan, solver, starts, durations_ms, scale)
+    makespan_val = solver.value(makespan)
+    csp_status = (
+        CSPStatus.OPTIMAL if solver_status == cp_model.OPTIMAL else CSPStatus.FEASIBLE
+    )
+    return CSPMetadata(
+        status=csp_status,
+        solver_time_ms=elapsed,
+        schedule=tuple(schedule_entries),
+        makespan=timedelta(milliseconds=makespan_val * 1000 / scale),
+        scale_factor=scale,
+    )
+
+
+def _scaled_durations_ms(plan: Plan, scale: int) -> list[int]:
+    """Return each action's scaled integer duration; 0 for durationless actions."""
+    out: list[int] = []
     for a in plan.actions:
         if a.duration is not None:
-            ms = int(a.duration.total_seconds() * scale)
-            durations_ms.append(max(ms, 0))
+            out.append(max(int(a.duration.total_seconds() * scale), 0))
         else:
-            durations_ms.append(0)  # instantaneous
+            out.append(0)
+    return out
 
+
+def _build_schedule_vars(
+    model: Any, plan: Plan, durations_ms: list[int]
+) -> tuple[list[Any], Any]:
+    """Create start/interval/makespan variables and attach precedence constraints."""
+    n = len(plan.actions)
     horizon = sum(durations_ms) + 1
-
-    # Decision variables
     starts: list[Any] = []
-    intervals: list[Any] = []
     for i in range(n):
         start = model.new_int_var(0, horizon, f"start_{i}")
-        interval = model.new_interval_var(
+        model.new_interval_var(
             start, durations_ms[i], start + durations_ms[i], f"interval_{i}"
         )
         starts.append(start)
-        intervals.append(interval)
-
     # Precedence constraints from dependency graph
     deps = build_dependency_graph(plan.actions)
     for j, predecessors in deps.items():
         for i in predecessors:
             model.add(starts[j] >= starts[i] + durations_ms[i])
-
     # Objective: minimize makespan
     makespan = model.new_int_var(0, horizon, "makespan")
     for i in range(n):
         model.add(makespan >= starts[i] + durations_ms[i])
     model.minimize(makespan)
+    return starts, makespan
 
-    # Solve
-    solver = cp_model.CpSolver()
-    solver_status = solver.solve(model)
 
-    elapsed = (time.monotonic() - t0) * 1000
-
-    if solver_status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        schedule_entries: list[ScheduleEntry] = []
-        for i in range(n):
-            start_val = solver.value(starts[i])
-            dur_val = durations_ms[i]
-            schedule_entries.append(
-                ScheduleEntry(
-                    action_name=plan.actions[i].name,
-                    start=timedelta(milliseconds=start_val * 1000 / scale),
-                    duration=timedelta(milliseconds=dur_val * 1000 / scale),
-                    end=timedelta(milliseconds=(start_val + dur_val) * 1000 / scale),
-                )
+def _decode_schedule(
+    plan: Plan,
+    solver: Any,
+    starts: list[Any],
+    durations_ms: list[int],
+    scale: int,
+) -> list[ScheduleEntry]:
+    """Materialize ``ScheduleEntry`` instances from solved CP-SAT variables."""
+    entries: list[ScheduleEntry] = []
+    for i in range(len(plan.actions)):
+        start_val = solver.value(starts[i])
+        dur_val = durations_ms[i]
+        entries.append(
+            ScheduleEntry(
+                action_name=plan.actions[i].name,
+                start=timedelta(milliseconds=start_val * 1000 / scale),
+                duration=timedelta(milliseconds=dur_val * 1000 / scale),
+                end=timedelta(milliseconds=(start_val + dur_val) * 1000 / scale),
             )
-        makespan_val = solver.value(makespan)
-        csp_status = (
-            CSPStatus.OPTIMAL
-            if solver_status == cp_model.OPTIMAL
-            else CSPStatus.FEASIBLE
         )
-        return CSPMetadata(
-            status=csp_status,
-            solver_time_ms=elapsed,
-            schedule=tuple(schedule_entries),
-            makespan=timedelta(milliseconds=makespan_val * 1000 / scale),
-            scale_factor=scale,
-        )
-
-    return CSPMetadata(
-        status=CSPStatus.INFEASIBLE,
-        solver_time_ms=elapsed,
-        scale_factor=scale,
-    )
+    return entries
 
 
 # ---------------------------------------------------------------------------
@@ -472,40 +490,97 @@ def optimize_plans(
 
     t0 = time.monotonic()
     cp_model = _cp_model
-
     model = cp_model.CpModel()
     n = len(plans)
 
-    # Boolean selection: exactly one plan is chosen
-    selected = [model.new_bool_var(f"plan_{i}") for i in range(n)]
-    model.add_exactly_one(selected)
-
-    # Precompute resource totals for each plan
     plan_resources: list[dict[str, float]] = [
         compute_resource_totals(p.actions) for p in plans
     ]
-
-    # Collect all resource keys
     all_keys: set[str] = set()
     for res in plan_resources:
         all_keys.update(res.keys())
 
-    # Resource variables: IntVar per resource key = weighted sum over plans
+    selected, resource_vars = _build_selection_vars(
+        model, n, plan_resources, all_keys, scale
+    )
+    constraint_map: dict[str, ConstraintSpec] = {c.key: c for c in goal.constraints}
+    soft_violation_terms = _wire_constraints(
+        model, resource_vars, constraint_map, plan_resources, scale
+    )
+    _set_optimization_objective(
+        model,
+        selected,
+        resource_vars,
+        soft_violation_terms,
+        plans,
+        goal,
+        scale,
+    )
+
+    solver = cp_model.CpSolver()
+    solver_status = solver.solve(model)
+    elapsed = (time.monotonic() - t0) * 1000
+
+    if solver_status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        return plans[0], CSPMetadata(
+            status=CSPStatus.INFEASIBLE,
+            solver_time_ms=elapsed,
+            plans_evaluated=n,
+            scale_factor=scale,
+        )
+
+    chosen_idx = _decode_selection(solver, selected, n)
+    chosen_plan = plans[chosen_idx]
+    chosen_resources = plan_resources[chosen_idx]
+    usage_list = _build_usage_list(all_keys, constraint_map, chosen_resources)
+    obj_values: dict[str, float] = {}
+    if goal.objectives:
+        for obj_key in goal.objectives:
+            obj_values[obj_key] = chosen_resources.get(obj_key, 0.0)
+
+    csp_status = (
+        CSPStatus.OPTIMAL if solver_status == cp_model.OPTIMAL else CSPStatus.FEASIBLE
+    )
+    return chosen_plan, CSPMetadata(
+        status=csp_status,
+        solver_time_ms=elapsed,
+        resource_usage=tuple(usage_list),
+        objective_values=MappingProxyType(obj_values),
+        plans_evaluated=n,
+        scale_factor=scale,
+    )
+
+
+def _build_selection_vars(
+    model: Any,
+    n: int,
+    plan_resources: list[dict[str, float]],
+    all_keys: set[str],
+    scale: int,
+) -> tuple[list[Any], dict[str, Any]]:
+    """Create boolean plan selectors plus one IntVar per resource key.
+
+    The resource IntVars are constrained so each one equals the weighted
+    sum of ``selected[i] * scaled_value[i]`` — effectively a dispatch
+    table that yields the chosen plan's resource total.
+    """
+    selected = [model.new_bool_var(f"plan_{i}") for i in range(n)]
+    model.add_exactly_one(selected)
     resource_vars: dict[str, Any] = {}
     for key in all_keys:
         scaled_values = [int(res.get(key, 0.0) * scale) for res in plan_resources]
         rv = model.new_int_var(0, max(scaled_values) + 1, f"resource_{key}")
         model.add(rv == sum(selected[i] * scaled_values[i] for i in range(n)))
         resource_vars[key] = rv
+    return selected, resource_vars
 
-    # Constraints from ConstraintSpec.  Hard constraints are enforced
-    # directly on the solver; soft constraints introduce a non-negative
-    # violation variable that contributes ``viol * weight`` to the
-    # objective (R1).
-    constraint_map: dict[str, ConstraintSpec] = {c.key: c for c in goal.constraints}
-    soft_violation_terms: list[Any] = []
-    # Big-M for soft-violation variables. The maximum possible violation
-    # is bounded by the largest scaled resource total across all plans.
+
+def _compute_big_m(
+    plan_resources: list[dict[str, float]],
+    constraint_map: dict[str, ConstraintSpec],
+    scale: int,
+) -> int:
+    """Return a safe Big-M bound for soft-violation slack variables."""
     max_scaled = 1
     for res in plan_resources:
         for v in res.values():
@@ -518,47 +593,75 @@ def optimize_plans(
             max_scaled = max(max_scaled, int(abs(constraint.max) * scale) + 1)
         if constraint.min is not None:
             max_scaled = max(max_scaled, int(abs(constraint.min) * scale) + 1)
-    big_m = max_scaled * 2 + 1
+    return max_scaled * 2 + 1
 
+
+def _wire_constraints(
+    model: Any,
+    resource_vars: dict[str, Any],
+    constraint_map: dict[str, ConstraintSpec],
+    plan_resources: list[dict[str, float]],
+    scale: int,
+) -> list[Any]:
+    """Attach hard bounds directly; emit soft-violation slack terms.
+
+    Hard constraints become solver assertions.  Soft constraints introduce
+    a non-negative slack variable (Big-M bounded) whose weighted value is
+    returned so the caller can fold it into the objective (R1).
+    """
+    soft_violation_terms: list[Any] = []
+    big_m = _compute_big_m(plan_resources, constraint_map, scale)
     for key, constraint in constraint_map.items():
         if key not in resource_vars:
-            # Create a zero variable for constrained keys with no resources
-            rv = model.new_int_var(0, 0, f"resource_{key}")
-            resource_vars[key] = rv
+            # Constrained key not present in any plan — model it as a zero var.
+            resource_vars[key] = model.new_int_var(0, 0, f"resource_{key}")
         rv = resource_vars[key]
         if constraint.level == "hard":
             if constraint.max is not None:
                 model.add(rv <= int(constraint.max * scale))
             if constraint.min is not None:
                 model.add(rv >= int(constraint.min * scale))
-        else:
-            # Soft bound: violations allowed but penalized.
-            weight_scaled = max(int(constraint.weight * scale), 1)
-            if constraint.max is not None:
-                viol_max = model.new_int_var(0, big_m, f"soft_viol_max_{key}")
-                model.add(viol_max >= rv - int(constraint.max * scale))
-                soft_violation_terms.append(viol_max * weight_scaled)
-            if constraint.min is not None:
-                viol_min = model.new_int_var(0, big_m, f"soft_viol_min_{key}")
-                model.add(viol_min >= int(constraint.min * scale) - rv)
-                soft_violation_terms.append(viol_min * weight_scaled)
+            continue
+        # Soft bound: violations allowed but penalized.
+        weight_scaled = max(int(constraint.weight * scale), 1)
+        if constraint.max is not None:
+            viol_max = model.new_int_var(0, big_m, f"soft_viol_max_{key}")
+            model.add(viol_max >= rv - int(constraint.max * scale))
+            soft_violation_terms.append(viol_max * weight_scaled)
+        if constraint.min is not None:
+            viol_min = model.new_int_var(0, big_m, f"soft_viol_min_{key}")
+            model.add(viol_min >= int(constraint.min * scale) - rv)
+            soft_violation_terms.append(viol_min * weight_scaled)
+    return soft_violation_terms
 
-    # Objective: weighted sum aligned with ObjectiveDirection,
-    # plus soft-constraint violation penalties.
+
+def _set_optimization_objective(
+    model: Any,
+    selected: list[Any],
+    resource_vars: dict[str, Any],
+    soft_violation_terms: list[Any],
+    plans: list[Plan],
+    goal: GoalSpec,
+    scale: int,
+) -> None:
+    """Combine hard objectives, soft-constraint penalties, and soft-goal rewards.
+
+    Falls back to plain total-cost minimisation when no objectives, soft
+    constraints, or soft goals are declared.
+    """
     objective_terms: list[Any] = []
     if goal.objectives:
         for obj_key, direction in goal.objectives.items():
-            if obj_key in resource_vars:
-                if direction == ObjectiveDirection.MINIMIZE:
-                    # Minimizing → positive coefficient (solver minimizes)
-                    objective_terms.append(resource_vars[obj_key])
-                else:
-                    # Maximizing → negative coefficient (solver minimizes -value)
-                    objective_terms.append(-resource_vars[obj_key])
+            if obj_key not in resource_vars:
+                continue
+            if direction == ObjectiveDirection.MINIMIZE:
+                # Minimizing → positive coefficient (solver minimizes)
+                objective_terms.append(resource_vars[obj_key])
+            else:
+                # Maximizing → negative coefficient (solver minimizes -value)
+                objective_terms.append(-resource_vars[obj_key])
 
-    # Soft goals: maximise weighted achievement (binary per plan × weight).
-    # A soft goal is satisfied by plan i if its conditions are all true in the
-    # plan's final expected state.
+    # Soft goals: reward weighted achievement (binary per plan × weight).
     soft_goal_terms: list[Any] = []
     if goal.soft_goals:
         for sg in goal.soft_goals:
@@ -568,103 +671,73 @@ def optimize_plans(
                     p.expected_states and p.expected_states[-1].satisfies(sg.conditions)
                 )
                 if achieved:
-                    # Subtract (negative in minimise) to reward achieving this goal
+                    # Subtract (negative in minimise) to reward achievement
                     soft_goal_terms.append(-selected[i] * weight_scaled)
 
-    combined_terms: list[Any] = (
-        list(objective_terms) + list(soft_violation_terms) + list(soft_goal_terms)
-    )
+    combined_terms = objective_terms + soft_violation_terms + soft_goal_terms
     if combined_terms:
         model.minimize(sum(combined_terms))
     else:
-        # No objectives or soft violations — prefer lower total cost
-        cost_terms = [selected[i] * int(plans[i].total_cost * scale) for i in range(n)]
+        # No objectives or soft violations — prefer lower total cost.
+        cost_terms = [
+            selected[i] * int(plans[i].total_cost * scale) for i in range(len(plans))
+        ]
         model.minimize(sum(cost_terms))
 
-    # Solve
-    solver = cp_model.CpSolver()
-    solver_status = solver.solve(model)
 
-    elapsed = (time.monotonic() - t0) * 1000
+def _decode_selection(solver: Any, selected: list[Any], n: int) -> int:
+    """Return the index of the plan the solver picked (defaults to 0)."""
+    for i in range(n):
+        if solver.value(selected[i]):
+            return i
+    return 0
 
-    if solver_status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        # Find which plan was selected
-        chosen_idx = 0
-        for i in range(n):
-            if solver.value(selected[i]):
-                chosen_idx = i
-                break
 
-        chosen_plan = plans[chosen_idx]
-        chosen_resources = plan_resources[chosen_idx]
+def _build_usage_list(
+    all_keys: set[str],
+    constraint_map: dict[str, ConstraintSpec],
+    chosen_resources: dict[str, float],
+) -> list[ResourceUsage]:
+    """Materialize ResourceUsage entries from the chosen plan's totals.
 
-        # Build resource usage.  satisfied=True for hard constraints is
-        # guaranteed by the solver; for soft constraints it depends on
-        # the actual chosen totals vs. bounds.
-        usage_list: list[ResourceUsage] = []
-        for key in sorted(all_keys):
-            cspec = constraint_map.get(key)
-            total = chosen_resources.get(key, 0.0)
-            satisfied = True
-            if cspec is not None:
-                if cspec.max is not None and total > cspec.max:
-                    satisfied = False
-                if cspec.min is not None and total < cspec.min:
-                    satisfied = False
+    Hard constraints are satisfied by the solver; for soft constraints
+    the ``satisfied`` flag reflects the actual chosen totals vs. bounds.
+    Keys declared in constraints but absent from every plan are appended
+    with ``total=0`` so downstream consumers see a complete picture.
+    """
+    usage_list: list[ResourceUsage] = []
+    for key in sorted(all_keys):
+        cspec = constraint_map.get(key)
+        total = chosen_resources.get(key, 0.0)
+        satisfied = True
+        if cspec is not None:
+            if cspec.max is not None and total > cspec.max:
+                satisfied = False
+            if cspec.min is not None and total < cspec.min:
+                satisfied = False
+        usage_list.append(
+            ResourceUsage(
+                key=key,
+                total=total,
+                constraint_min=cspec.min if cspec else None,
+                constraint_max=cspec.max if cspec else None,
+                satisfied=satisfied,
+                level=cspec.level if cspec else "info",
+            )
+        )
+    for key, cspec in constraint_map.items():
+        if key not in all_keys:
             usage_list.append(
                 ResourceUsage(
                     key=key,
-                    total=total,
-                    constraint_min=cspec.min if cspec else None,
-                    constraint_max=cspec.max if cspec else None,
-                    satisfied=satisfied,
-                    level=cspec.level if cspec else "info",
+                    total=0.0,
+                    constraint_min=cspec.min,
+                    constraint_max=cspec.max,
+                    satisfied=(cspec.min is None or cspec.min <= 0),
+                    level=cspec.level,
                 )
             )
-        # Include constrained keys that don't appear in any plan's resources.
-        for key, cspec in constraint_map.items():
-            if key not in all_keys:
-                usage_list.append(
-                    ResourceUsage(
-                        key=key,
-                        total=0.0,
-                        constraint_min=cspec.min,
-                        constraint_max=cspec.max,
-                        satisfied=(cspec.min is None or cspec.min <= 0),
-                        level=cspec.level,
-                    )
-                )
-
-        # Compute objective values
-        obj_values: dict[str, float] = {}
-        if goal.objectives:
-            for obj_key in goal.objectives:
-                obj_values[obj_key] = chosen_resources.get(obj_key, 0.0)
-
-        csp_status = (
-            CSPStatus.OPTIMAL
-            if solver_status == cp_model.OPTIMAL
-            else CSPStatus.FEASIBLE
-        )
-        meta = CSPMetadata(
-            status=csp_status,
-            solver_time_ms=elapsed,
-            resource_usage=tuple(usage_list),
-            objective_values=MappingProxyType(obj_values),
-            plans_evaluated=n,
-            scale_factor=scale,
-        )
-        return chosen_plan, meta
-
-    # All infeasible
-    meta = CSPMetadata(
-        status=CSPStatus.INFEASIBLE,
-        solver_time_ms=elapsed,
-        plans_evaluated=n,
-        scale_factor=scale,
-    )
-    # Return the first plan with infeasible metadata
-    return plans[0], meta
+    return usage_list
 
 
 # ---------------------------------------------------------------------------
@@ -751,64 +824,96 @@ def pareto_plans(
 
     t0 = time.monotonic()
 
-    # Step 1: validate all plans against hard constraints and collect metadata
+    feasible = _collect_feasible_plans(plans, goal, scale=scale)
+    if not feasible:
+        return []
+
+    plan_obj_values = _collect_objective_values(feasible, goal)
+
+    if not goal.objectives:
+        # No objectives — all feasible plans are non-dominated; sort by cost.
+        frontier = sorted(feasible, key=lambda t: t[0].total_cost)
+        if max_frontier is not None:
+            frontier = frontier[:max_frontier]
+        return frontier
+
+    frontier_items = _pareto_frontier(feasible, plan_obj_values, goal.objectives)
+    frontier = _sort_by_primary_objective(frontier_items, goal.objectives)
+    if max_frontier is not None:
+        frontier = frontier[:max_frontier]
+
+    elapsed_ms = (time.monotonic() - t0) * 1000
+    return _annotate_metadata(frontier, len(plans), elapsed_ms, scale)
+
+
+def _collect_feasible_plans(
+    plans: list["Plan"], goal: GoalSpec, *, scale: int
+) -> list[tuple["Plan", CSPMetadata]]:
+    """Validate each plan and keep only the ones whose hard constraints hold."""
     feasible: list[tuple["Plan", CSPMetadata]] = []
     for p in plans:
         meta = validate_plan(p, goal, scale=scale)
         if meta.status != CSPStatus.INFEASIBLE:
             feasible.append((p, meta))
+    return feasible
 
-    if not feasible:
-        return []
 
-    # Step 2: compute objective values for every feasible plan
+def _collect_objective_values(
+    feasible: list[tuple["Plan", CSPMetadata]], goal: GoalSpec
+) -> list[dict[str, float]]:
+    """Return per-plan objective dicts, filling in missing keys from resource totals."""
     plan_obj_values: list[dict[str, float]] = []
     for p, meta in feasible:
         obj: dict[str, float] = dict(meta.objective_values)
         # Also include resource totals that match objective keys but weren't
-        # in meta.objective_values (e.g. from the pure-Python fast path)
+        # in meta.objective_values (e.g. from the pure-Python fast path).
         if goal.objectives:
             totals = compute_resource_totals(p.actions)
             for key in goal.objectives:
                 if key not in obj:
                     obj[key] = totals.get(key, 0.0)
         plan_obj_values.append(obj)
+    return plan_obj_values
 
-    # Step 3: find the non-dominated subset
-    if not goal.objectives:
-        # No objectives — all feasible plans are non-dominated; sort by cost
-        frontier = sorted(feasible, key=lambda t: t[0].total_cost)
-        if max_frontier is not None:
-            frontier = frontier[:max_frontier]
-        return frontier
 
+def _pareto_frontier(
+    feasible: list[tuple["Plan", CSPMetadata]],
+    plan_obj_values: list[dict[str, float]],
+    objectives: "MappingProxyType[str, Any]",
+) -> list[tuple[tuple["Plan", CSPMetadata], dict[str, float]]]:
+    """Return the non-dominated ``(item, objective_values)`` pairs."""
     n = len(feasible)
     dominated = [False] * n
     for i in range(n):
         for j in range(n):
             if i == j or dominated[j]:
                 continue
-            if _dominates(plan_obj_values[j], plan_obj_values[i], goal.objectives):
+            if _dominates(plan_obj_values[j], plan_obj_values[i], objectives):
                 dominated[i] = True
                 break
+    return [(feasible[i], plan_obj_values[i]) for i in range(n) if not dominated[i]]
 
-    frontier_items = [
-        (feasible[i], plan_obj_values[i]) for i in range(n) if not dominated[i]
-    ]
 
-    # Step 4: sort by primary objective
-    primary_key, primary_dir = next(iter(goal.objectives.items()))
+def _sort_by_primary_objective(
+    frontier_items: list[tuple[tuple["Plan", CSPMetadata], dict[str, float]]],
+    objectives: "MappingProxyType[str, Any]",
+) -> list[tuple["Plan", CSPMetadata]]:
+    """Sort frontier items by the first declared objective, honoring its direction."""
     from langgoap.types import ObjectiveDirection
 
+    primary_key, primary_dir = next(iter(objectives.items()))
     reverse_sort = primary_dir == ObjectiveDirection.MAXIMIZE
     frontier_items.sort(key=lambda t: t[1].get(primary_key, 0.0), reverse=reverse_sort)
+    return [item for item, _ in frontier_items]
 
-    frontier = [item for item, _ in frontier_items]
-    if max_frontier is not None:
-        frontier = frontier[:max_frontier]
 
-    # Annotate each metadata with total solver_time_ms for the whole call
-    elapsed_ms = (time.monotonic() - t0) * 1000
+def _annotate_metadata(
+    frontier: list[tuple["Plan", CSPMetadata]],
+    plans_evaluated: int,
+    elapsed_ms: float,
+    scale: int,
+) -> list[tuple["Plan", CSPMetadata]]:
+    """Stamp each metadata with aggregate solver time and plan count."""
     result: list[tuple["Plan", CSPMetadata]] = []
     for p, meta in frontier:
         annotated = CSPMetadata(
@@ -818,7 +923,7 @@ def pareto_plans(
             objective_values=meta.objective_values,
             schedule=meta.schedule,
             makespan=meta.makespan,
-            plans_evaluated=len(plans),
+            plans_evaluated=plans_evaluated,
             scale_factor=scale,
             explanation=meta.explanation,
         )

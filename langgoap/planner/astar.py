@@ -176,11 +176,13 @@ def _search(
     # Sort actions by descending precondition count (specificity tie-breaking)
     sorted_actions = sorted(actions, key=lambda a: len(a.preconditions), reverse=True)
 
-    # A* search
-    counter = 0
+    # A* search — ``counter`` is a mutable box so ``_expand_neighbors`` can
+    # increment the tie-breaker and keep the open list's ordering stable
+    # across calls.
+    counter = [0]
 
     h0 = _heuristic(start, goal_conditions)
-    root = _SearchNode(f_score=h0, g_score=0.0, counter=counter, state=start)
+    root = _SearchNode(f_score=h0, g_score=0.0, counter=counter[0], state=start)
     open_list: list[_SearchNode] = [root]
     # Map from state → best g_score seen
     best_g: dict[PlanningState, float] = {start: 0.0}
@@ -194,82 +196,99 @@ def _search(
         current = heapq.heappop(open_list)
         nodes_explored += 1
 
-        # Goal check
         if current.state.satisfies(goal_conditions):
-            raw_actions = current.actions
-            # Anytime: record this complete plan; keep searching for a better one
-            # only when a strict deadline is set (anytime mode).
-            _build_now = deadline is None or time.monotonic() < deadline
-            original_len = len(raw_actions)
-
-            # Two-pass optimization
-            optimized = _backward_optimization(raw_actions, goal_conditions)
-            optimized = _forward_optimization(optimized, start, goal_conditions)
-
-            actions_pruned = original_len - len(optimized)
-
-            # Compute expected states and total cost
-            expected: list[PlanningState] = []
-            sim_state = start
-            total_cost = 0.0
-            for a in optimized:
-                total_cost += a.get_cost(sim_state.to_dict())
-                sim_state = sim_state.apply(a.effects)
-                expected.append(sim_state)
-
-            elapsed_ms = (time.monotonic() - t0) * 1000
-            candidate = Plan(
-                actions=optimized,
-                expected_states=tuple(expected),
-                total_cost=total_cost,
-                metadata=PlanMetadata(
-                    nodes_explored=nodes_explored,
-                    planning_time_ms=elapsed_ms,
-                    actions_pruned=actions_pruned,
-                ),
-                score=SimpleScore(scalar=total_cost),
-            )
             # In anytime mode, A* explores by f-score; the first goal found
             # is optimal (admissible heuristic), so return immediately.
             # best_complete is only used if the deadline fires mid-search.
-            best_complete = candidate
-            return candidate
+            return _build_plan_from_node(
+                current, start, goal_conditions, nodes_explored, t0
+            )
 
         # Skip if we've found a better path to this state
         if current.g_score > best_g.get(current.state, float("inf")):
             continue
 
-        # Expand neighbors
-        current_dict = current.state.to_dict()
-        for action in sorted_actions:
-            # Check preconditions
-            if not current.state.satisfies(action.preconditions):
-                continue
-
-            new_state = current.state.apply(action.effects)
-
-            # Skip no-op transitions
-            if new_state == current.state:
-                continue
-
-            cost = action.get_cost(current_dict)
-            tentative_g = current.g_score + cost
-
-            # Only proceed if this is a better path
-            if tentative_g < best_g.get(new_state, float("inf")):
-                best_g[new_state] = tentative_g
-                h = _heuristic(new_state, goal_conditions)
-                counter += 1
-                node = _SearchNode(
-                    f_score=tentative_g + h,
-                    g_score=tentative_g,
-                    counter=counter,
-                    state=new_state,
-                    actions=current.actions + (action,),
-                )
-                heapq.heappush(open_list, node)
+        _expand_neighbors(
+            current, sorted_actions, goal_conditions, best_g, open_list, counter
+        )
 
     return None  # No path found
+
+
+def _build_plan_from_node(
+    node: _SearchNode,
+    start: PlanningState,
+    goal_conditions: Mapping[str, Any],
+    nodes_explored: int,
+    t0: float,
+) -> Plan:
+    """Materialize a :class:`Plan` from a goal-satisfying search node."""
+    raw_actions = node.actions
+    original_len = len(raw_actions)
+    # Two-pass optimization
+    optimized = _backward_optimization(raw_actions, goal_conditions)
+    optimized = _forward_optimization(optimized, start, goal_conditions)
+    actions_pruned = original_len - len(optimized)
+
+    expected: list[PlanningState] = []
+    sim_state = start
+    total_cost = 0.0
+    for a in optimized:
+        total_cost += a.get_cost(sim_state.to_dict())
+        sim_state = sim_state.apply(a.effects)
+        expected.append(sim_state)
+
+    elapsed_ms = (time.monotonic() - t0) * 1000
+    return Plan(
+        actions=optimized,
+        expected_states=tuple(expected),
+        total_cost=total_cost,
+        metadata=PlanMetadata(
+            nodes_explored=nodes_explored,
+            planning_time_ms=elapsed_ms,
+            actions_pruned=actions_pruned,
+        ),
+        score=SimpleScore(scalar=total_cost),
+    )
+
+
+def _expand_neighbors(
+    current: _SearchNode,
+    sorted_actions: list[ActionSpec],
+    goal_conditions: Mapping[str, Any],
+    best_g: dict[PlanningState, float],
+    open_list: list[_SearchNode],
+    counter: list[int],
+) -> None:
+    """Push every improving neighbour of ``current`` onto the open list.
+
+    ``counter`` is a single-element mutable list used as a tie-breaker
+    box so the caller's value survives across invocations.
+    """
+    current_dict = current.state.to_dict()
+    for action in sorted_actions:
+        if not current.state.satisfies(action.preconditions):
+            continue
+        new_state = current.state.apply(action.effects)
+        if new_state == current.state:
+            continue  # no-op transition
+        cost = action.get_cost(current_dict)
+        tentative_g = current.g_score + cost
+        if tentative_g >= best_g.get(new_state, float("inf")):
+            continue
+        best_g[new_state] = tentative_g
+        h = _heuristic(new_state, goal_conditions)
+        counter[0] += 1
+        heapq.heappush(
+            open_list,
+            _SearchNode(
+                f_score=tentative_g + h,
+                g_score=tentative_g,
+                counter=counter[0],
+                state=new_state,
+                actions=current.actions + (action,),
+            ),
+        )
 
 
 def plan(

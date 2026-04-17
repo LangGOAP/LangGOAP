@@ -4,6 +4,7 @@
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
+[![MFCQI Score](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/integrallis/langgoap/main/.github/badges/mfcqi.json)](https://github.com/bsbodden/mfcqi)
 
 LangGOAP turns a declarative goal and a set of actions into a **compiled
 LangGraph `StateGraph`** that plans, executes, and replans. It combines

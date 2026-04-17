@@ -146,6 +146,35 @@ def _build_suggestion(
     return " ".join(parts)
 
 
+def _is_violated(c: ConstraintSpec, totals: dict[str, float]) -> bool:
+    """Return True when *c* is violated by the observed resource totals."""
+    total = totals.get(c.key, 0.0)
+    if c.max is not None and total > c.max:
+        return True
+    if c.min is not None and total < c.min:
+        return True
+    return False
+
+
+def _greedy_mus(
+    violated: list[ConstraintSpec], totals: dict[str, float]
+) -> list[ConstraintSpec]:
+    """Greedy MUS: keep constraints whose removal would restore feasibility."""
+    mus: list[ConstraintSpec] = []
+    remaining = list(violated)
+    for candidate in list(violated):
+        without = [c for c in remaining if c is not candidate]
+        if _check_feasibility(totals, without):
+            # Removing this constraint makes it feasible → it's essential
+            mus.append(candidate)
+        else:
+            # Still infeasible without it → it's redundant
+            remaining = without
+    # If greedy didn't identify any (all are redundant to each other),
+    # fall back to the full violated set
+    return mus or violated
+
+
 def explain_infeasibility(
     plan: Plan,
     goal: GoalSpec,
@@ -166,55 +195,21 @@ def explain_infeasibility(
         An :class:`InfeasibilityExplanation` describing the conflict,
         or ``None`` if the plan is not infeasible (no hard violations).
     """
-    # Only explain hard-constraint violations
     hard_constraints = [c for c in goal.constraints if c.level == "hard"]
     if not hard_constraints:
         return None
 
     totals = compute_resource_totals(plan.actions)
-
-    # Identify which hard constraints are actually violated
-    violated: list[ConstraintSpec] = []
-    for c in hard_constraints:
-        total = totals.get(c.key, 0.0)
-        is_violated = False
-        if c.max is not None and total > c.max:
-            is_violated = True
-        if c.min is not None and total < c.min:
-            is_violated = True
-        if is_violated:
-            violated.append(c)
-
+    violated = [c for c in hard_constraints if _is_violated(c, totals)]
     if not violated:
         return None
 
-    # Greedy MUS: a constraint is in the MUS if removing it makes the
-    # violated set feasible.
-    mus: list[ConstraintSpec] = []
-    remaining = list(violated)
-
-    for candidate in list(violated):
-        without = [c for c in remaining if c is not candidate]
-        if _check_feasibility(totals, without):
-            # Removing this constraint makes it feasible → it's essential
-            mus.append(candidate)
-        else:
-            # Still infeasible without it → it's redundant
-            remaining = without
-
-    # If greedy didn't identify any (all are redundant to each other),
-    # fall back to the full violated set
-    if not mus:
-        mus = violated
-
-    mus_tuple = tuple(mus)
+    mus_tuple = tuple(_greedy_mus(violated, totals))
     shortfalls = _build_shortfalls(totals, mus_tuple)
-    suggestion = _build_suggestion(shortfalls, mus_tuple)
-
     return InfeasibilityExplanation(
         conflicting_constraints=mus_tuple,
         resource_shortfalls=shortfalls,
-        suggestion=suggestion,
+        suggestion=_build_suggestion(shortfalls, mus_tuple),
     )
 
 
@@ -301,6 +296,15 @@ def explain_no_plan(
         p for p in all_preconditions if p not in start_true and p not in all_effects
     )
 
+    return NoPlanExplanation(
+        unreachable_conditions=tuple(unreachable),
+        missing_preconditions=tuple(missing),
+        suggestion=_build_no_plan_suggestion(unreachable, missing),
+    )
+
+
+def _build_no_plan_suggestion(unreachable: list[str], missing: list[str]) -> str:
+    """Assemble the human-readable suggestion for ``explain_no_plan``."""
     parts: list[str] = []
     if unreachable:
         parts.append(
@@ -321,12 +325,7 @@ def explain_no_plan(
             "dependencies or conflicting action effects. Review action "
             "preconditions and effects for internal consistency."
         )
-
-    return NoPlanExplanation(
-        unreachable_conditions=tuple(unreachable),
-        missing_preconditions=tuple(missing),
-        suggestion=" ".join(parts),
-    )
+    return " ".join(parts)
 
 
 __all__ = [

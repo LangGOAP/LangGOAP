@@ -13,7 +13,7 @@ import logging
 from dataclasses import replace
 
 from langgoap.actions import ActionSpec
-from langgoap.goals import GoalSpec
+from langgoap.goals import ConstraintSpec, GoalSpec
 from langgoap.planner.astar import plan as astar_plan
 from langgoap.planner.csp import (
     CSPMetadata,
@@ -46,19 +46,13 @@ def _score_from_csp(plan: Plan, goal: GoalSpec, meta: CSPMetadata) -> HardSoftSc
     hard = 0.0
     soft = 0.0
 
-    # Constraint violations → hard or soft depending on level.
     for usage in meta.resource_usage:
         c = constraint_by_key.get(usage.key)
         if c is None:
             continue
-        violation = 0.0
-        if c.max is not None and usage.total > c.max:
-            violation = usage.total - c.max
-        elif c.min is not None and usage.total < c.min:
-            violation = c.min - usage.total
-        if violation == 0.0:
+        penalty = _constraint_penalty(c, usage.total)
+        if penalty == 0.0:
             continue
-        penalty = violation * c.weight
         if c.level == "hard":
             hard -= penalty
         else:
@@ -71,6 +65,15 @@ def _score_from_csp(plan: Plan, goal: GoalSpec, meta: CSPMetadata) -> HardSoftSc
             soft += -v if direction == ObjectiveDirection.MINIMIZE else v
 
     return HardSoftScore(hard=hard, soft=soft)
+
+
+def _constraint_penalty(c: ConstraintSpec, total: float) -> float:
+    """Return ``violation_amount * weight`` for a constraint, or ``0`` if satisfied."""
+    if c.max is not None and total > c.max:
+        return (total - c.max) * c.weight
+    if c.min is not None and total < c.min:
+        return (c.min - total) * c.weight
+    return 0.0
 
 
 def needs_csp(goal: GoalSpec) -> bool:

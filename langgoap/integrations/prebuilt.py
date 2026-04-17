@@ -78,54 +78,14 @@ def create_goap_agent(
     Raises:
         ValueError: If ``goal`` is a string but ``llm`` is ``None``.
     """
-    preconditions = preconditions or {}
-    effects = effects or {}
-    resources = resources or {}
-    costs = costs or {}
-
-    # Wrap every tool with goapify_tool — Layer A delegates to Layer B.
-    actions: list[ActionSpec] = []
-    tools_without_eff: list[str] = []
-    for tool in tools:
-        tool_pre = preconditions.get(tool.name)
-        tool_eff = effects.get(tool.name)
-        tool_res = resources.get(tool.name)
-        tool_cost = costs.get(tool.name, 1.0)
-        if not tool_eff and not tool_res:
-            tools_without_eff.append(tool.name)
-        actions.append(
-            goapify_tool(
-                tool,
-                preconditions=tool_pre,
-                effects=tool_eff,
-                cost=tool_cost,
-                resources=tool_res,
-            )
-        )
-
-    if tools_without_eff:
-        logger.warning(
-            "create_goap_agent: the following tools have no effects or "
-            "resources declared and will be treated as no-op actions by "
-            "the planner: %s. Pass effects={<tool>: {...}} to make them "
-            "plan-visible.",
-            tools_without_eff,
-        )
-
-    # Resolve a string goal via the interpreter (once, at construction).
-    if isinstance(goal, str):
-        if llm is None:
-            raise ValueError(
-                "create_goap_agent received a string goal but no llm. "
-                "Pass llm=ChatOpenAI(...) or convert to a GoalSpec beforehand."
-            )
-        # Local import to keep interpreter dependencies lazy.
-        from langgoap.interpreter import GoalInterpreter
-
-        interpreter = GoalInterpreter(llm=llm, actions=actions)
-        resolved_goal: GoalSpec = interpreter.interpret(goal)
-    else:
-        resolved_goal = goal
+    actions = _wrap_tools_as_actions(
+        tools,
+        preconditions=preconditions or {},
+        effects=effects or {},
+        resources=resources or {},
+        costs=costs or {},
+    )
+    resolved_goal = _resolve_goal(goal, llm=llm, actions=actions)
 
     graph = GoapGraph(actions=actions)
     compiled = graph.compile(**graph_kwargs)
@@ -135,6 +95,62 @@ def create_goap_agent(
     # was a natural-language string.
     setattr(compiled, "goap_goal", resolved_goal)
     return compiled
+
+
+def _wrap_tools_as_actions(
+    tools: list[BaseTool],
+    *,
+    preconditions: dict[str, dict[str, Any]],
+    effects: dict[str, dict[str, Any]],
+    resources: dict[str, dict[str, float]],
+    costs: dict[str, float],
+) -> list[ActionSpec]:
+    """Wrap every tool with ``goapify_tool`` and warn on empty-effect tools."""
+    actions: list[ActionSpec] = []
+    tools_without_eff: list[str] = []
+    for tool in tools:
+        tool_eff = effects.get(tool.name)
+        tool_res = resources.get(tool.name)
+        if not tool_eff and not tool_res:
+            tools_without_eff.append(tool.name)
+        actions.append(
+            goapify_tool(
+                tool,
+                preconditions=preconditions.get(tool.name),
+                effects=tool_eff,
+                cost=costs.get(tool.name, 1.0),
+                resources=tool_res,
+            )
+        )
+    if tools_without_eff:
+        logger.warning(
+            "create_goap_agent: the following tools have no effects or "
+            "resources declared and will be treated as no-op actions by "
+            "the planner: %s. Pass effects={<tool>: {...}} to make them "
+            "plan-visible.",
+            tools_without_eff,
+        )
+    return actions
+
+
+def _resolve_goal(
+    goal: str | GoalSpec,
+    *,
+    llm: BaseChatModel | None,
+    actions: list[ActionSpec],
+) -> GoalSpec:
+    """Return a ``GoalSpec``, interpreting a natural-language string once."""
+    if not isinstance(goal, str):
+        return goal
+    if llm is None:
+        raise ValueError(
+            "create_goap_agent received a string goal but no llm. "
+            "Pass llm=ChatOpenAI(...) or convert to a GoalSpec beforehand."
+        )
+    # Local import to keep interpreter dependencies lazy.
+    from langgoap.interpreter import GoalInterpreter
+
+    return GoalInterpreter(llm=llm, actions=actions).interpret(goal)
 
 
 __all__ = ["create_goap_agent"]

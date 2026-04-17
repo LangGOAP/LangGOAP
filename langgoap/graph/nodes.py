@@ -251,6 +251,51 @@ class GoapPlanner:
             )
         return astar_plan(start, goal, self.actions, blacklisted_actions=blacklisted)
 
+    def _resolve_sequential_subgoal(
+        self, raw_goal: MultiGoal, state: GoapState, was_replan: bool
+    ) -> GoalSpec:
+        """Pick the current sub-goal from a sequential ``MultiGoal``."""
+        idx = state.get("current_subgoal_index", 0)
+        effective_goal = raw_goal.goals[idx]
+        if not was_replan:
+            logger.info(
+                "Planning for MultiGoal (sequential, subgoal %d/%d): %s",
+                idx + 1,
+                len(raw_goal.goals),
+                dict(effective_goal.conditions),
+            )
+        return effective_goal
+
+    def _resolve_any_subgoal(
+        self,
+        raw_goal: MultiGoal,
+        world_state: dict[str, Any],
+        blacklisted: list[str],
+    ) -> tuple[int, Plan] | None:
+        """Enumerate sub-goals of an ``any``-mode ``MultiGoal``, return the best plan.
+
+        Feasibility-first: a feasible plan always beats an infeasible one
+        regardless of cost.  Among plans with the same feasibility status,
+        lower total_cost wins.  Using total_cost (a plain float) avoids the
+        cross-subclass TypeError that Score.__lt__ raises when comparing
+        e.g. SimpleScore (from pure A*) against HardSoftScore (from the
+        CSP pipeline).
+        """
+        best_idx = -1
+        best_plan: Plan | None = None
+        for i, sg in enumerate(raw_goal.goals):
+            sub_pkeys = _planning_keys(self.actions, sg)
+            sub_start = PlanningState.from_dict(world_state, keys=sub_pkeys)
+            candidate = self._plan_single(sub_start, sg, blacklisted)
+            if candidate is None:
+                continue
+            if best_plan is None or _is_better_plan(candidate, best_plan):
+                best_idx = i
+                best_plan = candidate
+        if best_plan is None:
+            return None
+        return best_idx, best_plan
+
     def _plan_core(self, state: GoapState) -> tuple[dict[str, Any], bool]:
         """Shared planning logic for sync and async entry points.
 
@@ -291,39 +336,14 @@ class GoapPlanner:
         # that abstraction lives at the planner/observer dispatch layer.
         extra_updates: dict[str, Any] = {}
         precomputed_result: Plan | None = None
-        effective_goal: GoalSpec
         if isinstance(raw_goal, MultiGoal):
             if raw_goal.mode == "sequential":
-                idx = state.get("current_subgoal_index", 0)
-                effective_goal = raw_goal.goals[idx]
-                if not was_replan:
-                    logger.info(
-                        "Planning for MultiGoal (sequential, subgoal %d/%d): %s",
-                        idx + 1,
-                        len(raw_goal.goals),
-                        dict(effective_goal.conditions),
-                    )
+                effective_goal = self._resolve_sequential_subgoal(
+                    raw_goal, state, was_replan
+                )
             else:  # "any"
-                # Enumerate sub-goals, plan each, pick the best feasible.
-                # Feasibility-first: a feasible plan always beats an
-                # infeasible one regardless of cost.  Among plans with the
-                # same feasibility status, lower total_cost wins.  Using
-                # total_cost (a plain float) avoids the cross-subclass
-                # TypeError that Score.__lt__ raises when comparing e.g.
-                # SimpleScore (from pure A*) against HardSoftScore (from
-                # the CSP pipeline).
-                best_idx = -1
-                best_plan: Plan | None = None
-                for i, sg in enumerate(raw_goal.goals):
-                    sub_pkeys = _planning_keys(self.actions, sg)
-                    sub_start = PlanningState.from_dict(world_state, keys=sub_pkeys)
-                    candidate = self._plan_single(sub_start, sg, blacklisted)
-                    if candidate is None:
-                        continue
-                    if best_plan is None or _is_better_plan(candidate, best_plan):
-                        best_idx = i
-                        best_plan = candidate
-                if best_plan is None:
+                resolved = self._resolve_any_subgoal(raw_goal, world_state, blacklisted)
+                if resolved is None:
                     logger.warning("MultiGoal 'any' mode: no sub-goal is reachable")
                     return (
                         {
@@ -334,6 +354,7 @@ class GoapPlanner:
                         },
                         was_replan,
                     )
+                best_idx, best_plan = resolved
                 logger.info(
                     "MultiGoal 'any' mode: picked sub-goal %d with cost %.2f",
                     best_idx,
@@ -347,11 +368,11 @@ class GoapPlanner:
             if not was_replan:
                 logger.info("Planning for goal %s", dict(effective_goal.conditions))
 
+        pkeys = _planning_keys(self.actions, effective_goal)
+        start = PlanningState.from_dict(world_state, keys=pkeys)
         if precomputed_result is not None:
             result: Plan | None = precomputed_result
         else:
-            pkeys = _planning_keys(self.actions, effective_goal)
-            start = PlanningState.from_dict(world_state, keys=pkeys)
             result = self._plan_single(start, effective_goal, blacklisted)
 
         # Detect blacklist fallback: if the plan uses a blacklisted action,
@@ -1180,6 +1201,87 @@ def _get_max_retries(action_name: str, actions: list[ActionSpec]) -> int:
     return 0
 
 
+def _resolve_active_goal(state: GoapState) -> GoalSpec | None:
+    """Resolve the goal that was active at termination (handles ``MultiGoal``)."""
+    raw_goal = state.get("goal")
+    if raw_goal is None:
+        return None
+    if isinstance(raw_goal, MultiGoal):
+        idx = state.get("current_subgoal_index", 0)
+        if idx >= len(raw_goal.goals):
+            idx = len(raw_goal.goals) - 1
+        return raw_goal.goals[idx]
+    return raw_goal
+
+
+def _outcome_from_status(status: str) -> str | None:
+    """Map a terminal status string to an ``ExecutionRecord`` outcome, or ``None``."""
+    if status == "goal_achieved":
+        return "success"
+    if status in {"failed", "no_plan", "error"}:
+        return "failed"
+    return None
+
+
+def _is_goal_satisfied(goal: GoalSpec, world_state: dict[str, Any]) -> bool:
+    """Return True when every goal condition is present and equal in ``world_state``.
+
+    ``k in world_state`` must be checked first because ``dict.get(k)`` returns
+    ``None`` for missing keys, which would incorrectly satisfy a ``None``-valued
+    goal condition when the key is simply absent.
+    """
+    return all(
+        k in world_state and world_state[k] == v for k, v in goal.conditions.items()
+    )
+
+
+def _route_multi_goal(
+    raw_goal: MultiGoal, state: GoapState, world_state: dict[str, Any]
+) -> Command[str] | None:
+    """Advance ``MultiGoal`` bookkeeping; ``None`` means fall through to single-goal logic.
+
+    In ``sequential`` mode, a satisfied sub-goal advances the index and
+    resets per-sub-goal accounting (replan budget, blacklist, failure counts).
+    In ``any`` mode, the planner already committed to a specific sub-goal via
+    ``current_subgoal_index`` — satisfying it ends the run; we do not chase
+    the remaining alternatives.
+    """
+    idx = state.get("current_subgoal_index", 0)
+    if idx >= len(raw_goal.goals):
+        return Command(goto=END, update={"status": "goal_achieved"})
+    current_sub = raw_goal.goals[idx]
+    if not _is_goal_satisfied(current_sub, world_state):
+        return None
+    if raw_goal.mode == "sequential" and idx + 1 < len(raw_goal.goals):
+        return Command(
+            goto="planner",
+            update={
+                "current_subgoal_index": idx + 1,
+                "plan": None,
+                "current_step": 0,
+                "replan_reason": "subgoal_achieved",
+                "replan_count": 0,
+                "blacklisted_actions": [],
+                "action_failure_counts": {},
+            },
+        )
+    return Command(goto=END, update={"status": "goal_achieved"})
+
+
+def _route_replan_limit(goal: GoalSpec, state: GoapState) -> Command[str] | None:
+    """Emit a terminal ``failed`` command when the replan budget is exhausted."""
+    replan_count: int = state.get("replan_count", 0)
+    if goal.max_replans > 0 and replan_count >= goal.max_replans:
+        return Command(
+            goto=END,
+            update={
+                "status": "failed",
+                "replan_reason": f"max_replans_exceeded ({goal.max_replans})",
+            },
+        )
+    return None
+
+
 class GoapObserver:
     """LangGraph node that decides the next step via Command routing.
 
@@ -1277,23 +1379,11 @@ class GoapObserver:
         """
         if cmd.goto != END:
             return None
-        raw_goal = state.get("goal")
-        if raw_goal is None:
+        goal = _resolve_active_goal(state)
+        if goal is None:
             return None
-        if isinstance(raw_goal, MultiGoal):
-            idx = state.get("current_subgoal_index", 0)
-            if idx >= len(raw_goal.goals):
-                idx = len(raw_goal.goals) - 1
-            goal: GoalSpec = raw_goal.goals[idx]
-        else:
-            goal = raw_goal
-        update = cmd.update or {}
-        status = update.get("status", "unknown")
-        if status == "goal_achieved":
-            outcome = "success"
-        elif status in {"failed", "no_plan", "error"}:
-            outcome = "failed"
-        else:
+        outcome = _outcome_from_status((cmd.update or {}).get("status", "unknown"))
+        if outcome is None:
             return None
         plan_obj: Plan | None = state.get("plan")
         return ExecutionRecord(
@@ -1342,124 +1432,37 @@ class GoapObserver:
                 update={"status": "error", "replan_reason": "no goal specified"},
             )
 
-        # ``MultiGoal`` dispatch: resolve to the current sub-goal before
-        # the existing single-goal logic runs.  In ``sequential`` mode,
-        # advance ``current_subgoal_index`` when a sub-goal is satisfied.
-        # In ``any`` mode, the planner already committed to a specific
-        # sub-goal via ``current_subgoal_index`` — satisfying it ends
-        # the run (we do not chase the remaining alternatives).
-        goal: GoalSpec
+        # ``MultiGoal`` dispatch: advance sub-goals or short-circuit to
+        # the single-goal logic for the remainder.
         if isinstance(raw_goal, MultiGoal):
-            idx = state.get("current_subgoal_index", 0)
-            if idx >= len(raw_goal.goals):
-                return Command(goto=END, update={"status": "goal_achieved"})
-            current_sub = raw_goal.goals[idx]
-            sub_satisfied = all(
-                k in world_state and world_state[k] == v
-                for k, v in current_sub.conditions.items()
-            )
-            if sub_satisfied:
-                if raw_goal.mode == "sequential" and idx + 1 < len(raw_goal.goals):
-                    # Reset per-sub-goal accounting so the next
-                    # sub-goal gets a fresh replan budget, blacklist,
-                    # and failure counts.  ``max_replans`` is declared
-                    # per ``GoalSpec`` so its budget must also apply
-                    # per sub-goal; similarly, an action blacklisted
-                    # while working on sub-goal i should not carry
-                    # over to sub-goal i+1 which may need it.
-                    return Command(
-                        goto="planner",
-                        update={
-                            "current_subgoal_index": idx + 1,
-                            "plan": None,
-                            "current_step": 0,
-                            "replan_reason": "subgoal_achieved",
-                            "replan_count": 0,
-                            "blacklisted_actions": [],
-                            "action_failure_counts": {},
-                        },
-                    )
-                return Command(goto=END, update={"status": "goal_achieved"})
-            # Not yet satisfied — fall through with the effective sub-goal.
-            goal = current_sub
+            multi_cmd = _route_multi_goal(raw_goal, state, world_state)
+            if multi_cmd is not None:
+                return multi_cmd
+            goal = raw_goal.goals[state.get("current_subgoal_index", 0)]
         else:
             goal = raw_goal
 
-        # Goal achieved — check directly on the world_state dict to
-        # avoid creating a PlanningState (which would choke on
-        # non-hashable values like document lists).
-        # NOTE: must check `k in world_state` first; dict.get(k) returns None
-        # for missing keys, which would incorrectly satisfy a None-valued goal
-        # condition when the key is simply absent.
-        if all(
-            k in world_state and world_state[k] == v for k, v in goal.conditions.items()
-        ):
-            return Command(
-                goto=END,
-                update={"status": "goal_achieved"},
-            )
+        if _is_goal_satisfied(goal, world_state):
+            return Command(goto=END, update={"status": "goal_achieved"})
 
-        # Replan limit exceeded → give up to avoid infinite loops
-        replan_count: int = state.get("replan_count", 0)
-        if goal.max_replans > 0 and replan_count >= goal.max_replans:
-            return Command(
-                goto=END,
-                update={
-                    "status": "failed",
-                    "replan_reason": f"max_replans_exceeded ({goal.max_replans})",
-                },
-            )
+        limit_cmd = _route_replan_limit(goal, state)
+        if limit_cmd is not None:
+            return limit_cmd
 
-        # No plan possible → stop
         if status == "no_plan":
-            return Command(
-                goto=END,
-                update={"status": "no_plan"},
-            )
+            return Command(goto=END, update={"status": "no_plan"})
 
         never = goal.replan_strategy == ReplanStrategy.NEVER
 
-        # Action failed → track failure, blacklist if threshold exceeded, replan
         if status == "action_failed":
-            if never:
-                # With NEVER, treat a failed action as a hard stop.
-                return Command(
-                    goto=END,
-                    update={"status": "failed", "replan_reason": "action_failed"},
-                )
+            return self._route_action_failed(state, never)
 
-            failed_name = _get_last_failed_action(state)
-            if failed_name is not None:
-                counts = dict(state.get("action_failure_counts", {}))
-                counts[failed_name] = counts.get(failed_name, 0) + 1
-                max_retries = _get_max_retries(failed_name, self._actions)
-                blacklist = list(state.get("blacklisted_actions", []))
-                if counts[failed_name] > max_retries:
-                    if failed_name not in blacklist:
-                        blacklist.append(failed_name)
-                return Command(
-                    goto="planner",
-                    update={
-                        "replan_reason": "action_failed",
-                        "action_failure_counts": counts,
-                        "blacklisted_actions": blacklist,
-                    },
-                )
-            return Command(
-                goto="planner",
-                update={"replan_reason": "action_failed"},
-            )
-
-        # EVERY_ACTION replan strategy (not applicable if NEVER)
         if goal.replan_strategy == ReplanStrategy.EVERY_ACTION:
             return Command(
                 goto="planner",
                 update={"replan_reason": "every_action_replan"},
             )
 
-        # Check for state deviation from expected plan (ON_DEVIATION only).
-        # Compare only planning-relevant keys so that changes to execution
-        # context (documents, generations, etc.) don't trigger replanning.
         if (
             not never
             and plan_obj is not None
@@ -1467,24 +1470,15 @@ class GoapObserver:
             and current_step <= len(plan_obj.expected_states)
             and goal.replan_strategy == ReplanStrategy.ON_DEVIATION
         ):
-            pkeys = _planning_keys(self._actions, goal)
-            planning_state = PlanningState.from_dict(world_state, keys=pkeys)
-            expected_raw = plan_obj.expected_states[current_step - 1]
-            # Filter expected state to the same planning keys so
-            # manually-constructed plans (e.g. in tests) don't cause
-            # false deviations from non-planning keys.
-            expected = PlanningState.from_dict(expected_raw.to_dict(), keys=pkeys)
-            if planning_state != expected:
-                return Command(
-                    goto="planner",
-                    update={"replan_reason": "state_deviation"},
-                )
+            deviation_cmd = self._route_deviation_check(
+                goal, plan_obj, world_state, current_step
+            )
+            if deviation_cmd is not None:
+                return deviation_cmd
 
-        # More actions in the plan → continue
         if plan_obj is not None and current_step < len(plan_obj):
             return Command(goto="executor")
 
-        # Plan exhausted but goal not met → replan (unless NEVER)
         if never:
             return Command(
                 goto=END,
@@ -1494,3 +1488,56 @@ class GoapObserver:
             goto="planner",
             update={"replan_reason": "plan_exhausted"},
         )
+
+    def _route_action_failed(self, state: GoapState, never: bool) -> Command[str]:
+        """Handle the ``action_failed`` status: blacklist + replan, or stop."""
+        if never:
+            # With NEVER, treat a failed action as a hard stop.
+            return Command(
+                goto=END,
+                update={"status": "failed", "replan_reason": "action_failed"},
+            )
+        failed_name = _get_last_failed_action(state)
+        if failed_name is None:
+            return Command(
+                goto="planner",
+                update={"replan_reason": "action_failed"},
+            )
+        counts = dict(state.get("action_failure_counts", {}))
+        counts[failed_name] = counts.get(failed_name, 0) + 1
+        blacklist = list(state.get("blacklisted_actions", []))
+        max_retries = _get_max_retries(failed_name, self._actions)
+        if counts[failed_name] > max_retries and failed_name not in blacklist:
+            blacklist.append(failed_name)
+        return Command(
+            goto="planner",
+            update={
+                "replan_reason": "action_failed",
+                "action_failure_counts": counts,
+                "blacklisted_actions": blacklist,
+            },
+        )
+
+    def _route_deviation_check(
+        self,
+        goal: GoalSpec,
+        plan_obj: Plan,
+        world_state: dict[str, Any],
+        current_step: int,
+    ) -> Command[str] | None:
+        """Return a replan command when planning-relevant state has deviated."""
+        # Compare only planning-relevant keys so that changes to execution
+        # context (documents, generations, etc.) don't trigger replanning.
+        pkeys = _planning_keys(self._actions, goal)
+        planning_state = PlanningState.from_dict(world_state, keys=pkeys)
+        expected_raw = plan_obj.expected_states[current_step - 1]
+        # Filter expected state to the same planning keys so
+        # manually-constructed plans (e.g. in tests) don't cause
+        # false deviations from non-planning keys.
+        expected = PlanningState.from_dict(expected_raw.to_dict(), keys=pkeys)
+        if planning_state != expected:
+            return Command(
+                goto="planner",
+                update={"replan_reason": "state_deviation"},
+            )
+        return None

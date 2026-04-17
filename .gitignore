@@ -111,3 +111,6 @@ research/repos/
 # Project-specific
 examples/.Trash*
 .python-version
+
+# MFCQI local analysis outputs (the committed badge lives in .github/badges/)
+.mfcqi-reports/

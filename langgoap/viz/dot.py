@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 
 from langgoap.planner.csp import build_dependency_graph
 
 if TYPE_CHECKING:
-    from langgoap.planner.csp import ScheduleEntry
+    from langgoap.planner.csp import CSPMetadata, ScheduleEntry
     from langgoap.planner.types import Plan
 
 
@@ -50,72 +50,90 @@ def render_dot(
     ]
 
     node_ids = [_node_id(i, a.name) for i, a in enumerate(plan.actions)]
+    csp = plan.metadata.csp
+    schedule = (
+        csp.schedule if (show_schedule and csp is not None and csp.schedule) else None
+    )
 
-    schedule = None
-    if show_schedule and plan.metadata.csp is not None and plan.metadata.csp.schedule:
-        schedule = plan.metadata.csp.schedule
-
-    # Emit nodes (clustered by start-time when schedule is present).
     if schedule is not None and len(schedule) == len(plan.actions):
-        by_start: dict[float, list[int]] = {}
-        for i, entry in enumerate(schedule):
-            by_start.setdefault(entry.start.total_seconds(), []).append(i)
-        for cluster_idx, start_t in enumerate(sorted(by_start)):
-            indices = by_start[start_t]
-            if len(indices) > 1:
-                lines.append(f"    subgraph cluster_{cluster_idx} {{")
-                lines.append(f'        label="t={start_t:g}s";')
-                lines.append('        style="dashed";')
-                for i in indices:
-                    label = _format_label(plan, i, schedule[i])
-                    lines.append(f'        {node_ids[i]} [label="{label}"];')
-                lines.append("    }")
-            else:
-                i = indices[0]
-                label = _format_label(plan, i, schedule[i])
-                lines.append(f'    {node_ids[i]} [label="{label}"];')
+        lines.extend(_emit_scheduled_nodes(plan, node_ids, schedule))
     else:
-        for i, action in enumerate(plan.actions):
-            label = _escape_dot(action.name)
-            cost = action.get_cost({})
-            if cost != 1.0:
-                label = f"{label}\\ncost={cost:g}"
-            lines.append(f'    {node_ids[i]} [label="{label}"];')
+        lines.extend(_emit_unscheduled_nodes(plan, node_ids))
 
-    # Dependency edges
-    deps = build_dependency_graph(plan.actions)
-    has_any_edge = False
-    for j in range(len(plan.actions)):
-        for i in deps[j]:
-            lines.append(f"    {node_ids[i]} -> {node_ids[j]};")
-            has_any_edge = True
+    lines.extend(_emit_edges(plan, node_ids))
 
-    if not has_any_edge and len(plan.actions) > 1:
-        for i in range(len(plan.actions) - 1):
-            lines.append(f"    {node_ids[i]} -> {node_ids[i + 1]} [style=dashed];")
-
-    # Resource legend
-    if (
-        show_resources
-        and plan.metadata.csp is not None
-        and plan.metadata.csp.resource_usage
-    ):
-        legend_lines = ["Resources:"]
-        for usage in plan.metadata.csp.resource_usage:
-            bound = ""
-            if usage.constraint_max is not None:
-                bound = f" / {usage.constraint_max:g}"
-            elif usage.constraint_min is not None:
-                bound = f" >= {usage.constraint_min:g}"
-            status = "OK" if usage.satisfied else "VIOLATED"
-            legend_lines.append(f"{usage.key}: {usage.total:g}{bound} [{status}]")
-        legend = "\\l".join(_escape_dot(line) for line in legend_lines) + "\\l"
-        lines.append(
-            '    legend [shape=note, fillcolor="#fff8dc", ' f'label="{legend}"];'
-        )
+    if show_resources and csp is not None and csp.resource_usage:
+        lines.append(_emit_resource_legend(csp))
 
     lines.append("}")
     return "\n".join(lines) + "\n"
+
+
+def _emit_scheduled_nodes(
+    plan: Plan, node_ids: list[str], schedule: Sequence[ScheduleEntry]
+) -> list[str]:
+    """Emit nodes grouped by start time, wrapping parallel groups in clusters."""
+    by_start: dict[float, list[int]] = {}
+    for i, entry in enumerate(schedule):
+        by_start.setdefault(entry.start.total_seconds(), []).append(i)
+    out: list[str] = []
+    for cluster_idx, start_t in enumerate(sorted(by_start)):
+        indices = by_start[start_t]
+        if len(indices) > 1:
+            out.append(f"    subgraph cluster_{cluster_idx} {{")
+            out.append(f'        label="t={start_t:g}s";')
+            out.append('        style="dashed";')
+            for i in indices:
+                label = _format_label(plan, i, schedule[i])
+                out.append(f'        {node_ids[i]} [label="{label}"];')
+            out.append("    }")
+        else:
+            i = indices[0]
+            label = _format_label(plan, i, schedule[i])
+            out.append(f'    {node_ids[i]} [label="{label}"];')
+    return out
+
+
+def _emit_unscheduled_nodes(plan: Plan, node_ids: list[str]) -> list[str]:
+    """Emit one node per action, annotating non-default costs."""
+    out: list[str] = []
+    for i, action in enumerate(plan.actions):
+        label = _escape_dot(action.name)
+        cost = action.get_cost({})
+        if cost != 1.0:
+            label = f"{label}\\ncost={cost:g}"
+        out.append(f'    {node_ids[i]} [label="{label}"];')
+    return out
+
+
+def _emit_edges(plan: Plan, node_ids: list[str]) -> list[str]:
+    """Emit dependency edges, falling back to a dashed sequential chain."""
+    deps = build_dependency_graph(plan.actions)
+    out: list[str] = []
+    has_any_edge = False
+    for j in range(len(plan.actions)):
+        for i in deps[j]:
+            out.append(f"    {node_ids[i]} -> {node_ids[j]};")
+            has_any_edge = True
+    if not has_any_edge and len(plan.actions) > 1:
+        for i in range(len(plan.actions) - 1):
+            out.append(f"    {node_ids[i]} -> {node_ids[i + 1]} [style=dashed];")
+    return out
+
+
+def _emit_resource_legend(csp: CSPMetadata) -> str:
+    """Build the resource-usage legend node as a single DOT statement."""
+    legend_lines = ["Resources:"]
+    for usage in csp.resource_usage:
+        bound = ""
+        if usage.constraint_max is not None:
+            bound = f" / {usage.constraint_max:g}"
+        elif usage.constraint_min is not None:
+            bound = f" >= {usage.constraint_min:g}"
+        status = "OK" if usage.satisfied else "VIOLATED"
+        legend_lines.append(f"{usage.key}: {usage.total:g}{bound} [{status}]")
+    legend = "\\l".join(_escape_dot(line) for line in legend_lines) + "\\l"
+    return '    legend [shape=note, fillcolor="#fff8dc", ' f'label="{legend}"];'
 
 
 def _format_label(plan: Plan, index: int, schedule_entry: ScheduleEntry) -> str:

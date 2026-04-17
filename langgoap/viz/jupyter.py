@@ -68,49 +68,47 @@ def visualize(
         return render_ascii(
             plan, show_resources=show_resources, show_schedule=show_schedule
         )
-
     if format == "ascii_gantt":
         return render_ascii_gantt(plan)
-
     if format == "mermaid":
-        source = render_mermaid(
-            plan, show_resources=show_resources, show_schedule=show_schedule
-        )
-        if _ipython_available():
-            from IPython.display import Markdown
-
-            return Markdown(f"```mermaid\n{source}\n```")
-        return source
-
-    if format == "gantt":
-        source = render_mermaid_gantt(plan)
-        if _ipython_available():
-            from IPython.display import Markdown
-
-            return Markdown(f"```mermaid\n{source}\n```")
-        return source
-
-    if format == "dot":
-        source = render_dot(
-            plan, show_resources=show_resources, show_schedule=show_schedule
-        )
-        if not _ipython_available():
-            return source
-        try:
-            import graphviz
-        except ImportError:
-            logger.warning(
-                "graphviz Python package not available; returning DOT source."
+        return _wrap_mermaid(
+            render_mermaid(
+                plan, show_resources=show_resources, show_schedule=show_schedule
             )
-            return source
-        try:
-            src = graphviz.Source(source)
-            png_bytes = src.pipe(format="png")
-        except Exception as exc:  # pragma: no cover — environment-dependent
-            logger.warning("graphviz render failed (%s); returning DOT source.", exc)
-            return source
-        from IPython.display import Image
-
-        return Image(png_bytes)
+        )
+    if format == "gantt":
+        return _wrap_mermaid(render_mermaid_gantt(plan))
+    if format == "dot":
+        return _render_dot_display(
+            render_dot(plan, show_resources=show_resources, show_schedule=show_schedule)
+        )
 
     raise ValueError(f"Unknown visualization format: {format!r}")
+
+
+def _wrap_mermaid(source: str) -> str | Any:
+    """Wrap Mermaid source in an IPython Markdown cell when available."""
+    if _ipython_available():
+        from IPython.display import Markdown
+
+        return Markdown(f"```mermaid\n{source}\n```")
+    return source
+
+
+def _render_dot_display(source: str) -> str | Any:
+    """Render DOT source via graphviz+IPython, falling back to raw source."""
+    if not _ipython_available():
+        return source
+    try:
+        import graphviz
+    except ImportError:
+        logger.warning("graphviz Python package not available; returning DOT source.")
+        return source
+    try:
+        png_bytes = graphviz.Source(source).pipe(format="png")
+    except Exception as exc:  # pragma: no cover — environment-dependent
+        logger.warning("graphviz render failed (%s); returning DOT source.", exc)
+        return source
+    from IPython.display import Image
+
+    return Image(png_bytes)
