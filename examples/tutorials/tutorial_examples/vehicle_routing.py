@@ -1,4 +1,4 @@
-r"""Vehicle Routing — the Capacitated Vehicle Routing Problem (CVRP) in LangGoap.
+r"""Vehicle Routing — the Capacitated Vehicle Routing Problem (CVRP) in LangGOAP.
 
 Models a 2-vehicle / 4-customer CVRP subset as GOAP.  Each vehicle
 has a pre-assigned set of customers (clustering happens outside the

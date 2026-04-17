@@ -6,7 +6,7 @@ Read the full contributing guidelines: [`CONTRIBUTING.md`](../CONTRIBUTING.md)
 
 > **All contributions must be in English.** See the language policy in `CONTRIBUTING.md`.
 
-Thank you for contributing to LangGoap! Follow these steps to have your pull request considered as ready for review.
+Thank you for contributing to LangGOAP! Follow these steps to have your pull request considered as ready for review.
 
 1. PR title: Should follow the format `TYPE(SCOPE): DESCRIPTION`
 

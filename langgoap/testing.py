@@ -1,8 +1,8 @@
-"""Public testing utilities for LangGoap.
+"""Public testing utilities for LangGOAP.
 
 Mirrors LangChain's ``langchain.testing`` pattern: small, dependency-free
 helpers that downstream tests, notebooks, and tutorials can use without
-reaching into LangGoap's internal test infrastructure.
+reaching into LangGOAP's internal test infrastructure.
 
 Currently this module exposes:
 
@@ -43,7 +43,7 @@ class FakeStructuredModel(BaseChatModel):
 
     Args:
         response: The object that ``with_structured_output()`` will return.
-            Typically a Pydantic model instance — for LangGoap tutorials this
+            Typically a Pydantic model instance — for LangGOAP tutorials this
             is usually an :class:`langgoap.InterpretedGoal`.
         expected_schema: When provided, ``with_structured_output()`` asserts
             that the requested schema matches.  Use this in tests that want

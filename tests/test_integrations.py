@@ -1,4 +1,4 @@
-"""Unit tests for the LangGoap integration adapters.
+"""Unit tests for the LangGOAP integration adapters.
 
 Covers all three layers of the low-code on-ramp:
 - Layer B: ``goapify_tool`` (BaseTool -> ActionSpec)

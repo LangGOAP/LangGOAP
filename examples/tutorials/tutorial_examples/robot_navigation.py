@@ -4,9 +4,9 @@ Reference: ``research/repos/unified-planning/docs/notebooks/01-basic-example.ipy
 where a robot moves between ``NLOC`` locations connected in a chain,
 starting at ``l0`` and seeking ``l9``.
 
-LangGoap translation
+LangGOAP translation
 --------------------
-The original uses parameterized fluents (``robot_at(l)``).  LangGoap's
+The original uses parameterized fluents (``robot_at(l)``).  LangGOAP's
 world state is a plain ``dict[str, Any]`` so we model each location as
 its own boolean key: ``at_l0``, ``at_l1``, …, ``at_l9``.  A ``move``
 action between two specific locations becomes its own ``ActionSpec``:

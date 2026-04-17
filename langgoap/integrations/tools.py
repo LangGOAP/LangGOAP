@@ -1,4 +1,4 @@
-"""Adapter from LangChain ``BaseTool`` to LangGoap ``ActionSpec``.
+"""Adapter from LangChain ``BaseTool`` to LangGOAP ``ActionSpec``.
 
 Layer B of the three-layer low-code on-ramp (AD-2).  Fully
 deterministic — preconditions, effects, cost, resources, duration,
@@ -73,7 +73,7 @@ def goapify_tool(
     effect_validator: EffectValidator | None = None,
     result_key: str | None = None,
 ) -> ActionSpec:
-    """Wrap a LangChain :class:`BaseTool` into a LangGoap :class:`ActionSpec`.
+    """Wrap a LangChain :class:`BaseTool` into a LangGOAP :class:`ActionSpec`.
 
     The resulting action's ``execute`` callable invokes ``tool`` with the
     state dict filtered to match the tool's declared input schema (if any)

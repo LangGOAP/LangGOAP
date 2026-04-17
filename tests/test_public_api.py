@@ -1,4 +1,4 @@
-"""Tests for the public API surface of LangGoap."""
+"""Tests for the public API surface of LangGOAP."""
 
 from __future__ import annotations
 

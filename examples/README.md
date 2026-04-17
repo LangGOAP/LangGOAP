@@ -1,7 +1,7 @@
-# LangGoap Notebooks
+# LangGOAP Notebooks
 
 This directory contains Jupyter notebooks that serve as **runnable
-documentation** for LangGoap. They come in two flavours:
+documentation** for LangGOAP. They come in two flavours:
 
 - **Basics** (`basics/`) — short primers that each demonstrate a single
   mechanic such as plan visualisation or natural-language goal intake.

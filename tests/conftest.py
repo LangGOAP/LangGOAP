@@ -1,4 +1,4 @@
-"""Shared test fixtures and helpers for LangGoap tests."""
+"""Shared test fixtures and helpers for LangGOAP tests."""
 
 from __future__ import annotations
 

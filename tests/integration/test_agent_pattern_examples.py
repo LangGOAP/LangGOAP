@@ -1,4 +1,4 @@
-"""Integration tests for canonical agent workflow patterns in LangGoap.
+"""Integration tests for canonical agent workflow patterns in LangGOAP.
 
 Each test exercises a common agent pattern end-to-end through
 :class:`GoapGraph`:
@@ -360,7 +360,7 @@ class TestFactChecker:
 # Example 5: Cost-Based Agent Selection
 #
 # Mark expensive actions with a high ``cost`` to push them to last resort.
-# This test verifies that LangGoap's A* planner correctly prefers cheap
+# This test verifies that LangGOAP's A* planner correctly prefers cheap
 # actions over expensive ones, only falling back when necessary.
 # ===========================================================================
 

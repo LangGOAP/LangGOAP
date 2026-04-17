@@ -93,7 +93,7 @@ class TestHierarchicalTeamsGoapified:
     def test_multi_goal_document_and_visualization(self) -> None:
         """Achieving both document and visualization requires broader planning.
 
-        Since LangGoap currently supports single goals, we combine them into
+        Since LangGOAP currently supports single goals, we combine them into
         one goal with both conditions. The planner must find a path that
         satisfies both.
         """

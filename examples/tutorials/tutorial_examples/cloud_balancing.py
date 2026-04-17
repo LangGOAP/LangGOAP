@@ -1,4 +1,4 @@
-"""Cloud Balancing — the classic cloud-balancing bin-packing problem in LangGoap.
+"""Cloud Balancing — the classic cloud-balancing bin-packing problem in LangGOAP.
 
 Models the cloud-balancing assignment problem as a GOAP problem: every
 process must be assigned to exactly one computer, no computer may

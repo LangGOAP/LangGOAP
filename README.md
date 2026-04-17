@@ -1,11 +1,11 @@
-# LangGoap
+# LangGOAP
 
 **Goal-Oriented Action Planning for [LangGraph](https://langchain-ai.github.io/langgraph/), with constraint optimization.**
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 
-LangGoap turns a declarative goal and a set of actions into a **compiled
+LangGOAP turns a declarative goal and a set of actions into a **compiled
 LangGraph `StateGraph`** that plans, executes, and replans. It combines
 classical GOAP A\* search with OR-Tools CP-SAT constraint optimization
 and LLM-driven natural-language goal interpretation, and ships as a
@@ -15,9 +15,9 @@ Built by [Integrallis Software](https://integrallis.com).
 
 ---
 
-## Why LangGoap
+## Why LangGOAP
 
-| Capability                              | LangGoap | `create_react_agent` |
+| Capability                              | LangGOAP | `create_react_agent` |
 |-----------------------------------------|:--------:|:--------------------:|
 | A\* planning over explicit actions      |    Yes   |          No          |
 | Resource constraints (hard + soft)      |    Yes   |          No          |
@@ -130,7 +130,7 @@ async with AsyncPostgresSaver.from_conn_string(dsn) as saver:
 
 ## Three-layer low-code on-ramp
 
-LangGoap ships three integration layers so you can start simple and
+LangGOAP ships three integration layers so you can start simple and
 graduate without rewriting action definitions.
 
 ```text
@@ -280,10 +280,10 @@ by their corresponding integration tests under `tests/integration/`.
 
 ## Inspiration
 
-LangGoap builds on ideas and implementations from several projects:
+LangGOAP builds on ideas and implementations from several projects:
 
 - **[GOAP](https://alumni.media.mit.edu/~jorkin/gdc2006_orkin_jeff_fear.pdf)** (Jeff Orkin / F.E.A.R.) — Goal-Oriented Action Planning, the
-  classical game-AI technique that drives LangGoap's A\* planner.
+  classical game-AI technique that drives LangGOAP's A\* planner.
 - **[Embabel](https://github.com/embabel/embabel-agent)** — first to
   apply GOAP planning to agentic LLM workflows, demonstrating that
   declarative goals + action preconditions/effects can replace
@@ -294,15 +294,15 @@ LangGoap builds on ideas and implementations from several projects:
   [`docs/optaplanner_mapping.md`](docs/optaplanner_mapping.md) for the
   full concept mapping.
 - **[OR-Tools CP-SAT](https://developers.google.com/optimization/cp/cp_solver)** —
-  constraint solver backing LangGoap's CSP pipeline for resource
+  constraint solver backing LangGOAP's CSP pipeline for resource
   validation, temporal scheduling, and multi-plan optimization.
 - **[GOApy](https://github.com/leopoldmaillard/GOApy)** — pure Python
   GOAP implementation used as a reference for A\* search correctness.
 - **[unified-planning](https://github.com/aiplan4eu/unified-planning)** —
   formal AI planning concepts (temporal, numeric, PDDL interop) that
-  informed LangGoap's action/effect model.
+  informed LangGOAP's action/effect model.
 - **[LangGraph](https://langchain-ai.github.io/langgraph/)** — the
-  runtime substrate. LangGoap plans compile to real `StateGraph`
+  runtime substrate. LangGOAP plans compile to real `StateGraph`
   instances and integrate natively with checkpointers, stores, and the
   rest of the LangChain ecosystem.
 
@@ -324,7 +324,7 @@ uv run pytest tests/integration/test_flexible_job_shop.py -vv
 uv run pytest -m api
 ```
 
-LangGoap is developed test-first: every feature starts with a failing
+LangGOAP is developed test-first: every feature starts with a failing
 integration test that uses real infrastructure via TestContainers,
 never mocks. Notebooks are runnable documentation of what the tests
 already verify — never the other way around.

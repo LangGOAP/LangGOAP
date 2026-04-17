@@ -29,7 +29,7 @@ Out of scope for this tutorial
 ------------------------------
 
 - **Renewable resource capacities** (machines/labor constrained per
-  time slice).  LangGoap's CSP supports *total* resource
+  time slice).  LangGOAP's CSP supports *total* resource
   aggregation but not per-period capacity — exactly the same
   limitation documented in the vehicle routing fixture.  A
   post-v0.1.0 extension could push these into CP-SAT directly via

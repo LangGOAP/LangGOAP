@@ -1,20 +1,20 @@
-# OptaPlanner ↔ LangGoap Concept Mapping
+# OptaPlanner ↔ LangGOAP Concept Mapping
 
-LangGoap draws on OptaPlanner's vocabulary but does **not** reimplement
+LangGOAP draws on OptaPlanner's vocabulary but does **not** reimplement
 OptaPlanner.  OR-Tools CP-SAT already provides branch-and-bound search,
 propagation, no-good learning, restarts, and the full family of moves
 (change, swap, list-change) that OptaPlanner exposes as Java classes.
 Reimplementing those constructs on top of CP-SAT would be strictly
 worse: slower, less tested, and with no gain in expressiveness.
 
-Instead, LangGoap exposes a **Python-facing hierarchy** that makes the
+Instead, LangGOAP exposes a **Python-facing hierarchy** that makes the
 OptaPlanner concepts legible to users while leaving the heavy lifting
 to CP-SAT.  This document lists the mapping so OptaPlanner users can
 find their bearings quickly.
 
 ## Concept table
 
-| OptaPlanner concept         | LangGoap equivalent                          | Location                              |
+| OptaPlanner concept         | LangGOAP equivalent                          | Location                              |
 | --------------------------- | -------------------------------------------- | ------------------------------------- |
 | `Solver`                    | `GoapGraph` (the compiled LangGraph)         | `langgoap.graph.builder`              |
 | `SolverFactory`             | `GoapGraph.__init__` + `.compile()`          | `langgoap.graph.builder`              |
@@ -80,7 +80,7 @@ simulated annealing, …).  CP-SAT subsumes **every one of these** via:
    `ChainedGraphMove` and `ListChangeMove` for scheduling problems.
 
 Writing a `ChangeMove` class in Python would be strictly slower than
-letting CP-SAT decide how to mutate the assignment.  LangGoap
+letting CP-SAT decide how to mutate the assignment.  LangGOAP
 therefore exposes CP-SAT at the `csp.py` level and does not duplicate
 the moves as Python classes.
 
@@ -142,7 +142,7 @@ constraints or objectives.
 ## What is **not** mapped
 
 The following OptaPlanner features are explicitly out of scope for
-LangGoap v0.1.0:
+LangGOAP v0.1.0:
 
 - **`SolutionPartitioner`** — the partitioned search is an OptaPlanner-
   specific mechanism for splitting a single problem across threads.
@@ -153,7 +153,7 @@ LangGoap v0.1.0:
   users get explicit `ActionSpec`, `GoalSpec`, and `Plan` dataclasses
   instead, which are easier to type-check and compose.
 - **Benchmarker** — OptaPlanner ships a solution-quality benchmarker.
-  Not yet in LangGoap; tracked for a post-v0.1.0 release.
+  Not yet in LangGOAP; tracked for a post-v0.1.0 release.
 - **Custom `Move` classes** — see above.  Write a `PlanningStrategy`
   if you need to inject non-CP-SAT search behavior.
 

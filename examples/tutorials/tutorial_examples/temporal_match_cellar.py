@@ -2,15 +2,15 @@ r"""Temporal Match Cellar — Tier 3 tutorial showcasing durative actions,
 CSP temporal scheduling, parallelization, and Gantt visualization.
 
 Translates the classic *match cellar* temporal planning example from
-unified-planning/03 into LangGoap.  In the original problem an agent
+unified-planning/03 into LangGOAP.  In the original problem an agent
 must mend a set of fuses in a dark cellar, and mending requires light
 from a match that burns for a fixed time — introducing a temporal
 overlap constraint that is the hallmark of durative-action planning.
 
-LangGoap's CSP phase cannot express the *over-all* "light must be on
+LangGOAP's CSP phase cannot express the *over-all* "light must be on
 during mend" constraint directly (the scheduler uses strict
 end-before-start precedence, not interval containment).  The domain
-is therefore recast into a form LangGoap can represent exactly:
+is therefore recast into a form LangGOAP can represent exactly:
 
 - Lighting a match takes 6 seconds and *leaves behind* a
   ``light_N_ready`` flag.  This models "the match has been lit and
@@ -19,7 +19,7 @@ is therefore recast into a form LangGoap can represent exactly:
   ``light_N_ready`` flag.  It also requires the previous fuse to be
   mended, which encodes the single-hand mutex chain.
 
-The simplification makes the temporal story visible to LangGoap's
+The simplification makes the temporal story visible to LangGOAP's
 scheduler: lighting matches is **independent work** that can run in
 parallel, and mending fuses is **sequential work** because of the
 hand mutex.  Every notebook assertion pins exactly what the pipeline
@@ -42,7 +42,7 @@ What this tutorial spotlights
    ``fuse_(N-1)_mended=True`` as a precondition, which translates
    into a dependency-graph edge that the scheduler honors by
    serializing the mends.  This is the *right* way to express a
-   single-hand mutex in a LangGoap action model: encode it in the
+   single-hand mutex in a LangGOAP action model: encode it in the
    preconditions, not in resource totals.
 
 4. **Gantt visualization** — :func:`~langgoap.viz.render_ascii_gantt`

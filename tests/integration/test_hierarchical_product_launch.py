@@ -278,7 +278,7 @@ class TestPerSubgoalReplanBudget:
         zero — otherwise a cumulative budget would poison the launch
         stage whenever an earlier stage hiccuped.
 
-        In LangGoap, ``max_retries`` is the *blacklist threshold*, not
+        In LangGOAP, ``max_retries`` is the *blacklist threshold*, not
         an in-step retry counter.  Every action failure routes the
         observer back to the planner, incrementing ``replan_count``
         and firing ``on_replan``.  The per-sub-goal reset in

@@ -1,13 +1,13 @@
 # Changelog
 
-All notable changes to LangGoap are documented in this file.
+All notable changes to LangGOAP are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.1.0] — 2026-04-11
 
-Initial public release. LangGoap is a Goal-Oriented Action Planning
+Initial public release. LangGOAP is a Goal-Oriented Action Planning
 framework for LangGraph with constraint optimization, natural-language
 goal interpretation, and a LangChain-first execution model in which the
 plan **is** a compiled `StateGraph`.
@@ -152,7 +152,7 @@ rostering, project job scheduling, task assigning). Every instance is
 derived from a small fixture committed under
 `examples/tutorials/tutorial_examples/data/` with provenance headers.
 `docs/optaplanner_mapping.md` explains how constraint-solver concepts
-map to LangGoap classes.
+map to LangGOAP classes.
 
 ### Observability, history, and visualization
 
@@ -196,7 +196,7 @@ map to LangGoap classes.
 
 ### Checkpointer support
 
-- **Custom ormsgpack serializers** for LangGoap's frozen dataclasses.
+- **Custom ormsgpack serializers** for LangGOAP's frozen dataclasses.
   `MappingProxyType`, `frozenset`, `timedelta`, and `tuple` are all
   round-tripped correctly through LangGraph's checkpoint wire format.
   Callable fields (`execute`, `aexecute`, `effect_validator`) are

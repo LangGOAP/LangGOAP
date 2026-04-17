@@ -1,6 +1,6 @@
 """Shared execute functions for the Agent Pattern Examples tutorial.
 
-Five canonical agent workflow patterns rendered in LangGoap:
+Five canonical agent workflow patterns rendered in LangGOAP:
 
 1. Star News Finder — multi-step LLM pipeline with web search.
 2. Meal Preparation — parallel preconditions merging at a single goal.

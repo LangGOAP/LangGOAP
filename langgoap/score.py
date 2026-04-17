@@ -1,6 +1,6 @@
 """Score hierarchy for plan evaluation.
 
-LangGoap uses a tiered score hierarchy for comparing plans:
+LangGOAP uses a tiered score hierarchy for comparing plans:
 
 * :class:`SimpleScore` — one scalar; used when a plan has no constraint
   context (e.g. after pure A* planning).

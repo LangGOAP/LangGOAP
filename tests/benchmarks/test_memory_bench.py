@@ -1,4 +1,4 @@
-"""Memory benchmarks for LangGoap's core frozen dataclasses.
+"""Memory benchmarks for LangGOAP's core frozen dataclasses.
 
 Measures per-instance memory footprint for every hot-path dataclass:
 PlanningState, ActionSpec, Plan, PlanMetadata, GoalSpec, CSPMetadata,

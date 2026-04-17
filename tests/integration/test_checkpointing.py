@@ -29,7 +29,7 @@ These three invariants are what users actually rely on when they reach
 for a checkpointer, so the test suite asserts them directly rather than
 testing individual LangGraph primitives.
 
-LangGoap's frozen dataclasses wrap dict fields in ``MappingProxyType``
+LangGOAP's frozen dataclasses wrap dict fields in ``MappingProxyType``
 for deep immutability.  LangGraph's stock ``JsonPlusSerializer`` cannot
 encode ``MappingProxyType``, so :class:`GoapGraph` auto-installs
 ``LangGoapSerializer`` on every checkpointer that reaches ``compile()``.

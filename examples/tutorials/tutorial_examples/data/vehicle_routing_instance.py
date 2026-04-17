@@ -19,7 +19,7 @@ exercising:
   schedules both chains in parallel, yielding a real two-lane Gantt.
 
 The full benchmark instance supports time windows (``cvrptw-*.vrp``
-fixtures).  LangGoap's CSP scheduler currently optimizes precedence
+fixtures).  LangGOAP's CSP scheduler currently optimizes precedence
 + duration + makespan only, so time windows are deliberately out of
 scope for this tutorial.  The demands and capacities below are
 proportional to the original CVRP values.

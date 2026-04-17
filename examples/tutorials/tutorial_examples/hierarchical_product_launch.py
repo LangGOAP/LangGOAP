@@ -2,7 +2,7 @@ r"""Hierarchical product launch — Tier 3 ``MultiGoal`` sequential tutorial.
 
 A SaaS product launch decomposes naturally into three stages that must
 run in order: you cannot build what you have not specified, and you
-cannot announce what you have not built.  LangGoap expresses this with
+cannot announce what you have not built.  LangGOAP expresses this with
 a :class:`~langgoap.MultiGoal` in ``"sequential"`` mode — the observer
 plans and executes sub-goal 0 to completion, then uses the resulting
 world state as the starting state for sub-goal 1, and so on.

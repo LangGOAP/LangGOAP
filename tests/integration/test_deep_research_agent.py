@@ -1,6 +1,6 @@
 r"""Integration test for the deep research agent tutorial (Tier 3).
 
-Exercises LangGoap against the hermetic in-memory research corpus in
+Exercises LangGOAP against the hermetic in-memory research corpus in
 ``examples/tutorials/tutorial_examples/data/deep_research_instance.py``.
 The battery pins the five features the tutorial showcases:
 

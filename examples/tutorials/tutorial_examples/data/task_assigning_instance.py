@@ -8,7 +8,7 @@ Derived from reference benchmark data for the task-assigning problem
 
 We collapse the problem to **6 tasks x 3 employees x 4 skills x 4
 task types** and squash the multi-level soft score into a single
-weighted ``weighted_delay`` resource so the current LangGoap
+weighted ``weighted_delay`` resource so the current LangGOAP
 ``HardSoftScore`` covers it.  The mapping is:
 
 - **Hard constraint — no missing skills** → skill matching at

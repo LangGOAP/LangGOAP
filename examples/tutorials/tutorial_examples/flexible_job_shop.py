@@ -26,14 +26,14 @@ Flexible job shop — mode flexibility, not machine flexibility
 
 The classic Flexible Job Shop Scheduling Problem (FJSSP) lets each
 operation run on one of several eligible machines with different
-processing times.  LangGoap's CP-SAT scheduler does not model machine
+processing times.  LangGOAP's CP-SAT scheduler does not model machine
 mutex natively (no ``NoOverlap`` per-machine resource), so the FJSSP
 "choose a machine" decision is recast here as a
 **"choose a mode"** decision on each operation: ``express`` runs on
 an in-house fast machine that is pricey per hour; ``standard`` runs on
 a cloud worker that is cheap but slow.  This is the same recasting
 that ``project_job_scheduling.py`` (notebook 7) uses for MRCPSP, and it
-is the idiomatic LangGoap pattern for "flexibility" problems.
+is the idiomatic LangGOAP pattern for "flexibility" problems.
 
 GOAP modelling
 --------------

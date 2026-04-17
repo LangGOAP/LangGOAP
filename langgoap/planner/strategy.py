@@ -1,6 +1,6 @@
 """Planning strategy hierarchy.
 
-LangGoap supports pluggable planning strategies via the
+LangGOAP supports pluggable planning strategies via the
 :class:`PlanningStrategy` Protocol.  A strategy takes a start state,
 a goal, and a list of actions, and returns a single
 :class:`~langgoap.planner.types.Plan` (or ``None``).

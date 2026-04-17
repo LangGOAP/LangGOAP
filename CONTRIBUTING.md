@@ -1,8 +1,8 @@
-# Contributing to LangGoap
+# Contributing to LangGOAP
 
-Hi there! Thank you for even being interested in contributing to LangGoap.
+Hi there! Thank you for even being interested in contributing to LangGOAP.
 
-LangGoap is an open-source Goal-Oriented Action Planning framework built
+LangGOAP is an open-source Goal-Oriented Action Planning framework built
 on top of the LangChain/LangGraph ecosystem. It is maintained by
 [Integrallis](https://integrallis.com). We follow the same general
 contribution style as the upstream LangChain projects so that moving
@@ -41,7 +41,7 @@ docstrings, identifiers, and user-facing strings.
 
 ## Development setup
 
-LangGoap uses [`uv`](https://docs.astral.sh/uv/) for dependency
+LangGOAP uses [`uv`](https://docs.astral.sh/uv/) for dependency
 management and virtual environments.
 
 ```bash
@@ -87,7 +87,7 @@ under `tests/integration/`.
 
 ## Commit and PR title conventions
 
-LangGoap uses [conventional commits](https://www.conventionalcommits.org/).
+LangGOAP uses [conventional commits](https://www.conventionalcommits.org/).
 PR titles should follow the format:
 
 ```

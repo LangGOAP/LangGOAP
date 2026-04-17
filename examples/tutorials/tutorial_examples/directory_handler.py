@@ -1,4 +1,4 @@
-"""Directory Handler — Tier 1 primer for LangGoap.
+"""Directory Handler — Tier 1 primer for LangGOAP.
 
 A minimal end-to-end GOAP loop adapted from GOApy's ``directory_handler``
 example (``research/repos/GOApy/examples/directory_handler``).
@@ -46,7 +46,7 @@ def _token_exists(workspace: Path) -> bool:
 def initial_world_state(workspace: Path) -> dict[str, Any]:
     """Sense the filesystem once and return the starting world state.
 
-    LangGoap's executor reads the state keys directly, so we hand the
+    LangGOAP's executor reads the state keys directly, so we hand the
     planner concrete ``bool``s rather than GOApy's string enums.
     """
     return {

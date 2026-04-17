@@ -6,7 +6,7 @@ Three on-ramps from "figure it out for me" to "full control":
   from a tool list and a goal, mirroring ``langgraph.prebuilt
   .create_react_agent``.  Fastest way to get a running GOAP agent.
 * :func:`goapify_tool` (Layer B) — deterministic adapter from a
-  LangChain :class:`~langchain_core.tools.BaseTool` to a LangGoap
+  LangChain :class:`~langchain_core.tools.BaseTool` to a LangGOAP
   :class:`~langgoap.actions.ActionSpec`.  Used internally by Layer A
   and directly by users who want to build their own action list.
 * :class:`GoapSubgraph` and :func:`add_goap_subgraph` (Layer C) —

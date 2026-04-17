@@ -1,4 +1,4 @@
-# LangGoap Tutorial Notebooks
+# LangGOAP Tutorial Notebooks
 
 This directory contains runnable tutorial notebooks. The **v0.1.0 featured
 catalog** below is the set of notebooks published on the documentation site
@@ -57,7 +57,7 @@ runnable documentation; the integration test is the source of truth.
 
 The notebooks below predate the v0.1.0 featured catalog. They are kept in
 the repository because each one is backed by a passing integration test
-and exercises real LangGoap APIs, but they are **not published on the
+and exercises real LangGOAP APIs, but they are **not published on the
 documentation site** and are not advertised from the project README.
 Expect overlap with the featured catalog — some Tier 2/3 notebooks cover
 similar ground more thoroughly.
@@ -75,8 +75,8 @@ similar ground more thoroughly.
 The three `langgraph_*_original.ipynb` files are unmodified copies of the
 upstream LangGraph tutorials that the `*_goapified` notebooks above
 translate into GOAP. They are kept alongside the goapified versions so
-readers can compare the two side-by-side. They are **not** LangGoap code
-and do not run against LangGoap APIs.
+readers can compare the two side-by-side. They are **not** LangGOAP code
+and do not run against LangGOAP APIs.
 
 - `langgraph_adaptive_rag_original.ipynb`
 - `langgraph_hierarchical_agent_teams_original.ipynb`

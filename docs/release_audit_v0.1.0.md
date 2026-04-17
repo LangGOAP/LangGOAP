@@ -1,6 +1,6 @@
 # v0.1.0 Release Audit
 
-Post-release audit for LangGoap v0.1.0. Records the state of the
+Post-release audit for LangGOAP v0.1.0. Records the state of the
 release gate, must-have coverage, and any residual items explicitly
 deferred.
 
@@ -147,7 +147,7 @@ v0.1.0 in the plan and remain deferred:
   kernel spawn, sometimes picking up a system-wide pyenv interpreter
   rather than the uv venv. Workaround is to drive execution
   programmatically via `nbclient.NotebookClient`. This is a tooling
-  issue in jupyter's kernel resolution and not a LangGoap bug, so it
+  issue in jupyter's kernel resolution and not a LangGOAP bug, so it
   does not block the release. Documented in the Notebook 15 commit
   and this audit so future maintainers know the workaround.
 

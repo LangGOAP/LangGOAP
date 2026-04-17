@@ -1,4 +1,4 @@
-"""LangGoap: Goal-Oriented Action Planning framework for LangGraph."""
+"""LangGOAP: Goal-Oriented Action Planning framework for LangGraph."""
 
 from langgoap._version import __version__
 from langgoap.actions import ActionSpec, GoapAction, goap_action

@@ -7,7 +7,7 @@ Imported by:
 Note: The original Adaptive RAG also includes a ``transform_query`` step that
 rewrites the question after failed document grading.  Full query-transform
 routing requires action blacklisting (so the planner stops re-selecting the
-same failing retrieval path), which is planned for a future LangGoap release.
+same failing retrieval path), which is planned for a future LangGOAP release.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-r"""Project Job Scheduling — the Multi-mode RCPSP in LangGoap.
+r"""Project Job Scheduling — the Multi-mode RCPSP in LangGOAP.
 
 Models the multi-mode Resource-Constrained Project Scheduling Problem
 (MRCPSP) as GOAP.  Each job has one or more modes

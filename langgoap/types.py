@@ -1,4 +1,4 @@
-"""Core type definitions for LangGoap."""
+"""Core type definitions for LangGOAP."""
 
 from __future__ import annotations
 

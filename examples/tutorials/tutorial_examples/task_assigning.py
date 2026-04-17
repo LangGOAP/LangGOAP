@@ -1,4 +1,4 @@
-r"""Task Assigning — the task-assigning problem in LangGoap.
+r"""Task Assigning — the task-assigning problem in LangGOAP.
 
 Models the task-assigning problem as GOAP.  Each task must be
 assigned to exactly one employee; skill matching is a hard constraint

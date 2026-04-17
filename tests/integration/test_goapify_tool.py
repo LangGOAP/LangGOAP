@@ -1,6 +1,6 @@
 """Integration tests for ``langgoap.integrations.tools.goapify_tool``.
 
-The adapter converts a LangChain ``BaseTool`` to a LangGoap
+The adapter converts a LangChain ``BaseTool`` to a LangGOAP
 ``ActionSpec`` with explicit pre/eff/cost/resources.  Layer B of
 the three-layer low-code on-ramp (AD-2).
 """

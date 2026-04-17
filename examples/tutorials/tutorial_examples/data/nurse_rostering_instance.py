@@ -20,7 +20,7 @@ Standard NRP concepts that are **out of scope** for this tutorial:
 - Multi-day patterns and consecutive-work-day limits — the fixture
   is a single day.
 - Unwanted shift patterns — encoding these would require action-
-  chain history tracking which LangGoap's flat world state can only
+  chain history tracking which LangGOAP's flat world state can only
   approximate via per-nurse counters.
 - Contract-level min/max assignment counts — trivially expressible
   as resource totals but add no pedagogical value for a 1-day demo.

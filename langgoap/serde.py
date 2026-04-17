@@ -1,15 +1,15 @@
-"""Custom serializer that handles LangGoap's ``MappingProxyType`` fields.
+"""Custom serializer that handles LangGOAP's ``MappingProxyType`` fields.
 
-LangGoap's frozen dataclasses (:class:`~langgoap.actions.ActionSpec`,
+LangGOAP's frozen dataclasses (:class:`~langgoap.actions.ActionSpec`,
 :class:`~langgoap.goals.GoalSpec`, :class:`~langgoap.planner.types.Plan`,
 etc.) wrap every dict field in ``types.MappingProxyType`` inside
 ``__post_init__``.  ``frozen=True`` on a dataclass only prevents the
 *attribute* being rebound — it does not stop the wrapped dict from being
-mutated in place — so ``MappingProxyType`` is how LangGoap enforces
+mutated in place — so ``MappingProxyType`` is how LangGOAP enforces
 deep immutability on the planning state.
 
 LangGraph's stock ``JsonPlusSerializer`` has two encoding gaps for
-LangGoap:
+LangGOAP:
 
 1. **``MappingProxyType`` has no msgpack encoding.**  The stock default
    handler raises ``TypeError: Type is not msgpack serializable: GoalSpec``
@@ -36,7 +36,7 @@ This module ships two serializer subclasses:
   RedisJSON, requiring JSON-serializable bytes from ``dumps_typed``.
   This subclass preserves the JSON-first encoding from
   ``JsonPlusRedisSerializer`` and only overrides the msgpack fallback
-  path to use LangGoap's custom encoder.
+  path to use LangGOAP's custom encoder.
 
 :func:`install_langgoap_serde` auto-detects which backend the
 checkpointer uses and installs the correct subclass.
@@ -133,7 +133,7 @@ def _langgoap_msgpack_default(obj: Any) -> Any:
         # Own the dataclass branch for the same reason we own the set
         # branch: the stock handler recurses through the module-level
         # ``_msgpack_enc`` which uses the stock default, bypassing our
-        # hook and losing every LangGoap-specific encoding inside a
+        # hook and losing every LangGOAP-specific encoding inside a
         # dataclass field.
         #
         # Callable fields (execute, aexecute, effect_validator,
@@ -175,14 +175,14 @@ def _langgoap_msgpack_enc(obj: Any) -> bytes:
 
 
 class LangGoapSerializer(JsonPlusSerializer):
-    """``JsonPlusSerializer`` subclass that supports LangGoap state.
+    """``JsonPlusSerializer`` subclass that supports LangGOAP state.
 
     Overrides ``dumps_typed`` to route msgpack encoding through
     :func:`_langgoap_msgpack_enc`.  The ``loads_typed`` path is unchanged
     because the stock ext hook already handles every Ext code we emit
     (``EXT_CONSTRUCTOR_SINGLE_ARG`` reconstructs tuples and sets via
     ``cls(arg)``; ``EXT_CONSTRUCTOR_KW_ARGS`` reconstructs dataclasses
-    via ``cls(**kwargs)``).  LangGoap's dataclass ``__post_init__``
+    via ``cls(**kwargs)``).  LangGOAP's dataclass ``__post_init__``
     hooks re-wrap decoded dicts into ``MappingProxyType`` automatically.
     """
 
@@ -232,7 +232,7 @@ def _make_langgoap_redis_serializer_cls() -> type:
     base = _get_redis_serializer_base()
 
     class LangGoapRedisSerializer(base):  # type: ignore[valid-type,misc]
-        """``JsonPlusRedisSerializer`` subclass that supports LangGoap state.
+        """``JsonPlusRedisSerializer`` subclass that supports LangGOAP state.
 
         The Redis checkpointer stores checkpoint data as RedisJSON, which
         requires every value to be JSON-serializable.  The stock
@@ -240,7 +240,7 @@ def _make_langgoap_redis_serializer_cls() -> type:
         encoding path (``orjson`` + ``_preprocess_interrupts``), falling
         back to msgpack only for structures containing ``bytes``.
 
-        LangGoap's frozen dataclasses contain two types that the stock
+        LangGOAP's frozen dataclasses contain two types that the stock
         preprocessor doesn't handle:
 
         - ``MappingProxyType`` (deep-immutable dict wrapper)
@@ -355,7 +355,7 @@ def _make_langgoap_redis_serializer_cls() -> type:
             else:
                 try:
                     # JSON-first path.  Works for metadata dicts, simple
-                    # scalars, and LangGoap dataclasses (after
+                    # scalars, and LangGOAP dataclasses (after
                     # _preprocess_interrupts converts MappingProxyType /
                     # frozenset to JSON-safe LC constructor format).
                     processed_obj = self._preprocess_interrupts(obj)
@@ -366,7 +366,7 @@ def _make_langgoap_redis_serializer_cls() -> type:
                     )
                     return "json", json_bytes
                 except (TypeError, Exception):
-                    # Fallback to LangGoap's custom msgpack encoder for
+                    # Fallback to LangGOAP's custom msgpack encoder for
                     # anything JSON can't handle.
                     try:
                         return "msgpack", _langgoap_msgpack_enc(obj)
@@ -417,14 +417,14 @@ def _is_redis_serde(serde: Any) -> bool:
 def install_langgoap_serde(
     checkpointer: BaseCheckpointSaver,
 ) -> BaseCheckpointSaver:
-    """Replace the checkpointer's serde with a LangGoap-aware variant.
+    """Replace the checkpointer's serde with a LangGOAP-aware variant.
 
     Auto-detects the backend:
 
     - **Redis** checkpointers (whose stock serde is
       ``JsonPlusRedisSerializer``) get a ``LangGoapRedisSerializer``
       that preserves the JSON-first encoding required by ``_dump_metadata``
-      and falls back to LangGoap's custom msgpack encoder.
+      and falls back to LangGOAP's custom msgpack encoder.
     - **All other** checkpointers (``MemorySaver``, ``PostgresSaver``, …)
       get a :class:`LangGoapSerializer` (pure msgpack).
 

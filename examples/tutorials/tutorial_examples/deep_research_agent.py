@@ -1,7 +1,7 @@
 r"""Deep research agent — Tier 3 tutorial translating deepagents' example.
 
 Adapts the orchestrator-plus-subagent research loop from
-``research/repos/deepagents/examples/deep_research`` into a LangGoap plan
+``research/repos/deepagents/examples/deep_research`` into a LangGOAP plan
 driven by the Layer A on-ramp :func:`langgoap.integrations.create_goap_agent`.
 The tutorial spotlights five features at once:
 
@@ -29,7 +29,7 @@ The tutorial spotlights five features at once:
 Everything is hermetic: no shell commands, no real web traffic, no
 external dependencies.  The :class:`ResearchWorkspace` mutable object
 in this module is the only source of truth for corpus, findings, and
-the final synthesized report — the LangGoap layer tracks phase flags
+the final synthesized report — the LangGOAP layer tracks phase flags
 (``request_saved``, ``topics_planned``, etc.) while the workspace
 holds the actual research data.
 """

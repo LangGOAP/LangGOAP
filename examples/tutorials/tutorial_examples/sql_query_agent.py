@@ -3,7 +3,7 @@ r"""Text-to-SQL agent — Tier 2 tutorial translating deepagents' example.
 Adapts the workflow sketched in
 ``research/repos/deepagents/examples/text-to-sql-agent`` (schema
 exploration → query drafting → execution) into a GOAP plan driven by
-LangGoap.  The tutorial spotlights three features at once:
+LangGOAP.  The tutorial spotlights three features at once:
 
 1. **Action sequencing** — ``explore_schema`` must fire before any draft
    action because drafting preconditions on ``schema_known=True``.

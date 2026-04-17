@@ -1,4 +1,4 @@
-"""Shared fixtures and action-graph factories for the LangGoap benchmark suite.
+"""Shared fixtures and action-graph factories for the LangGOAP benchmark suite.
 
 All builders produce pure synthetic ActionSpecs — no LLM calls, no I/O.
 Every factory is deterministic given the same parameters so benchmark results

@@ -1,6 +1,6 @@
 r"""Integration test for the Text-to-SQL agent tutorial (Tier 2).
 
-Exercises LangGoap against an in-memory SQLite database seeded from the
+Exercises LangGOAP against an in-memory SQLite database seeded from the
 compact Chinook subset in
 ``examples/tutorials/tutorial_examples/data/sql_query_instance.py``.
 The battery verifies four pieces of the GOAP loop at once:

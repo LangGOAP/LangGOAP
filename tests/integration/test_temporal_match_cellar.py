@@ -5,7 +5,7 @@ every schedule entry, makespan, and score contribution.  Unlike the
 unified-planning original this domain does **not** use "over-all"
 interval containment — the hand mutex is expressed as a precondition
 chain (``mend_fuse_N`` depends on ``fuse_(N-1)_mended``), which is the
-shape LangGoap's dependency-graph-based scheduler can honor.
+shape LangGOAP's dependency-graph-based scheduler can honor.
 
 The headline assertions are structural:
 

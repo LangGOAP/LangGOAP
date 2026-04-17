@@ -3,7 +3,7 @@ the fluent :class:`~langgoap.constraints.ConstraintBuilder`.
 
 Translates the deepagents *content builder* pattern — a multi-format
 content marketing workflow driven by subagents that produce blog posts,
-LinkedIn updates, and Twitter threads — into LangGoap.  Where the
+LinkedIn updates, and Twitter threads — into LangGOAP.  Where the
 original pattern uses filesystem I/O and LLM subagents, the GOAP version
 strips everything down to the planning nucleus: a fixed catalog of
 actions with clear preconditions, effects, resources, and costs so the

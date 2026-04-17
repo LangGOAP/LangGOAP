@@ -100,7 +100,7 @@ class GoapGraph:
         Args:
             checkpointer: Optional LangGraph checkpointer for persistence.
                 When provided, the checkpointer's serde is swapped for a
-                LangGoap-aware subclass (see :mod:`langgoap.serde`) so that
+                LangGOAP-aware subclass (see :mod:`langgoap.serde`) so that
                 frozen dataclasses using ``MappingProxyType`` fields
                 round-trip through msgpack correctly.
             store: Optional LangGraph store for shared state.
@@ -115,7 +115,7 @@ class GoapGraph:
         Returns:
             A compiled StateGraph ready for invocation.
         """
-        # Install LangGoap's MappingProxyType-aware serde on the
+        # Install LangGOAP's MappingProxyType-aware serde on the
         # checkpointer so frozen dataclasses serialize cleanly.  Skipped
         # silently when no checkpointer is provided — no-ops don't need
         # a custom serde because state never hits disk.

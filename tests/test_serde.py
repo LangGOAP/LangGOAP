@@ -1,6 +1,6 @@
-"""Tests for the custom LangGoap serializer (serde module).
+"""Tests for the custom LangGOAP serializer (serde module).
 
-Covers round-trip serialization for every LangGoap frozen dataclass and
+Covers round-trip serialization for every LangGOAP frozen dataclass and
 immutable container type that flows through LangGraph's checkpointer
 wire format.  These are pure unit tests -- no Docker, no external services.
 """
