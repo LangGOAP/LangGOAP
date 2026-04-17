@@ -26,11 +26,6 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from tutorial_examples.hierarchical_product_launch import (
-    product_launch_actions,
-    product_launch_goal,
-    product_launch_start,
-)
 
 from langgoap import (
     ActionSpec,
@@ -39,6 +34,116 @@ from langgoap import (
     MultiGoal,
     NullTracer,
 )
+
+# ---------------------------------------------------------------------------
+# Deterministic stubs for GOAP mechanics tests.
+# These mirror the original tutorial_examples functions but are self-contained
+# so the tutorial module can evolve to require a real LLM without breaking
+# planning-focused tests.
+# ---------------------------------------------------------------------------
+
+
+def _research_market(ws: dict[str, Any]) -> dict[str, Any]:
+    del ws
+    return {"market_data": True}
+
+
+def _write_prd(ws: dict[str, Any]) -> dict[str, Any]:
+    del ws
+    return {"prd_approved": True}
+
+
+def _implement_features(ws: dict[str, Any]) -> dict[str, Any]:
+    del ws
+    return {"code_written": True}
+
+
+def _qa_test(ws: dict[str, Any]) -> dict[str, Any]:
+    del ws
+    return {"qa_passed": True}
+
+
+def _prepare_marketing(ws: dict[str, Any]) -> dict[str, Any]:
+    del ws
+    return {"marketing_ready": True}
+
+
+def _announce_launch(ws: dict[str, Any]) -> dict[str, Any]:
+    del ws
+    return {"launched": True}
+
+
+def product_launch_actions() -> list[ActionSpec]:
+    """Six-action catalog spanning all three launch stages (deterministic stubs)."""
+    return [
+        ActionSpec(
+            name="research_market",
+            preconditions={},
+            effects={"market_data": True},
+            cost=2.0,
+            execute=_research_market,
+        ),
+        ActionSpec(
+            name="write_prd",
+            preconditions={"market_data": True},
+            effects={"prd_approved": True},
+            cost=3.0,
+            execute=_write_prd,
+        ),
+        ActionSpec(
+            name="implement_features",
+            preconditions={"prd_approved": True},
+            effects={"code_written": True},
+            cost=5.0,
+            execute=_implement_features,
+        ),
+        ActionSpec(
+            name="qa_test",
+            preconditions={"code_written": True},
+            effects={"qa_passed": True},
+            cost=2.0,
+            execute=_qa_test,
+        ),
+        ActionSpec(
+            name="prepare_marketing",
+            preconditions={"qa_passed": True},
+            effects={"marketing_ready": True},
+            cost=2.0,
+            execute=_prepare_marketing,
+        ),
+        ActionSpec(
+            name="announce_launch",
+            preconditions={"marketing_ready": True, "qa_passed": True},
+            effects={"launched": True},
+            cost=1.0,
+            execute=_announce_launch,
+        ),
+    ]
+
+
+def product_launch_start() -> dict[str, Any]:
+    """Clean-slate world state: no milestones reached yet."""
+    return {
+        "market_data": False,
+        "prd_approved": False,
+        "code_written": False,
+        "qa_passed": False,
+        "marketing_ready": False,
+        "launched": False,
+    }
+
+
+def product_launch_goal() -> MultiGoal:
+    """Three-stage sequential MultiGoal for the launch."""
+    return MultiGoal(
+        goals=(
+            GoalSpec(conditions={"prd_approved": True}),
+            GoalSpec(conditions={"qa_passed": True}),
+            GoalSpec(conditions={"launched": True}),
+        ),
+        mode="sequential",
+    )
+
 
 # ---------------------------------------------------------------------------
 # Recording tracer — used by TestTracerObservability
@@ -343,3 +448,46 @@ class TestPerSubgoalReplanBudget:
         # Final ``replan_count`` is zero because the observer reset it
         # when it advanced from stage 2 to stage 3.
         assert result["replan_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Real LLM integration tests — run with ``uv run pytest -m api``
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.api
+class TestProductLaunchWithLLM:
+    """Exercises the LLM-powered tutorial_examples factories end-to-end."""
+
+    @pytest.fixture
+    def llm(self) -> Any:
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+    def test_full_three_stage_launch_with_llm(self, llm: Any) -> None:
+        """LLM-powered three-stage sequential launch reaches goal_achieved."""
+        from tutorial_examples.hierarchical_product_launch import (
+            product_launch_actions as llm_actions,
+        )
+        from tutorial_examples.hierarchical_product_launch import (
+            product_launch_goal as llm_goal,
+        )
+        from tutorial_examples.hierarchical_product_launch import (
+            product_launch_start as llm_start,
+        )
+
+        actions = llm_actions(llm)
+        result = GoapGraph(actions=actions).invoke(
+            goal=llm_goal(),
+            world_state={**llm_start(), "product_name": "LangGoap SaaS"},
+        )
+
+        assert result["status"] == "goal_achieved"
+        ws = result["world_state"]
+        assert ws["launched"] is True
+        # LLM-generated content exists in the world state
+        assert isinstance(ws.get("market_research"), str)
+        assert isinstance(ws.get("prd_content"), str)
+        assert isinstance(ws.get("marketing_content"), str)
+        assert isinstance(ws.get("launch_announcement"), str)

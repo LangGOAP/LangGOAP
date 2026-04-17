@@ -23,10 +23,11 @@ docstring table and pinned exactly in every assertion.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from tutorial_examples.content_builder_agent import (
     blog_only_goal,
-    content_builder_actions,
     content_builder_start,
     multi_channel_goal,
     premium_campaign_goal,
@@ -35,7 +36,122 @@ from tutorial_examples.content_builder_agent import (
     quality_blog_goal_fluent,
 )
 
-from langgoap import GoapGraph
+from langgoap import ActionSpec, GoapGraph
+
+# ---------------------------------------------------------------------------
+# Deterministic action factory for GOAP mechanics / CSP tests.
+# The tutorial module's content_builder_actions() will evolve to require a
+# real LLM; this local stub keeps the 15+ resource-pinning tests stable.
+# ---------------------------------------------------------------------------
+
+
+def _make_execute(effects: dict[str, Any]) -> Any:
+    def execute(ws: dict[str, Any]) -> dict[str, Any]:
+        del ws
+        return dict(effects)
+
+    return execute
+
+
+def content_builder_actions() -> list[ActionSpec]:
+    """12-action content marketing catalog (deterministic stubs)."""
+    return [
+        ActionSpec(
+            name="research_topic",
+            preconditions={},
+            effects={"research_done": True},
+            cost=1.0,
+            resources={"writer_hours": 1.0, "cost_usd": 5.0},
+            execute=_make_execute({"research_done": True}),
+        ),
+        ActionSpec(
+            name="draft_outline",
+            preconditions={"research_done": True},
+            effects={"outline_ready": True},
+            cost=1.0,
+            resources={"writer_hours": 2.0, "cost_usd": 10.0},
+            execute=_make_execute({"outline_ready": True}),
+        ),
+        ActionSpec(
+            name="write_blog_fast",
+            preconditions={"outline_ready": True},
+            effects={"blog_drafted": True},
+            cost=3.0,
+            resources={"writer_hours": 2.0, "cost_usd": 30.0, "quality_score": 5.0},
+            execute=_make_execute({"blog_drafted": True}),
+        ),
+        ActionSpec(
+            name="write_blog_deep",
+            preconditions={"outline_ready": True},
+            effects={"blog_drafted": True},
+            cost=6.0,
+            resources={"writer_hours": 6.0, "cost_usd": 80.0, "quality_score": 10.0},
+            execute=_make_execute({"blog_drafted": True}),
+        ),
+        ActionSpec(
+            name="generate_blog_cover",
+            preconditions={"blog_drafted": True},
+            effects={"blog_cover_ready": True},
+            cost=2.0,
+            resources={"gpu_minutes": 5.0, "cost_usd": 15.0},
+            execute=_make_execute({"blog_cover_ready": True}),
+        ),
+        ActionSpec(
+            name="publish_blog",
+            preconditions={"blog_drafted": True, "blog_cover_ready": True},
+            effects={"blog_live": True},
+            cost=1.0,
+            execute=_make_execute({"blog_live": True}),
+        ),
+        ActionSpec(
+            name="write_linkedin_post",
+            preconditions={"outline_ready": True},
+            effects={"linkedin_drafted": True},
+            cost=2.0,
+            resources={"writer_hours": 1.0, "cost_usd": 10.0, "quality_score": 4.0},
+            execute=_make_execute({"linkedin_drafted": True}),
+        ),
+        ActionSpec(
+            name="generate_linkedin_image",
+            preconditions={"linkedin_drafted": True},
+            effects={"linkedin_image_ready": True},
+            cost=1.0,
+            resources={"gpu_minutes": 2.0, "cost_usd": 5.0},
+            execute=_make_execute({"linkedin_image_ready": True}),
+        ),
+        ActionSpec(
+            name="publish_linkedin",
+            preconditions={"linkedin_drafted": True, "linkedin_image_ready": True},
+            effects={"linkedin_live": True},
+            cost=1.0,
+            execute=_make_execute({"linkedin_live": True}),
+        ),
+        ActionSpec(
+            name="write_twitter_thread",
+            preconditions={"outline_ready": True},
+            effects={"twitter_drafted": True},
+            cost=1.0,
+            resources={"writer_hours": 0.5, "cost_usd": 4.0, "quality_score": 2.0},
+            execute=_make_execute({"twitter_drafted": True}),
+        ),
+        ActionSpec(
+            name="generate_twitter_image",
+            preconditions={"twitter_drafted": True},
+            effects={"twitter_image_ready": True},
+            cost=1.0,
+            resources={"gpu_minutes": 1.0, "cost_usd": 2.0},
+            execute=_make_execute({"twitter_image_ready": True}),
+        ),
+        ActionSpec(
+            name="publish_twitter",
+            preconditions={"twitter_drafted": True, "twitter_image_ready": True},
+            effects={"twitter_live": True},
+            cost=1.0,
+            execute=_make_execute({"twitter_live": True}),
+        ),
+    ]
+
+
 from langgoap.goals import ObjectiveDirection
 from langgoap.planner.csp import CSPStatus
 from langgoap.planner.pipeline import plan as pipeline_plan
@@ -476,3 +592,65 @@ class TestEndToEndExecution:
         assert result["world_state"]["twitter_live"] is True
         sequence = {r.action_name for r in result["execution_history"]}
         assert sequence == FAST_MULTI_ACTION_SET
+
+
+# ---------------------------------------------------------------------------
+# Real LLM integration tests — run with ``uv run pytest -m api``
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.api
+class TestContentBuilderWithLLM:
+    """Exercises the LLM-powered tutorial_examples factories end-to-end."""
+
+    @pytest.fixture
+    def llm(self) -> Any:
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+    def test_blog_pipeline_with_llm(self, llm: Any) -> None:
+        """LLM-powered research → outline → blog → cover → publish."""
+        from tutorial_examples.content_builder_agent import (
+            content_builder_actions as llm_actions,
+        )
+
+        actions = llm_actions(llm)
+        graph = GoapGraph(actions)
+        result = graph.invoke(
+            goal=blog_only_goal(),
+            world_state={**content_builder_start(), "topic": "AI agent planning"},
+        )
+
+        assert result["status"] == "goal_achieved"
+        ws = result["world_state"]
+        assert ws["blog_live"] is True
+        # LLM generated real content
+        assert isinstance(ws.get("research_findings"), str)
+        assert len(ws["research_findings"]) > 20
+        assert isinstance(ws.get("content_outline"), str)
+        assert isinstance(ws.get("blog_content"), str)
+        assert len(ws["blog_content"]) > 100
+
+    def test_multi_channel_with_llm(self, llm: Any) -> None:
+        """LLM-powered full campaign: blog + LinkedIn + Twitter."""
+        from tutorial_examples.content_builder_agent import (
+            content_builder_actions as llm_actions,
+        )
+
+        actions = llm_actions(llm)
+        graph = GoapGraph(actions)
+        result = graph.invoke(
+            goal=multi_channel_goal(),
+            world_state={**content_builder_start(), "topic": "LLM-based planning"},
+        )
+
+        assert result["status"] == "goal_achieved"
+        ws = result["world_state"]
+        assert ws["blog_live"] is True
+        assert ws["linkedin_live"] is True
+        assert ws["twitter_live"] is True
+        # Each channel produced LLM content
+        assert isinstance(ws.get("blog_content"), str)
+        assert isinstance(ws.get("linkedin_content"), str)
+        assert isinstance(ws.get("twitter_content"), str)

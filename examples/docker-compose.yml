@@ -9,6 +9,8 @@ services:
     volumes:
       - ./:/home/jupyter/workspace/examples
       - ../:/home/jupyter/workspace/langgoap
+    env_file:
+      - ../.env
     environment:
       - USER_AGENT=LangGoapJupyterNotebooks/0.1.0
     user: jupyter

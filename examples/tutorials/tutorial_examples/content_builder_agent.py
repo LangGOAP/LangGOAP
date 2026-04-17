@@ -4,10 +4,9 @@ the fluent :class:`~langgoap.constraints.ConstraintBuilder`.
 Translates the deepagents *content builder* pattern — a multi-format
 content marketing workflow driven by subagents that produce blog posts,
 LinkedIn updates, and Twitter threads — into LangGOAP.  Where the
-original pattern uses filesystem I/O and LLM subagents, the GOAP version
-strips everything down to the planning nucleus: a fixed catalog of
-actions with clear preconditions, effects, resources, and costs so the
-A\* → CSP pipeline does real optimization work.
+original pattern uses a supervisor LLM and subagent routing, the GOAP
+version replaces the orchestration layer with A\* → CSP planning while
+retaining **real LLM intelligence** inside each content-generating action.
 
 What this tutorial spotlights
 -----------------------------
@@ -93,25 +92,266 @@ GOAP modelling
 Resource numbers pin every plan's aggregated totals so the integration
 test can assert exact values rather than ``>=`` bounds — structural
 tests per the notebook 11/12 audit.
+
+LLM vs stub actions
+-------------------
+
+Content-generating actions (research, outline, blog writing, LinkedIn,
+Twitter) use the LLM for real text generation.  Image generation and
+publish actions remain stubs because a text LLM cannot produce images
+and platform publishing requires API credentials.
 """
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Callable, Literal
+
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from langgoap import ActionSpec, ConstraintSpec, GoalSpec
 from langgoap.constraints import ConstraintBuilder
 from langgoap.goals import ObjectiveDirection
 
+_Execute = Callable[[dict[str, Any]], dict[str, Any]]
+
+
 # ---------------------------------------------------------------------------
-# Execute helpers — deterministic, world-state-only mutation
+# Stub execute — for actions that cannot use a text LLM (image gen, publish)
 # ---------------------------------------------------------------------------
 
 
-def _make_execute(effects: dict[str, Any]) -> Any:
+def _make_stub_execute(effects: dict[str, Any]) -> _Execute:
     def execute(ws: dict[str, Any]) -> dict[str, Any]:
-        del ws  # effects are static; starting state is not read
+        del ws
         return dict(effects)
+
+    return execute
+
+
+# ---------------------------------------------------------------------------
+# LLM-powered execute factories
+# ---------------------------------------------------------------------------
+
+
+def _make_research_topic(
+    llm: BaseChatModel,
+    *,
+    search_tool: Any | None = None,
+) -> _Execute:
+    """Research a topic using LLM (or optional search tool)."""
+
+    def execute(ws: dict[str, Any]) -> dict[str, Any]:
+        topic = ws.get("topic", ws.get("task", "content marketing"))
+
+        if search_tool is not None:
+            raw = search_tool.invoke(topic)
+            items = raw if isinstance(raw, list) else [raw]
+            findings = "\n".join(
+                r.get("content", r.get("snippet", str(r))) for r in items
+            )
+        else:
+            response = llm.invoke(
+                [
+                    SystemMessage(
+                        content=(
+                            "You are a research agent. Given a topic, provide "
+                            "3-5 key findings with specific facts and data points "
+                            "that would be useful for creating content. Return each "
+                            "finding on its own line, prefixed with '- '."
+                        )
+                    ),
+                    HumanMessage(
+                        content=f"Research the topic: {topic}"
+                    ),
+                ]
+            )
+            findings = response.content.strip()
+
+        return {"research_done": True, "research_findings": findings}
+
+    return execute
+
+
+def _make_draft_outline(llm: BaseChatModel) -> _Execute:
+    """Draft a content outline from research findings."""
+
+    def execute(ws: dict[str, Any]) -> dict[str, Any]:
+        findings = ws.get("research_findings", "")
+        topic = ws.get("topic", ws.get("task", ""))
+
+        response = llm.invoke(
+            [
+                SystemMessage(
+                    content=(
+                        "You are a content strategist. Given research findings "
+                        "about a topic, create a structured outline with 5-7 "
+                        "sections suitable for a blog post, LinkedIn article, "
+                        "and Twitter thread. Return each section on its own "
+                        "line as a numbered item."
+                    )
+                ),
+                HumanMessage(
+                    content=(
+                        f"Topic: {topic}\n\n"
+                        f"Research findings:\n{findings}\n\n"
+                        "Create a content outline:"
+                    )
+                ),
+            ]
+        )
+        return {
+            "outline_ready": True,
+            "content_outline": response.content.strip(),
+        }
+
+    return execute
+
+
+def _make_write_blog_fast(llm: BaseChatModel) -> _Execute:
+    """Write a concise, quick-turnaround blog post."""
+
+    def execute(ws: dict[str, Any]) -> dict[str, Any]:
+        outline = ws.get("content_outline", "")
+        topic = ws.get("topic", ws.get("task", ""))
+        findings = ws.get("research_findings", "")
+
+        response = llm.invoke(
+            [
+                SystemMessage(
+                    content=(
+                        "You are a content writer focused on speed and clarity. "
+                        "Given a topic, outline, and research, write a concise "
+                        "blog post (300-500 words). Be direct and informative "
+                        "without deep analysis. Include a compelling title."
+                    )
+                ),
+                HumanMessage(
+                    content=(
+                        f"Topic: {topic}\n\n"
+                        f"Outline:\n{outline}\n\n"
+                        f"Research:\n{findings}\n\n"
+                        "Write a concise blog post:"
+                    )
+                ),
+            ]
+        )
+        return {
+            "blog_drafted": True,
+            "blog_content": response.content.strip(),
+        }
+
+    return execute
+
+
+def _make_write_blog_deep(llm: BaseChatModel) -> _Execute:
+    """Write a thorough, in-depth blog post."""
+
+    def execute(ws: dict[str, Any]) -> dict[str, Any]:
+        outline = ws.get("content_outline", "")
+        topic = ws.get("topic", ws.get("task", ""))
+        findings = ws.get("research_findings", "")
+
+        response = llm.invoke(
+            [
+                SystemMessage(
+                    content=(
+                        "You are a senior content writer producing in-depth "
+                        "articles. Given a topic, outline, and research, write "
+                        "a comprehensive blog post (800-1200 words). Include "
+                        "detailed analysis, examples, data points from the "
+                        "research, and actionable takeaways. Use section "
+                        "headings matching the outline. Include a compelling title."
+                    )
+                ),
+                HumanMessage(
+                    content=(
+                        f"Topic: {topic}\n\n"
+                        f"Outline:\n{outline}\n\n"
+                        f"Research:\n{findings}\n\n"
+                        "Write an in-depth blog post:"
+                    )
+                ),
+            ]
+        )
+        return {
+            "blog_drafted": True,
+            "blog_content": response.content.strip(),
+        }
+
+    return execute
+
+
+def _make_write_linkedin_post(llm: BaseChatModel) -> _Execute:
+    """Write a LinkedIn post from the content outline."""
+
+    def execute(ws: dict[str, Any]) -> dict[str, Any]:
+        outline = ws.get("content_outline", "")
+        topic = ws.get("topic", ws.get("task", ""))
+        findings = ws.get("research_findings", "")
+
+        response = llm.invoke(
+            [
+                SystemMessage(
+                    content=(
+                        "You are a LinkedIn content specialist. Given a topic, "
+                        "outline, and research, write a professional LinkedIn "
+                        "post (150-300 words). Use a hook opening, bullet points "
+                        "for key insights, and a call-to-action. Include "
+                        "relevant hashtags."
+                    )
+                ),
+                HumanMessage(
+                    content=(
+                        f"Topic: {topic}\n\n"
+                        f"Outline:\n{outline}\n\n"
+                        f"Research:\n{findings}\n\n"
+                        "Write a LinkedIn post:"
+                    )
+                ),
+            ]
+        )
+        return {
+            "linkedin_drafted": True,
+            "linkedin_content": response.content.strip(),
+        }
+
+    return execute
+
+
+def _make_write_twitter_thread(llm: BaseChatModel) -> _Execute:
+    """Write a Twitter thread from the content outline."""
+
+    def execute(ws: dict[str, Any]) -> dict[str, Any]:
+        outline = ws.get("content_outline", "")
+        topic = ws.get("topic", ws.get("task", ""))
+        findings = ws.get("research_findings", "")
+
+        response = llm.invoke(
+            [
+                SystemMessage(
+                    content=(
+                        "You are a Twitter thread writer. Given a topic, "
+                        "outline, and research, write a 5-7 tweet thread. "
+                        "Start with a hook tweet, provide key insights in "
+                        "subsequent tweets (each under 280 characters), and "
+                        "end with a summary/CTA tweet. Number each tweet."
+                    )
+                ),
+                HumanMessage(
+                    content=(
+                        f"Topic: {topic}\n\n"
+                        f"Outline:\n{outline}\n\n"
+                        f"Research:\n{findings}\n\n"
+                        "Write a Twitter thread:"
+                    )
+                ),
+            ]
+        )
+        return {
+            "twitter_drafted": True,
+            "twitter_content": response.content.strip(),
+        }
 
     return execute
 
@@ -121,12 +361,25 @@ def _make_execute(effects: dict[str, Any]) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def content_builder_actions() -> list[ActionSpec]:
+def content_builder_actions(
+    llm: BaseChatModel,
+    *,
+    search_tool: Any | None = None,
+) -> list[ActionSpec]:
     """Return the 12-action content marketing catalog.
 
-    Costs were tuned so A\\* naturally prefers the *fast* blog writer
+    Content-generating actions use the LLM for real text generation.
+    Image generation and publish actions remain stubs (a text LLM cannot
+    produce images and publishing requires platform API credentials).
+
+    Costs are tuned so A\\* naturally prefers the *fast* blog writer
     and the cheaper publishing paths.  The integration test relies on
     this ordering to drive CSP enumeration on the quality constraint.
+
+    Args:
+        llm: Language model powering content-generating actions.
+        search_tool: Optional search tool for ``research_topic``
+            (e.g. ``TavilySearchResults``).
     """
     return [
         # Shared discovery & outline.
@@ -136,7 +389,7 @@ def content_builder_actions() -> list[ActionSpec]:
             effects={"research_done": True},
             cost=1.0,
             resources={"writer_hours": 1.0, "cost_usd": 5.0},
-            execute=_make_execute({"research_done": True}),
+            execute=_make_research_topic(llm, search_tool=search_tool),
         ),
         ActionSpec(
             name="draft_outline",
@@ -144,7 +397,7 @@ def content_builder_actions() -> list[ActionSpec]:
             effects={"outline_ready": True},
             cost=1.0,
             resources={"writer_hours": 2.0, "cost_usd": 10.0},
-            execute=_make_execute({"outline_ready": True}),
+            execute=_make_draft_outline(llm),
         ),
         # Two competing blog writers — same effect, different profile.
         ActionSpec(
@@ -157,7 +410,7 @@ def content_builder_actions() -> list[ActionSpec]:
                 "cost_usd": 30.0,
                 "quality_score": 5.0,
             },
-            execute=_make_execute({"blog_drafted": True}),
+            execute=_make_write_blog_fast(llm),
         ),
         ActionSpec(
             name="write_blog_deep",
@@ -169,22 +422,23 @@ def content_builder_actions() -> list[ActionSpec]:
                 "cost_usd": 80.0,
                 "quality_score": 10.0,
             },
-            execute=_make_execute({"blog_drafted": True}),
+            execute=_make_write_blog_deep(llm),
         ),
+        # Image gen: text LLM cannot produce images — stub.
         ActionSpec(
             name="generate_blog_cover",
             preconditions={"blog_drafted": True},
             effects={"blog_cover_ready": True},
             cost=2.0,
             resources={"gpu_minutes": 5.0, "cost_usd": 15.0},
-            execute=_make_execute({"blog_cover_ready": True}),
+            execute=_make_stub_execute({"blog_cover_ready": True}),
         ),
         ActionSpec(
             name="publish_blog",
             preconditions={"blog_drafted": True, "blog_cover_ready": True},
             effects={"blog_live": True},
             cost=1.0,
-            execute=_make_execute({"blog_live": True}),
+            execute=_make_stub_execute({"blog_live": True}),
         ),
         # LinkedIn path.
         ActionSpec(
@@ -197,7 +451,7 @@ def content_builder_actions() -> list[ActionSpec]:
                 "cost_usd": 10.0,
                 "quality_score": 4.0,
             },
-            execute=_make_execute({"linkedin_drafted": True}),
+            execute=_make_write_linkedin_post(llm),
         ),
         ActionSpec(
             name="generate_linkedin_image",
@@ -205,7 +459,7 @@ def content_builder_actions() -> list[ActionSpec]:
             effects={"linkedin_image_ready": True},
             cost=1.0,
             resources={"gpu_minutes": 2.0, "cost_usd": 5.0},
-            execute=_make_execute({"linkedin_image_ready": True}),
+            execute=_make_stub_execute({"linkedin_image_ready": True}),
         ),
         ActionSpec(
             name="publish_linkedin",
@@ -215,7 +469,7 @@ def content_builder_actions() -> list[ActionSpec]:
             },
             effects={"linkedin_live": True},
             cost=1.0,
-            execute=_make_execute({"linkedin_live": True}),
+            execute=_make_stub_execute({"linkedin_live": True}),
         ),
         # Twitter path.
         ActionSpec(
@@ -228,7 +482,7 @@ def content_builder_actions() -> list[ActionSpec]:
                 "cost_usd": 4.0,
                 "quality_score": 2.0,
             },
-            execute=_make_execute({"twitter_drafted": True}),
+            execute=_make_write_twitter_thread(llm),
         ),
         ActionSpec(
             name="generate_twitter_image",
@@ -236,7 +490,7 @@ def content_builder_actions() -> list[ActionSpec]:
             effects={"twitter_image_ready": True},
             cost=1.0,
             resources={"gpu_minutes": 1.0, "cost_usd": 2.0},
-            execute=_make_execute({"twitter_image_ready": True}),
+            execute=_make_stub_execute({"twitter_image_ready": True}),
         ),
         ActionSpec(
             name="publish_twitter",
@@ -246,7 +500,7 @@ def content_builder_actions() -> list[ActionSpec]:
             },
             effects={"twitter_live": True},
             cost=1.0,
-            execute=_make_execute({"twitter_live": True}),
+            execute=_make_stub_execute({"twitter_live": True}),
         ),
     ]
 

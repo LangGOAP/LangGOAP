@@ -23,10 +23,11 @@ The tutorial spotlights four features at once:
    every sub-goal advance, so a transient failure while writing the
    PRD does not eat into the build stage's replan budget.
 
-Everything is hermetic: the tutorial defines deterministic
-``execute`` functions that mutate nothing outside the world state.
-The notebook wraps these into a standard :class:`~langgoap.GoapGraph`
-and drives it with :func:`product_launch_goal`.
+Each content-generating action (``research_market``, ``write_prd``,
+``prepare_marketing``, ``announce_launch``) uses the LLM for real text
+generation.  Engineering actions (``implement_features``, ``qa_test``)
+remain stubs — they represent code-level work that a text LLM cannot
+meaningfully perform.
 
 Stage breakdown
 ---------------
@@ -64,43 +65,180 @@ Action catalog
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
+
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from langgoap import ActionSpec, GoalSpec, MultiGoal
 
+_Execute = Callable[[dict[str, Any]], dict[str, Any]]
+
+
 # ---------------------------------------------------------------------------
-# Execute functions — deterministic, world-state-only mutation
+# LLM-powered execute factories
 # ---------------------------------------------------------------------------
 
 
-def _research_market(ws: dict[str, Any]) -> dict[str, Any]:
-    del ws  # starting-state inspection not needed
-    return {"market_data": True}
+def _make_research_market(
+    llm: BaseChatModel,
+    *,
+    search_tool: Any | None = None,
+) -> _Execute:
+    """Research the market landscape for a product."""
+
+    def execute(ws: dict[str, Any]) -> dict[str, Any]:
+        product = ws.get("product_name", ws.get("task", "SaaS product"))
+
+        if search_tool is not None:
+            raw = search_tool.invoke(f"{product} market analysis")
+            items = raw if isinstance(raw, list) else [raw]
+            findings = "\n".join(
+                r.get("content", r.get("snippet", str(r))) for r in items
+            )
+        else:
+            response = llm.invoke(
+                [
+                    SystemMessage(
+                        content=(
+                            "You are a market research analyst. Given a product "
+                            "description, provide a concise market analysis "
+                            "covering: target market, competitors, market size, "
+                            "and key trends. Be specific and data-oriented."
+                        )
+                    ),
+                    HumanMessage(
+                        content=f"Research the market for: {product}"
+                    ),
+                ]
+            )
+            findings = response.content.strip()
+
+        return {"market_data": True, "market_research": findings}
+
+    return execute
 
 
-def _write_prd(ws: dict[str, Any]) -> dict[str, Any]:
-    del ws
-    return {"prd_approved": True}
+def _make_write_prd(llm: BaseChatModel) -> _Execute:
+    """Write a product requirements document from market research."""
+
+    def execute(ws: dict[str, Any]) -> dict[str, Any]:
+        research = ws.get("market_research", "")
+        product = ws.get("product_name", ws.get("task", "SaaS product"))
+
+        response = llm.invoke(
+            [
+                SystemMessage(
+                    content=(
+                        "You are a product manager. Given market research, "
+                        "write a concise PRD (Product Requirements Document) "
+                        "that includes: problem statement, target users, "
+                        "key features (3-5), success metrics, and timeline. "
+                        "Keep it actionable and specific."
+                    )
+                ),
+                HumanMessage(
+                    content=(
+                        f"Product: {product}\n\n"
+                        f"Market research:\n{research}\n\n"
+                        "Write the PRD:"
+                    )
+                ),
+            ]
+        )
+        return {"prd_approved": True, "prd_content": response.content.strip()}
+
+    return execute
 
 
-def _implement_features(ws: dict[str, Any]) -> dict[str, Any]:
-    del ws
-    return {"code_written": True}
+def _make_implement_features() -> _Execute:
+    """Implement features — stub (code-level work, not LLM-suitable)."""
+
+    def execute(ws: dict[str, Any]) -> dict[str, Any]:
+        del ws
+        return {"code_written": True}
+
+    return execute
 
 
-def _qa_test(ws: dict[str, Any]) -> dict[str, Any]:
-    del ws
-    return {"qa_passed": True}
+def _make_qa_test() -> _Execute:
+    """Run QA tests — stub (testing infrastructure, not LLM-suitable)."""
+
+    def execute(ws: dict[str, Any]) -> dict[str, Any]:
+        del ws
+        return {"qa_passed": True}
+
+    return execute
 
 
-def _prepare_marketing(ws: dict[str, Any]) -> dict[str, Any]:
-    del ws
-    return {"marketing_ready": True}
+def _make_prepare_marketing(llm: BaseChatModel) -> _Execute:
+    """Prepare marketing materials for the product launch."""
+
+    def execute(ws: dict[str, Any]) -> dict[str, Any]:
+        prd = ws.get("prd_content", "")
+        product = ws.get("product_name", ws.get("task", "SaaS product"))
+
+        response = llm.invoke(
+            [
+                SystemMessage(
+                    content=(
+                        "You are a marketing strategist. Given a product "
+                        "and its PRD, create a concise marketing brief "
+                        "that includes: value proposition, key messages "
+                        "(3 bullet points), target channels, and a tagline. "
+                        "Make it compelling and launch-ready."
+                    )
+                ),
+                HumanMessage(
+                    content=(
+                        f"Product: {product}\n\n"
+                        f"PRD summary:\n{prd}\n\n"
+                        "Prepare the marketing brief:"
+                    )
+                ),
+            ]
+        )
+        return {
+            "marketing_ready": True,
+            "marketing_content": response.content.strip(),
+        }
+
+    return execute
 
 
-def _announce_launch(ws: dict[str, Any]) -> dict[str, Any]:
-    del ws
-    return {"launched": True}
+def _make_announce_launch(llm: BaseChatModel) -> _Execute:
+    """Write the public launch announcement."""
+
+    def execute(ws: dict[str, Any]) -> dict[str, Any]:
+        marketing = ws.get("marketing_content", "")
+        product = ws.get("product_name", ws.get("task", "SaaS product"))
+
+        response = llm.invoke(
+            [
+                SystemMessage(
+                    content=(
+                        "You are a launch communications specialist. Given "
+                        "a product and marketing brief, write a concise "
+                        "launch announcement (150-250 words) suitable for "
+                        "a blog post or press release. Include the key value "
+                        "proposition and a call to action."
+                    )
+                ),
+                HumanMessage(
+                    content=(
+                        f"Product: {product}\n\n"
+                        f"Marketing brief:\n{marketing}\n\n"
+                        "Write the launch announcement:"
+                    )
+                ),
+            ]
+        )
+        return {
+            "launched": True,
+            "launch_announcement": response.content.strip(),
+        }
+
+    return execute
 
 
 # ---------------------------------------------------------------------------
@@ -108,13 +246,23 @@ def _announce_launch(ws: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def product_launch_actions() -> list[ActionSpec]:
+def product_launch_actions(
+    llm: BaseChatModel,
+    *,
+    search_tool: Any | None = None,
+) -> list[ActionSpec]:
     """Return the six-action catalog that spans all three launch stages.
 
-    Every action is deterministic and its ``execute`` function touches
-    only the world state — no side effects, no I/O.  Costs reflect
-    rough relative effort so ``Plan.total_cost`` is a meaningful
-    readout: discovery 5, build 7, launch 3 (sum 15).
+    Content-generating actions use the LLM for real text generation.
+    Engineering actions (implement_features, qa_test) remain stubs.
+
+    Costs reflect rough relative effort so ``Plan.total_cost`` is a
+    meaningful readout: discovery 5, build 7, launch 3 (sum 15).
+
+    Args:
+        llm: Language model powering content-generating actions.
+        search_tool: Optional search tool for ``research_market``
+            (e.g. ``TavilySearchResults``).
     """
     return [
         ActionSpec(
@@ -122,42 +270,42 @@ def product_launch_actions() -> list[ActionSpec]:
             preconditions={},
             effects={"market_data": True},
             cost=2.0,
-            execute=_research_market,
+            execute=_make_research_market(llm, search_tool=search_tool),
         ),
         ActionSpec(
             name="write_prd",
             preconditions={"market_data": True},
             effects={"prd_approved": True},
             cost=3.0,
-            execute=_write_prd,
+            execute=_make_write_prd(llm),
         ),
         ActionSpec(
             name="implement_features",
             preconditions={"prd_approved": True},
             effects={"code_written": True},
             cost=5.0,
-            execute=_implement_features,
+            execute=_make_implement_features(),
         ),
         ActionSpec(
             name="qa_test",
             preconditions={"code_written": True},
             effects={"qa_passed": True},
             cost=2.0,
-            execute=_qa_test,
+            execute=_make_qa_test(),
         ),
         ActionSpec(
             name="prepare_marketing",
             preconditions={"qa_passed": True},
             effects={"marketing_ready": True},
             cost=2.0,
-            execute=_prepare_marketing,
+            execute=_make_prepare_marketing(llm),
         ),
         ActionSpec(
             name="announce_launch",
             preconditions={"marketing_ready": True, "qa_passed": True},
             effects={"launched": True},
             cost=1.0,
-            execute=_announce_launch,
+            execute=_make_announce_launch(llm),
         ),
     ]
 

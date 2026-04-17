@@ -14,16 +14,86 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from tutorial_examples.adaptive_rag import (
-    adaptive_rag_actions,
-    generate_answer,
-    grade_documents,
-    grade_documents_none_relevant,
-    retrieve_documents,
-    web_search,
-)
 
 from langgoap import ActionSpec, GoalSpec, GoapGraph, ReplanStrategy
+
+# ---------------------------------------------------------------------------
+# Deterministic stubs for GOAP mechanics tests.
+# These mirror the original tutorial_examples functions but are self-contained
+# so the tutorial module can evolve to require a real LLM without breaking
+# planning-focused tests.
+# ---------------------------------------------------------------------------
+
+
+def _retrieve_documents(ws: dict[str, Any]) -> dict[str, Any]:
+    question = ws.get("question", "")
+    docs = [
+        {"page_content": f"Relevant info about {question}", "source": "vectorstore"},
+        {"page_content": "Background context", "source": "vectorstore"},
+    ]
+    return {"has_documents": True, "documents": docs}
+
+
+def _web_search(ws: dict[str, Any]) -> dict[str, Any]:
+    question = ws.get("question", "")
+    docs = [
+        {"page_content": f"Web result for: {question}", "source": "web"},
+    ]
+    return {"has_documents": True, "documents": docs}
+
+
+def _grade_documents(ws: dict[str, Any]) -> dict[str, Any]:
+    docs = ws.get("documents", [])
+    return {"has_relevant_documents": True, "relevant_documents": docs}
+
+
+def _generate_answer(ws: dict[str, Any]) -> dict[str, Any]:
+    docs = ws.get("relevant_documents", ws.get("documents", []))
+    content = "; ".join(d.get("page_content", "") for d in docs)
+    return {
+        "answer_ready": True,
+        "generation": f"Generated answer from {len(docs)} docs: {content}",
+    }
+
+
+def _adaptive_rag_actions(
+    *,
+    grade_fn: Any = None,
+    retrieve_cost: float = 1.0,
+    web_cost: float = 2.0,
+) -> list[ActionSpec]:
+    if grade_fn is None:
+        grade_fn = _grade_documents
+    return [
+        ActionSpec(
+            name="retrieve_documents",
+            preconditions={"has_question": True},
+            effects={"has_documents": True},
+            cost=retrieve_cost,
+            execute=_retrieve_documents,
+        ),
+        ActionSpec(
+            name="web_search",
+            preconditions={"has_question": True},
+            effects={"has_documents": True},
+            cost=web_cost,
+            execute=_web_search,
+        ),
+        ActionSpec(
+            name="grade_documents",
+            preconditions={"has_documents": True},
+            effects={"has_relevant_documents": True},
+            cost=1.0,
+            execute=grade_fn,
+        ),
+        ActionSpec(
+            name="generate_answer",
+            preconditions={"has_relevant_documents": True},
+            effects={"answer_ready": True},
+            cost=1.0,
+            execute=_generate_answer,
+        ),
+    ]
 
 
 class TestAdaptiveRagGoapified:
@@ -31,7 +101,7 @@ class TestAdaptiveRagGoapified:
 
     def test_happy_path_vectorstore_retrieval(self) -> None:
         """Planner discovers retrieve → grade → generate path (lowest cost)."""
-        actions = adaptive_rag_actions()
+        actions = _adaptive_rag_actions()
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(conditions={"answer_ready": True}),
             world_state={
@@ -58,19 +128,19 @@ class TestAdaptiveRagGoapified:
                 name="web_search",
                 preconditions={"has_question": True},
                 effects={"has_documents": True},
-                execute=web_search,
+                execute=_web_search,
             ),
             ActionSpec(
                 name="grade_documents",
                 preconditions={"has_documents": True},
                 effects={"has_relevant_documents": True},
-                execute=grade_documents,
+                execute=_grade_documents,
             ),
             ActionSpec(
                 name="generate_answer",
                 preconditions={"has_relevant_documents": True},
                 effects={"answer_ready": True},
-                execute=generate_answer,
+                execute=_generate_answer,
             ),
         ]
 
@@ -88,7 +158,7 @@ class TestAdaptiveRagGoapified:
 
     def test_planner_prefers_lower_cost_retrieval(self) -> None:
         """When both paths are available, planner picks vectorstore (lower cost)."""
-        actions = adaptive_rag_actions(retrieve_cost=1.0, web_cost=5.0)
+        actions = _adaptive_rag_actions(retrieve_cost=1.0, web_cost=5.0)
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(conditions={"answer_ready": True}),
             world_state={"has_question": True, "question": "agent architectures"},
@@ -119,7 +189,7 @@ class TestAdaptiveRagGoapified:
             docs = ws.get("documents", [])
             return {"has_relevant_documents": True, "relevant_documents": docs}
 
-        actions = adaptive_rag_actions(grade_fn=grade_then_succeed)
+        actions = _adaptive_rag_actions(grade_fn=grade_then_succeed)
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(
                 conditions={"answer_ready": True},
@@ -140,7 +210,7 @@ class TestAdaptiveRagGoapified:
             call_count["retrieve"] += 1
             if call_count["retrieve"] == 1:
                 raise ConnectionError("Vector store unavailable")
-            return retrieve_documents(ws)
+            return _retrieve_documents(ws)
 
         actions = [
             ActionSpec(
@@ -155,19 +225,19 @@ class TestAdaptiveRagGoapified:
                 preconditions={"has_question": True},
                 effects={"has_documents": True},
                 cost=2.0,
-                execute=web_search,
+                execute=_web_search,
             ),
             ActionSpec(
                 name="grade_documents",
                 preconditions={"has_documents": True},
                 effects={"has_relevant_documents": True},
-                execute=grade_documents,
+                execute=_grade_documents,
             ),
             ActionSpec(
                 name="generate_answer",
                 preconditions={"has_relevant_documents": True},
                 effects={"answer_ready": True},
-                execute=generate_answer,
+                execute=_generate_answer,
             ),
         ]
 
@@ -188,7 +258,7 @@ class TestAdaptiveRagGoapified:
         This tests the two-tier state separation: planning uses boolean flags
         while execution context carries rich data (unhashable document lists).
         """
-        actions = adaptive_rag_actions()
+        actions = _adaptive_rag_actions()
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(conditions={"answer_ready": True}),
             world_state={
@@ -214,7 +284,7 @@ class TestAdaptiveRagGoapified:
                 name="retrieve_documents",
                 preconditions={"has_question": True},
                 effects={"has_documents": True},
-                execute=retrieve_documents,
+                execute=_retrieve_documents,
             ),
         ]
 
@@ -224,3 +294,199 @@ class TestAdaptiveRagGoapified:
         )
 
         assert result["status"] == "no_plan"
+
+
+# ---------------------------------------------------------------------------
+# Real LLM integration tests — run with ``uv run pytest -m api``
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.api
+class TestAdaptiveRagWithLLM:
+    """Exercises LLM-powered Adaptive RAG actions end-to-end."""
+
+    @pytest.fixture
+    def llm(self) -> Any:
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+    @staticmethod
+    def _build_actions(
+        llm: Any, *, validate_hallucinations: bool = True
+    ) -> list[ActionSpec]:
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        def retrieve_documents(ws: dict[str, Any]) -> dict[str, Any]:
+            question = ws.get("question", "")
+            response = llm.invoke(
+                [
+                    SystemMessage(
+                        content="You are a document retrieval system. Given a question, generate 2 relevant document excerpts. Return each on its own line, prefixed with '- '."
+                    ),
+                    HumanMessage(content=f"Retrieve documents for: {question}"),
+                ]
+            )
+            lines = [
+                l.strip().lstrip("- ").strip()
+                for l in response.content.strip().split("\n")
+                if l.strip() and l.strip() != "-"
+            ]
+            return {
+                "has_documents": True,
+                "documents": [
+                    {"page_content": l, "source": "vectorstore"} for l in lines if l
+                ],
+            }
+
+        def web_search(ws: dict[str, Any]) -> dict[str, Any]:
+            question = ws.get("question", "")
+            response = llm.invoke(
+                [
+                    SystemMessage(
+                        content="You are a web search tool. Given a question, provide 1-2 concise, factual web search results. Return each on its own line, prefixed with '- '."
+                    ),
+                    HumanMessage(content=f"Web search for: {question}"),
+                ]
+            )
+            lines = [
+                l.strip().lstrip("- ").strip()
+                for l in response.content.strip().split("\n")
+                if l.strip() and l.strip() != "-"
+            ]
+            return {
+                "has_documents": True,
+                "documents": [{"page_content": l, "source": "web"} for l in lines if l],
+            }
+
+        def grade_documents(ws: dict[str, Any]) -> dict[str, Any]:
+            docs, question, relevant = (
+                ws.get("documents", []),
+                ws.get("question", ""),
+                [],
+            )
+            for doc in docs:
+                r = llm.invoke(
+                    [
+                        SystemMessage(
+                            content="You are a document relevance grader. Respond with EXACTLY 'yes' or 'no'."
+                        ),
+                        HumanMessage(
+                            content=f"Question: {question}\nDocument: {doc.get('page_content', '')}\nRelevant?"
+                        ),
+                    ]
+                )
+                if "yes" in r.content.strip().lower():
+                    relevant.append(doc)
+            return {
+                "has_relevant_documents": len(relevant) > 0,
+                "relevant_documents": relevant,
+            }
+
+        def generate_answer(ws: dict[str, Any]) -> dict[str, Any]:
+            docs = ws.get("relevant_documents", ws.get("documents", []))
+            question, context = ws.get("question", ""), "\n\n".join(
+                d.get("page_content", str(d)) for d in docs
+            )
+            r = llm.invoke(
+                [
+                    SystemMessage(
+                        content="You are a RAG assistant. Generate a concise, grounded answer using only the provided documents."
+                    ),
+                    HumanMessage(
+                        content=f"Question: {question}\nDocuments:\n{context}\nGenerate an answer:"
+                    ),
+                ]
+            )
+            return {"answer_ready": True, "generation": r.content.strip()}
+
+        validator = None
+        if validate_hallucinations:
+
+            def validator(pre: dict[str, Any], post: dict[str, Any]) -> bool:
+                gen = post.get("generation", "")
+                docs = pre.get("relevant_documents", pre.get("documents", []))
+                if not gen or not docs:
+                    return False
+                ctx = "\n".join(d.get("page_content", str(d)) for d in docs)
+                r = llm.invoke(
+                    [
+                        SystemMessage(
+                            content="You are a hallucination grader. Respond 'yes' if grounded, 'no' otherwise."
+                        ),
+                        HumanMessage(
+                            content=f"Documents:\n{ctx}\nAnswer: {gen}\nGrounded?"
+                        ),
+                    ]
+                )
+                return "yes" in r.content.strip().lower()
+
+        return [
+            ActionSpec(
+                name="retrieve_documents",
+                preconditions={"has_question": True},
+                effects={"has_documents": True},
+                cost=1.0,
+                execute=retrieve_documents,
+            ),
+            ActionSpec(
+                name="web_search",
+                preconditions={"has_question": True},
+                effects={"has_documents": True},
+                cost=2.0,
+                execute=web_search,
+            ),
+            ActionSpec(
+                name="grade_documents",
+                preconditions={"has_documents": True},
+                effects={"has_relevant_documents": True},
+                cost=1.0,
+                execute=grade_documents,
+            ),
+            ActionSpec(
+                name="generate_answer",
+                preconditions={"has_relevant_documents": True},
+                effects={"answer_ready": True},
+                cost=1.0,
+                execute=generate_answer,
+                effect_validator=validator,
+            ),
+        ]
+
+    def test_full_pipeline_with_llm(self, llm: Any) -> None:
+        """LLM-powered retrieve -> grade -> generate reaches goal_achieved."""
+        actions = self._build_actions(llm)
+        result = GoapGraph(actions=actions).invoke(
+            goal=GoalSpec(conditions={"answer_ready": True}),
+            world_state={
+                "has_question": True,
+                "question": "What are the main types of agent memory?",
+            },
+        )
+
+        assert result["status"] == "goal_achieved"
+        ws = result["world_state"]
+        assert ws["answer_ready"] is True
+        assert isinstance(ws["generation"], str)
+        assert len(ws["generation"]) > 20
+
+        successful = [h.action_name for h in result["execution_history"] if h.success]
+        assert successful == [
+            "retrieve_documents",
+            "grade_documents",
+            "generate_answer",
+        ]
+
+    def test_hallucination_validator_with_llm(self, llm: Any) -> None:
+        """Effect validator runs LLM hallucination check on generated answer."""
+        actions = self._build_actions(llm, validate_hallucinations=True)
+        result = GoapGraph(actions=actions).invoke(
+            goal=GoalSpec(conditions={"answer_ready": True}),
+            world_state={
+                "has_question": True,
+                "question": "What is GOAP planning in game AI?",
+            },
+        )
+
+        assert result["status"] == "goal_achieved"
+        assert isinstance(result["world_state"]["generation"], str)
