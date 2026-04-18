@@ -164,6 +164,33 @@ class TestRenderMermaid:
         src = render_mermaid(plan)
         assert "[VIOLATED]" in src
 
+    def test_brand_styling_classdefs_present(self) -> None:
+        plan = _make_linear_plan()
+        src = render_mermaid(plan)
+        assert "classDef action" in src
+        assert "classDef cost" in src
+        assert ":::action" in src
+
+    def test_cost_badge_pill_for_non_default_cost(self) -> None:
+        a = ActionSpec(name="cheap", effects={"x": True})  # cost=1.0 (default)
+        b = ActionSpec(
+            name="expensive",
+            preconditions={"x": True},
+            effects={"y": True},
+            cost=5.0,
+        )
+        plan = Plan(actions=(a, b), total_cost=6.0)
+        src = render_mermaid(plan)
+        # Expensive action gets a separate pill badge with FA icon
+        assert "fa:fa-dollar-sign 5" in src
+        assert ":::cost" in src
+        # Badge pill is grouped in a transparent subgraph
+        assert "subgraph sg_" in src
+        assert "fill:none,stroke:none" in src
+        # Cheap action (default cost) does NOT get a badge
+        assert "cheap" in src
+        assert src.count("fa:fa-dollar-sign") == 1
+
     def test_node_ids_are_safe_for_special_characters(self) -> None:
         a = ActionSpec(name="run.sql query-1", effects={"ok": True})
         plan = Plan(actions=(a,), total_cost=1.0)
@@ -334,3 +361,25 @@ class TestPlanViz:
         monkeypatch.setattr("langgoap.viz.jupyter._ipython_available", lambda: False)
         result = _make_linear_plan().visualize(format="mermaid")
         assert isinstance(result, str)
+
+    def test_draw_mermaid_png_returns_bytes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_png = b"\x89PNG\r\n\x1a\n"
+        import langchain_core.runnables.graph_mermaid as _mod
+
+        monkeypatch.setattr(_mod, "draw_mermaid_png", lambda *a, **kw: fake_png)
+        result = _make_linear_plan().draw_mermaid_png()
+        assert result == fake_png
+
+    def test_repr_mimebundle_contains_png(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_png = b"\x89PNG\r\n\x1a\n"
+        import langchain_core.runnables.graph_mermaid as _mod
+
+        monkeypatch.setattr(_mod, "draw_mermaid_png", lambda *a, **kw: fake_png)
+        plan = _make_linear_plan()
+        bundle = plan._repr_mimebundle_()
+        assert "text/plain" in bundle
+        assert bundle["image/png"] == fake_png

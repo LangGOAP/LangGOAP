@@ -164,6 +164,27 @@ class Plan:
             show_schedule=show_schedule,
         )
 
+    def draw_mermaid_png(self, **kwargs: Any) -> bytes:
+        """Render this plan as a PNG image via Mermaid.
+
+        Delegates to ``langchain_core``'s ``draw_mermaid_png()`` which uses
+        the mermaid.ink API by default.  All keyword arguments are forwarded
+        (e.g. ``background_color``, ``draw_method``).
+
+        Returns:
+            PNG image bytes — pass to ``IPython.display.Image()`` to display.
+        """
+        from langchain_core.runnables.graph_mermaid import draw_mermaid_png as _draw
+
+        return _draw(self.to_mermaid(), **kwargs)
+
+    def _repr_mimebundle_(self, **kwargs: Any) -> dict[str, Any]:
+        """Jupyter rich display — renders the plan as an inline PNG."""
+        return {
+            "text/plain": repr(self),
+            "image/png": self.draw_mermaid_png(),
+        }
+
     def save(
         self,
         path: str | Path,

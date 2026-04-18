@@ -15,6 +15,18 @@ if TYPE_CHECKING:
 
 _ID_SAFE = re.compile(r"[^A-Za-z0-9_]")
 
+# -- Brand styling ------------------------------------------------------------
+# Consistent visual identity across all LangGOAP plan diagrams.  Action nodes
+# get a light background with a distinctive blue border.
+
+_CLASSDEFS = [
+    "    classDef action fill:#f8f9fa,stroke:#4a90d9,stroke-width:2px,color:#1a1a2e",
+    "    classDef cost fill:#d4edda,stroke:#2d8a4e,stroke-width:1px,color:#155724,font-size:10px",
+]
+
+# Font Awesome icon used inside cost badge nodes.
+_COST_ICON = "fa:fa-dollar-sign"
+
 
 def _node_id(index: int, name: str) -> str:
     """Return a Mermaid-safe node id.
@@ -58,7 +70,13 @@ def render_mermaid(
     if len(plan) == 0:
         return 'flowchart TD\n    empty["(empty plan)"]\n'
 
-    lines: list[str] = ["flowchart TD"]
+    has_costed = any(a.get_cost({}) != 1.0 for a in plan.actions)
+
+    lines: list[str] = []
+    if has_costed:
+        lines.append('%%{ init: { "flowchart": { "nodeSpacing": 5 } } }%%')
+    lines.append("flowchart TD")
+    lines.extend(_CLASSDEFS)
 
     node_ids = [_node_id(i, a.name) for i, a in enumerate(plan.actions)]
     csp = plan.metadata.csp
@@ -96,24 +114,41 @@ def _emit_scheduled_nodes(
             out.append(f'    subgraph slot_{t_idx}["t={start_t:g}s"]')
             for i in indices:
                 label = _format_node_label(plan, i, schedule[i])
-                out.append(f'        {node_ids[i]}["{label}"]')
+                out.append(f'        {node_ids[i]}["{label}"]:::action')
             out.append("    end")
         else:
             i = indices[0]
             label = _format_node_label(plan, i, schedule[i])
-            out.append(f'    {node_ids[i]}["{label}"]')
+            out.append(f'    {node_ids[i]}["{label}"]:::action')
     return out
 
 
 def _emit_unscheduled_nodes(plan: Plan, node_ids: list[str]) -> list[str]:
-    """Emit one node per action, annotating non-default costs."""
+    """Emit action nodes with brand styling and cost badge pills.
+
+    Actions with non-default costs get a separate stadium-shaped pill
+    node (green ``cost`` classDef) containing a ``fa:fa-comment-dollar``
+    icon and the cost value.  The action and its pill are grouped
+    side-by-side inside a transparent ``subgraph`` with ``direction LR``.
+    """
     out: list[str] = []
+    badge_subgraphs: list[str] = []
     for i, action in enumerate(plan.actions):
         label = _escape_label(action.name)
         cost = action.get_cost({})
         if cost != 1.0:
-            label = f"{label}\\ncost={cost:g}"
-        out.append(f'    {node_ids[i]}["{label}"]')
+            sg_id = f"sg_{node_ids[i]}"
+            badge_id = f"c{i}"
+            out.append(f'    subgraph {sg_id}[" "]')
+            out.append("        direction LR")
+            out.append(f'        {node_ids[i]}["{label}"]:::action')
+            out.append(f'        {badge_id}(["{_COST_ICON} {cost:g}"]):::cost')
+            out.append("    end")
+            badge_subgraphs.append(sg_id)
+        else:
+            out.append(f'    {node_ids[i]}["{label}"]:::action')
+    for sg_id in badge_subgraphs:
+        out.append(f"    style {sg_id} fill:none,stroke:none")
     return out
 
 
@@ -173,7 +208,7 @@ def _format_node_label(plan: Plan, index: int, schedule_entry: ScheduleEntry) ->
     label = _escape_label(action.name)
     duration_s = schedule_entry.duration.total_seconds()
     if duration_s > 0:
-        label = f"{label}\\nduration={duration_s:g}s"
+        label = f"{label}\\n\u23f1 {duration_s:g}s"
     return label
 
 
