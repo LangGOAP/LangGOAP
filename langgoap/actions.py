@@ -15,6 +15,27 @@ from langgoap.types import CostFunction
 EffectFunction = Callable[[Mapping[str, Any]], Mapping[str, Any]]
 
 
+def _unresolved_dynamic_effect(world_state: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Placeholder installed when a callable effect fails to deserialize.
+
+    Callable effects cannot cross process boundaries — arbitrary Python
+    functions (closures, lambdas, bound methods) are not portable
+    through msgpack/JSON checkpoints.  When an :class:`ActionSpec` with
+    a callable ``effects`` is restored from a checkpoint, the function
+    is lost; this sentinel is installed in its place so the action
+    continues to report ``has_dynamic_effects == True`` (keeping
+    planner and static-analysis behavior consistent) while raising a
+    clear error if the effect is accidentally invoked before the
+    caller re-binds the real callable from their action-spec source.
+    """
+    raise RuntimeError(
+        "ActionSpec callable effect was restored from a checkpoint without "
+        "being re-bound. Callable effects cannot cross process boundaries; "
+        "rebuild your ActionSpec list from source and pass it to the "
+        "executor/graph so the real callable is wired back in."
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ActionSpec:
     """Specification of a GOAP action for planning.
@@ -88,6 +109,13 @@ class ActionSpec:
             object.__setattr__(
                 self, "preconditions", MappingProxyType(dict(self.preconditions))
             )
+        # Deserialization path: the serializer emits ``effects=None`` for
+        # callable effects (functions are not portable).  When
+        # ``effect_keys`` is present, we know the original action was
+        # dynamic, so install the sentinel callable in place of ``None``
+        # before the normal validation runs.
+        if self.effects is None and self.effect_keys is not None:
+            object.__setattr__(self, "effects", _unresolved_dynamic_effect)
         # effects is either a Mapping or a callable.  Only wrap Mappings.
         if callable(self.effects) and not isinstance(self.effects, Mapping):
             if self.effect_keys is None:

@@ -179,6 +179,45 @@ class TestActionSpecRoundTrip:
         # are not picklable across process boundaries.
         assert restored.cost is None
 
+    def test_action_with_callable_effects_round_trips(self) -> None:
+        """Dynamic-effect ActionSpec must survive a round-trip: the
+        callable is lost (callables aren't portable across process
+        boundaries), but effect_keys is preserved and a sentinel
+        callable is installed so has_dynamic_effects stays True."""
+        serde = LangGoapSerializer()
+
+        def eat_here(state: dict[str, Any]) -> dict[str, Any]:
+            return {"food": state["food"] - frozenset({state["location"]})}
+
+        original = ActionSpec(
+            name="eat",
+            effects=eat_here,
+            effect_keys=frozenset({"food"}),
+        )
+        restored = _round_trip(serde, original)
+        assert isinstance(restored, ActionSpec)
+        assert restored.name == "eat"
+        assert restored.effect_keys == frozenset({"food"})
+        assert restored.has_dynamic_effects is True
+
+    def test_restored_callable_effect_raises_on_invocation(self) -> None:
+        """The sentinel installed by deserialization must raise a clear
+        error if invoked before the caller re-binds the real callable."""
+        serde = LangGoapSerializer()
+
+        def eat_here(state: dict[str, Any]) -> dict[str, Any]:
+            return {"food": frozenset()}
+
+        original = ActionSpec(
+            name="eat",
+            effects=eat_here,
+            effect_keys=frozenset({"food"}),
+        )
+        restored = _round_trip(serde, original)
+        assert restored is not None
+        with pytest.raises(RuntimeError, match="re-bound|rebind|checkpoint"):
+            restored.get_effects({"food": frozenset({"a"}), "location": "a"})
+
 
 # ---------------------------------------------------------------------------
 # GoalSpec round-trips
