@@ -1,6 +1,30 @@
 """LangGOAP: Goal-Oriented Action Planning framework for LangGraph."""
 
+import logging
+
 from langgoap._version import __version__
+
+
+def set_log_level(level: str | int) -> None:
+    """Set the log level for all langgoap loggers.
+
+    Convenience function replacing the common 2-line pattern::
+
+        import logging
+        logging.getLogger("langgoap").setLevel(logging.ERROR)
+
+    With::
+
+        import langgoap
+        langgoap.set_log_level("ERROR")
+
+    Args:
+        level: Log level as a string (e.g. ``"ERROR"``, ``"DEBUG"``)
+            or an ``int`` (e.g. ``logging.WARNING``).
+    """
+    logging.getLogger("langgoap").setLevel(level)
+
+
 from langgoap.actions import ActionSpec, GoapAction, goap_action
 from langgoap.conditions import (
     AsyncConditionResolver,
@@ -115,6 +139,7 @@ from langgoap.viz import (
 
 __all__ = [
     "__version__",
+    "set_log_level",
     # Actions
     "ActionSpec",
     "GoapAction",

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from langgoap.state import PlanningState
@@ -215,3 +217,19 @@ class TestInferStartState:
         from langgoap.state import infer_start_state
 
         assert infer_start_state([]) == {}
+
+
+class TestSetLogLevel:
+    def test_set_log_level_changes_logger(self) -> None:
+        import langgoap
+
+        langgoap.set_log_level("ERROR")
+        assert logging.getLogger("langgoap").level == logging.ERROR
+        langgoap.set_log_level("WARNING")
+        assert logging.getLogger("langgoap").level == logging.WARNING
+
+    def test_set_log_level_accepts_int(self) -> None:
+        import langgoap
+
+        langgoap.set_log_level(logging.DEBUG)
+        assert logging.getLogger("langgoap").level == logging.DEBUG
