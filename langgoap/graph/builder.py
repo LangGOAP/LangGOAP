@@ -262,7 +262,13 @@ class GoapGraph:
             The final :class:`~langgoap.graph.state.GoapState` after the
             GOAP loop completes.
         """
-        from langgoap.interpreter import GoalInterpreter
+        from langgoap.interpreter import (
+            GoalInterpreter,
+            _default_structured_output_kwargs,
+        )
+
+        if structured_output_kwargs is None:
+            structured_output_kwargs = _default_structured_output_kwargs(llm)
 
         interpreter = GoalInterpreter(
             llm=llm,
@@ -298,7 +304,13 @@ class GoapGraph:
             The final :class:`~langgoap.graph.state.GoapState` after the
             GOAP loop completes.
         """
-        from langgoap.interpreter import GoalInterpreter
+        from langgoap.interpreter import (
+            GoalInterpreter,
+            _default_structured_output_kwargs,
+        )
+
+        if structured_output_kwargs is None:
+            structured_output_kwargs = _default_structured_output_kwargs(llm)
 
         interpreter = GoalInterpreter(
             llm=llm,

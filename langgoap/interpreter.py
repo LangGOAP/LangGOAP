@@ -243,6 +243,25 @@ Return ONLY the structured goal. Do not include actions or plans.\
 # ---------------------------------------------------------------------------
 
 
+def _default_structured_output_kwargs(llm: BaseChatModel) -> dict[str, Any]:
+    """Auto-detect provider-specific structured output kwargs.
+
+    OpenAI models default to strict JSON-schema mode which requires
+    ``additionalProperties: false`` on all objects — incompatible with
+    the open-ended ``conditions`` dict in :class:`InterpretedGoal`.
+    This helper detects OpenAI models and falls back to
+    ``function_calling`` mode automatically.
+    """
+    try:
+        from langchain_openai import ChatOpenAI
+
+        if isinstance(llm, ChatOpenAI):
+            return {"method": "function_calling"}
+    except ImportError:
+        pass
+    return {}
+
+
 class GoalInterpreter:
     """Converts natural language requests into GoalSpec objects via LLM.
 
@@ -261,7 +280,9 @@ class GoalInterpreter:
             options, e.g. ``{"method": "function_calling"}`` for OpenAI when
             ``conditions`` must remain an open dict (OpenAI strict JSON-schema
             mode requires ``additionalProperties: false`` on all objects, which
-            is incompatible with a free-form conditions mapping).
+            is incompatible with a free-form conditions mapping).  When
+            ``None`` (the default), auto-detects OpenAI models and applies
+            ``{"method": "function_calling"}`` automatically.
     """
 
     def __init__(
@@ -274,6 +295,10 @@ class GoalInterpreter:
         self._llm = llm
         self._actions = actions
         self._system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
+
+        if structured_output_kwargs is None:
+            structured_output_kwargs = _default_structured_output_kwargs(llm)
+
         self._structured_llm = llm.with_structured_output(
             InterpretedGoal, **(structured_output_kwargs or {})
         )

@@ -407,6 +407,39 @@ class TestGoalInterpreter:
         with pytest.raises(ValueError, match="empty conditions"):
             await interp.ainterpret("Do something")
 
+    def test_auto_detect_non_openai_uses_empty_kwargs(self) -> None:
+        """Non-OpenAI models get empty structured_output_kwargs by default."""
+        from langgoap.interpreter import _default_structured_output_kwargs
+
+        llm = FakeStructuredModel(
+            response=InterpretedGoal(conditions={"x": True}, reasoning="")
+        )
+        kwargs = _default_structured_output_kwargs(llm)
+        assert kwargs == {}
+
+    def test_auto_detect_applied_when_none(self) -> None:
+        """GoalInterpreter applies auto-detection when structured_output_kwargs is None."""
+        response = InterpretedGoal(conditions={"x": True}, reasoning="")
+        llm = FakeStructuredModel(response=response)
+        # Should not raise — auto-detection returns {} for non-OpenAI
+        interp = GoalInterpreter(llm=llm, actions=_sample_actions())
+        goal = interp.interpret("Do something")
+        assert isinstance(goal, GoalSpec)
+
+    def test_explicit_kwargs_override_auto_detect(self) -> None:
+        """Explicit structured_output_kwargs bypasses auto-detection."""
+        response = InterpretedGoal(conditions={"x": True}, reasoning="")
+        llm = FakeStructuredModel(response=response)
+        custom_kwargs = {"method": "json_mode"}
+        # Construction with explicit kwargs should not trigger auto-detect
+        interp = GoalInterpreter(
+            llm=llm,
+            actions=_sample_actions(),
+            structured_output_kwargs=custom_kwargs,
+        )
+        goal = interp.interpret("Do something")
+        assert isinstance(goal, GoalSpec)
+
     def test_with_structured_output_called_with_correct_schema(self) -> None:
         """GoalInterpreter must request InterpretedGoal schema (L3).
 
