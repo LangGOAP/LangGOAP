@@ -362,6 +362,29 @@ class TestPlanViz:
         result = _make_linear_plan().visualize(format="mermaid")
         assert isinstance(result, str)
 
+    def test_to_gantt_delegates(self) -> None:
+        plan = _make_parallel_scheduled_plan()
+        gantt = plan.to_gantt()
+        assert gantt.startswith("gantt")
+        for entry in plan.metadata.csp.schedule:  # type: ignore[union-attr]
+            assert entry.action_name in gantt
+
+    def test_to_gantt_raises_without_schedule(self) -> None:
+        plan = _make_linear_plan()
+        with pytest.raises(ValueError, match="schedule"):
+            plan.to_gantt()
+
+    def test_draw_gantt_png_returns_bytes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_png = b"\x89PNG\r\n\x1a\n"
+        import langchain_core.runnables.graph_mermaid as _mod
+
+        monkeypatch.setattr(_mod, "draw_mermaid_png", lambda *a, **kw: fake_png)
+        plan = _make_parallel_scheduled_plan()
+        result = plan.draw_gantt_png()
+        assert result == fake_png
+
     def test_draw_mermaid_png_returns_bytes(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

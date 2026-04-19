@@ -164,6 +164,38 @@ class Plan:
             show_schedule=show_schedule,
         )
 
+    def to_gantt(self) -> str:
+        """Render this plan's schedule as a Mermaid ``gantt`` chart.
+
+        Requires ``plan.metadata.csp.schedule`` to be populated.
+
+        Returns:
+            Mermaid gantt source code as a plain string.
+
+        Raises:
+            ValueError: If the plan has no schedule attached.
+        """
+        from langgoap.viz.mermaid import render_mermaid_gantt
+
+        return render_mermaid_gantt(self)
+
+    def draw_gantt_png(self, **kwargs: Any) -> bytes:
+        """Render this plan's schedule as a PNG Gantt chart via Mermaid.
+
+        Delegates to ``langchain_core``'s ``draw_mermaid_png()`` which uses
+        the mermaid.ink API by default.  All keyword arguments are forwarded
+        (e.g. ``background_color``, ``draw_method``).
+
+        Returns:
+            PNG image bytes — pass to ``IPython.display.Image()`` to display.
+
+        Raises:
+            ValueError: If the plan has no schedule attached.
+        """
+        from langchain_core.runnables.graph_mermaid import draw_mermaid_png as _draw
+
+        return _draw(self.to_gantt(), **kwargs)
+
     def draw_mermaid_png(self, **kwargs: Any) -> bytes:
         """Render this plan as a PNG image via Mermaid.
 
