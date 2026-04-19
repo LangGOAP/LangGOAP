@@ -25,7 +25,7 @@ def set_log_level(level: str | int) -> None:
     logging.getLogger("langgoap").setLevel(level)
 
 
-from langgoap.actions import ActionSpec, GoapAction, goap_action
+from langgoap.actions import ActionSpec, EffectFunction, GoapAction, goap_action
 from langgoap.conditions import (
     AsyncConditionResolver,
     ConditionResolver,
@@ -142,6 +142,7 @@ __all__ = [
     "set_log_level",
     # Actions
     "ActionSpec",
+    "EffectFunction",
     "GoapAction",
     "goap_action",
     # Conditions (three-valued logic + LLM-evaluated conditions)
