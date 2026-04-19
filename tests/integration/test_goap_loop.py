@@ -15,7 +15,7 @@ from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
 from langgoap.graph.builder import GoapGraph
 from langgoap.graph.nodes import GoapExecutor, GoapObserver, GoapPlanner
-from langgoap.graph.state import GoapState
+from langgoap.graph.state import GoapState, successful_action_names
 from langgoap.types import ReplanStrategy
 from tests.conftest import make_action as _action
 
@@ -325,6 +325,20 @@ class TestFullGoapLoop:
             {"title": "doc2"},
         ]
         assert "Based on 2 documents" in result["world_state"]["answer"]
+
+    def test_successful_action_names_utility(self) -> None:
+        """successful_action_names() extracts names of successful actions."""
+        actions = _report_pipeline_actions()
+        graph = GoapGraph(actions=actions)
+        result = graph.invoke(
+            goal=GoalSpec(conditions={"report_complete": True}),
+            world_state={},
+        )
+        names = successful_action_names(result)
+        assert "gather_data" in names
+        assert "clean_data" in names
+        assert "analyze_data" in names
+        assert "write_report" in names
 
     def test_max_replans_prevents_infinite_loop(self) -> None:
         """max_replans guard terminates a persistently-failing replan cycle."""

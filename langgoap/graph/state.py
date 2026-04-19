@@ -31,6 +31,23 @@ class ActionResult:
     error: str | None = None
 
 
+def successful_action_names(result: GoapState) -> list[str]:
+    """Return names of successfully executed actions from a GOAP result.
+
+    Convenience utility that replaces the common pattern::
+
+        [h.action_name for h in result["execution_history"] if h.success]
+
+    Args:
+        result: A :class:`GoapState` (or compatible dict) containing an
+            ``execution_history`` key.
+
+    Returns:
+        List of action names that completed successfully, in execution order.
+    """
+    return [h.action_name for h in result["execution_history"] if h.success]
+
+
 class GoapState(TypedDict, total=False):
     """LangGraph state schema for the GOAP execution loop.
 
