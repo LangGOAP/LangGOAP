@@ -118,8 +118,12 @@ def build_action_catalog(actions: list[ActionSpec]) -> str:
         parts = [f"- **{action.name}**"]
         if action.preconditions:
             parts.append(f"  Preconditions: {dict(action.preconditions)}")
-        if action.effects:
-            parts.append(f"  Effects: {dict(action.effects)}")
+        if action.has_dynamic_effects:
+            parts.append(
+                f"  Effects: <dynamic, keys={sorted(action.effect_key_set())}>"
+            )
+        elif action.effects:
+            parts.append(f"  Effects: {dict(action.effects)}")  # type: ignore[arg-type]
         if action.metadata and action.metadata.get("description"):
             parts.append(f"  Description: {action.metadata['description']}")
         if action.resources:

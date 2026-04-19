@@ -279,7 +279,7 @@ def explain_no_plan(
     all_effects: set[str] = set()
     all_preconditions: set[str] = set()
     for a in actions:
-        all_effects.update(str(k) for k in a.effects)
+        all_effects.update(str(k) for k in a.effect_key_set())
         all_preconditions.update(str(k) for k in a.preconditions)
 
     start_true: set[str] = {k for k, v in start.to_dict().items() if v}

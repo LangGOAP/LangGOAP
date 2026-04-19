@@ -100,9 +100,10 @@ def repair_plan(
 
     for action in remaining:
         if sim_state.satisfies(action.preconditions):
-            cost = action.get_cost(sim_state.to_dict())
+            sim_dict = sim_state.to_dict()
+            cost = action.get_cost(sim_dict)
             prefix_cost += cost
-            sim_state = sim_state.apply(action.effects)
+            sim_state = sim_state.apply(action.get_effects(sim_dict))
             prefix_actions.append(action)
             prefix_states.append(sim_state)
         else:

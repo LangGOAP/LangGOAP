@@ -205,3 +205,80 @@ class TestGoapActionClass:
 
         spec = ExpensiveAction().to_spec()
         assert spec.get_cost({"complexity": 3.0}) == 30.0
+
+
+class TestCallableEffects:
+    """ActionSpec supports callable effects for state-dependent transitions."""
+
+    def test_callable_effects_marks_action_as_dynamic(self) -> None:
+        def decrement(state: dict[str, Any]) -> dict[str, Any]:
+            return {"counter": state["counter"] - 1}
+
+        spec = ActionSpec(
+            name="dec",
+            effects=decrement,
+            effect_keys=frozenset({"counter"}),
+        )
+        assert spec.has_dynamic_effects is True
+
+    def test_static_effects_are_not_dynamic(self) -> None:
+        spec = ActionSpec(name="act", effects={"done": True})
+        assert spec.has_dynamic_effects is False
+
+    def test_get_effects_resolves_callable_with_state(self) -> None:
+        def decrement(state: dict[str, Any]) -> dict[str, Any]:
+            return {"counter": state["counter"] - 1}
+
+        spec = ActionSpec(
+            name="dec",
+            effects=decrement,
+            effect_keys=frozenset({"counter"}),
+        )
+        assert dict(spec.get_effects({"counter": 5})) == {"counter": 4}
+        assert dict(spec.get_effects({"counter": 1})) == {"counter": 0}
+
+    def test_get_effects_returns_static_mapping_unchanged(self) -> None:
+        spec = ActionSpec(name="act", effects={"done": True})
+        assert dict(spec.get_effects({"anything": 42})) == {"done": True}
+
+    def test_callable_effects_requires_effect_keys(self) -> None:
+        """Dynamic effects must declare which state keys they may produce."""
+
+        def noop(state: dict[str, Any]) -> dict[str, Any]:
+            return {}
+
+        with pytest.raises(ValueError, match="effect_keys"):
+            ActionSpec(name="bad", effects=noop)
+
+    def test_effect_keys_rejected_for_static_effects(self) -> None:
+        """effect_keys is only meaningful for dynamic effects."""
+        with pytest.raises(ValueError, match="effect_keys"):
+            ActionSpec(
+                name="bad",
+                effects={"done": True},
+                effect_keys=frozenset({"done"}),
+            )
+
+    def test_has_effects_true_for_callable(self) -> None:
+        def f(state: dict[str, Any]) -> dict[str, Any]:
+            return {"x": True}
+
+        spec = ActionSpec(name="a", effects=f, effect_keys=frozenset({"x"}))
+        assert spec.has_effects() is True
+
+    def test_shrinking_frozenset_effect(self) -> None:
+        """Effect callable can remove an element from a frozenset in state."""
+
+        def pop_smallest(state: dict[str, Any]) -> dict[str, Any]:
+            items = state["items"]
+            if not items:
+                return {"items": items}
+            return {"items": items - frozenset({min(items)})}
+
+        spec = ActionSpec(
+            name="pop",
+            effects=pop_smallest,
+            effect_keys=frozenset({"items"}),
+        )
+        result = spec.get_effects({"items": frozenset({"a", "b", "c"})})
+        assert result["items"] == frozenset({"b", "c"})

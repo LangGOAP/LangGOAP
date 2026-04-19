@@ -137,7 +137,11 @@ def infer_start_state(actions: list[ActionSpec]) -> dict[str, bool]:
     keys: set[str] = set()
     for a in actions:
         keys.update(a.preconditions.keys())
-        for k, v in a.effects.items():
+        if a.has_dynamic_effects:
+            # Dynamic effects don't expose concrete values; skip — callers
+            # should pass a real starting state when using them.
+            continue
+        for k, v in a.effects.items():  # type: ignore[union-attr]
             if isinstance(v, bool):
                 keys.add(k)
     return {k: False for k in sorted(keys)}

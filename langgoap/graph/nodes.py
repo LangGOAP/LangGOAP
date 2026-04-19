@@ -89,7 +89,7 @@ def _planning_keys(actions: list[ActionSpec], goal: GoalSpec) -> set[str]:
     keys: set[str] = set(goal.conditions.keys())
     for action in actions:
         keys.update(action.preconditions.keys())
-        keys.update(action.effects.keys())
+        keys.update(action.effect_key_set())
     return keys
 
 
@@ -474,7 +474,7 @@ class GoapPlanner:
             resolver_keys: list[str] = []
             for a in self.actions:
                 resolver_keys.extend(a.preconditions.keys())
-                resolver_keys.extend(a.effects.keys())
+                resolver_keys.extend(a.effect_key_set())
             ws = resolve_conditions(self._resolvers, list(set(resolver_keys)), ws)
             state = {**state, "world_state": ws}
 
@@ -519,7 +519,7 @@ class GoapPlanner:
             resolver_keys: list[str] = []
             for a in self.actions:
                 resolver_keys.extend(a.preconditions.keys())
-                resolver_keys.extend(a.effects.keys())
+                resolver_keys.extend(a.effect_key_set())
             ws = await aresolve_conditions(
                 self._resolvers, list(set(resolver_keys)), ws
             )
@@ -566,12 +566,13 @@ def _apply_result(
     If the callable returned a dict, its contents overwrite matching keys.
     Otherwise (None or any other type), the action's declared effects are
     applied — this covers the "no execute callable" path as well as callables
-    that return non-dict sentinels.
+    that return non-dict sentinels.  Dynamic effects are resolved against
+    ``world_state`` before merging.
     """
     if isinstance(raw_result, dict):
         world_state.update(raw_result)
     else:
-        world_state.update(action.effects)
+        world_state.update(action.get_effects(world_state))
 
 
 def _build_success(
@@ -719,7 +720,7 @@ def _check_human_approval(
             "type": "goap_action_approval",
             "action": action.name,
             "preconditions": dict(action.preconditions),
-            "effects": dict(action.effects),
+            "effects": dict(action.get_effects(world_state)),
             "world_state": dict(world_state),
         }
     )

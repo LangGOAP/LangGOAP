@@ -408,3 +408,68 @@ class TestEdgeCases:
         assert "set_a" in result.action_names
         assert "set_b" in result.action_names
         assert "set_c" in result.action_names
+
+
+class TestCallableEffects:
+    """A* resolves callable effects against the live search state."""
+
+    def test_counter_decrement_via_callable(self) -> None:
+        """A* repeatedly applies a state-dependent effect to hit a target value."""
+
+        def decrement(state: dict[str, Any]) -> dict[str, Any]:
+            return {"counter": state["counter"] - 1}
+
+        actions = [
+            ActionSpec(
+                name="dec",
+                effects=decrement,
+                effect_keys=frozenset({"counter"}),
+            ),
+        ]
+        start = PlanningState.from_dict({"counter": 3})
+        goal = GoalSpec(conditions={"counter": 0})
+
+        result = plan(start, goal, actions)
+
+        assert result is not None
+        assert result.action_names == ["dec", "dec", "dec"]
+
+    def test_shrinking_frozenset_to_empty(self) -> None:
+        """A* plans a multi-step sequence that drains a frozenset in state.
+
+        Models the Pac-Man 'eat all pellets' scenario symbolically: a
+        single ``eat`` action whose effect callable removes the
+        current location from the ``food`` frozenset in state, plus
+        explicit moves that position the agent at each pellet.
+        """
+
+        def eat_here(state: dict[str, Any]) -> dict[str, Any]:
+            loc = state["location"]
+            food = state["food"]
+            return {"food": food - frozenset({loc})}
+
+        actions = [
+            _action("goto_a", eff={"location": "a"}),
+            _action("goto_b", eff={"location": "b"}),
+            _action("goto_c", eff={"location": "c"}),
+            ActionSpec(
+                name="eat",
+                effects=eat_here,
+                effect_keys=frozenset({"food"}),
+            ),
+        ]
+        start = PlanningState.from_dict(
+            {
+                "location": "start",
+                "food": frozenset({"a", "b", "c"}),
+            }
+        )
+        goal = GoalSpec(conditions={"food": frozenset()})
+
+        result = plan(start, goal, actions)
+
+        assert result is not None
+        eats = [n for n in result.action_names if n == "eat"]
+        assert len(eats) == 3
+        # Final expected state has food drained to empty.
+        assert result.expected_states[-1].get("food") == frozenset()

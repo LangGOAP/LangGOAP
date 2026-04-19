@@ -207,8 +207,9 @@ class LazyDecompositionStrategy:
         sim_state = start
         total_cost = 0.0
         for a in truncated_actions:
-            total_cost += a.get_cost(sim_state.to_dict())
-            sim_state = sim_state.apply(a.effects)
+            sim_dict = sim_state.to_dict()
+            total_cost += a.get_cost(sim_dict)
+            sim_state = sim_state.apply(a.get_effects(sim_dict))
             expected.append(sim_state)
 
         # Preserve the inner strategy's metadata

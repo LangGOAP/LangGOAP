@@ -72,15 +72,26 @@ def _is_reachable(
 
     This is a necessary (not sufficient) condition for plan existence.
     Used as a cheap early-exit before entering the full A* search.
+
+    Dynamic-effect actions cannot be introspected statically; any goal
+    key listed in their ``effect_keys`` is treated as producible with
+    any value, and the check short-circuits conservatively to ``True``
+    for those keys.
     """
     producible: set[tuple[str, Any]] = set()
+    dynamic_keys: set[str] = set()
     for action in actions:
-        for k, v in action.effects.items():
-            producible.add((k, v))
+        if action.has_dynamic_effects:
+            dynamic_keys.update(action.effect_keys or ())
+        else:
+            for k, v in action.effects.items():  # type: ignore[union-attr]
+                producible.add((k, v))
 
     state_dict = start.to_dict()
     for k, v in goal_conditions.items():
         if k in state_dict and state_dict[k] == v:
+            continue
+        if k in dynamic_keys:
             continue
         if (k, v) not in producible:
             return False
@@ -102,12 +113,21 @@ def _backward_optimization(
     (starting from goal conditions). An action is kept only if at least
     one of its effects is needed. Its preconditions then become needed
     for earlier actions.
+
+    Dynamic-effect actions read arbitrary state at execution time; the
+    backward pass has no static way to know which keys they depend on,
+    so the optimization is skipped entirely when any action has
+    dynamic effects.  A* has already returned an optimal path — the
+    pass is a best-effort shortener, and bailing out is safe.
     """
+    if any(a.has_dynamic_effects for a in actions):
+        return actions
+
     needed: set[tuple[str, Any]] = set(goal_conditions.items())
     kept: list[ActionSpec] = []
 
     for action in reversed(actions):
-        effect_items = set(action.effects.items())
+        effect_items = set(action.effects.items())  # type: ignore[union-attr]
         if effect_items & needed:
             kept.append(action)
             # Remove satisfied conditions, add preconditions as new needs
@@ -134,12 +154,16 @@ def _forward_optimization(
     current = start
 
     for action in actions:
-        # Check if this action actually changes state toward the goal
+        # Check if this action actually changes state toward the goal.
+        # Dynamic-effect actions are always kept — their effects depend
+        # on the simulated state and may produce new values we cannot
+        # evaluate without running the callable.
         current_dict = current.to_dict()
-        produces_new = any(current_dict.get(k) != v for k, v in action.effects.items())
-        if produces_new:
+        resolved = action.get_effects(current_dict)
+        produces_new = any(current_dict.get(k) != v for k, v in resolved.items())
+        if action.has_dynamic_effects or produces_new:
             kept.append(action)
-            current = current.apply(action.effects)
+            current = current.apply(resolved)
 
     # Verify goal is still satisfied
     if current.satisfies(goal_conditions):
@@ -234,8 +258,9 @@ def _build_plan_from_node(
     sim_state = start
     total_cost = 0.0
     for a in optimized:
-        total_cost += a.get_cost(sim_state.to_dict())
-        sim_state = sim_state.apply(a.effects)
+        sim_dict = sim_state.to_dict()
+        total_cost += a.get_cost(sim_dict)
+        sim_state = sim_state.apply(a.get_effects(sim_dict))
         expected.append(sim_state)
 
     elapsed_ms = (time.monotonic() - t0) * 1000
@@ -269,7 +294,7 @@ def _expand_neighbors(
     for action in sorted_actions:
         if not current.state.satisfies(action.preconditions):
             continue
-        new_state = current.state.apply(action.effects)
+        new_state = current.state.apply(action.get_effects(current_dict))
         if new_state == current.state:
             continue  # no-op transition
         cost = action.get_cost(current_dict)

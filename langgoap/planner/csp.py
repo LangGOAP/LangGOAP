@@ -190,9 +190,18 @@ def build_dependency_graph(
         if not actions[j].preconditions:
             continue
         for key, value in actions[j].preconditions.items():
-            # Find the closest producer before j
+            # Find the closest producer before j.  Dynamic-effect actions
+            # are treated as potential producers whenever the key appears
+            # in their declared effect_keys (value cannot be introspected
+            # statically).
             for i in range(j - 1, -1, -1):
-                if actions[i].effects.get(key) == value:
+                prev = actions[i]
+                produces = (
+                    key in (prev.effect_keys or frozenset())
+                    if prev.has_dynamic_effects
+                    else prev.effects.get(key) == value  # type: ignore[union-attr]
+                )
+                if produces:
                     if i not in deps[j]:
                         deps[j].append(i)
                     break  # closest producer found

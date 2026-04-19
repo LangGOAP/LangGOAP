@@ -12,6 +12,8 @@ from typing import Any, Callable
 
 from langgoap.types import CostFunction
 
+EffectFunction = Callable[[Mapping[str, Any]], Mapping[str, Any]]
+
 
 @dataclass(frozen=True, slots=True)
 class ActionSpec:
@@ -22,8 +24,15 @@ class ActionSpec:
         preconditions: World state conditions that must hold before execution.
             Stored as an immutable MappingProxyType to match the frozen
             contract of this dataclass.
-        effects: World state changes produced by execution.
-            Stored as an immutable MappingProxyType.
+        effects: World state changes produced by execution.  Either a
+            static mapping (stored as an immutable MappingProxyType) or a
+            callable ``(world_state) -> Mapping[str, Any]`` for
+            state-dependent transitions.  Callable effects must declare
+            ``effect_keys`` so the planner's static analysis passes can
+            reason about which state keys the action may touch.
+        effect_keys: Required when ``effects`` is callable; lists the
+            state keys the callable may produce.  Must be ``None`` for
+            static effects.
         cost: Static cost or callable that computes cost from world state.
         execute: The function to call when the action is executed (sync).
         aexecute: Optional async execute callable. When set, the async
@@ -58,7 +67,10 @@ class ActionSpec:
     preconditions: Mapping[str, Any] = field(
         default_factory=lambda: MappingProxyType({})
     )
-    effects: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
+    effects: Mapping[str, Any] | EffectFunction = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+    effect_keys: frozenset[str] | None = None
     cost: float | CostFunction = 1.0
     execute: Callable[..., Any] | None = None
     aexecute: Callable[..., Any] | None = None
@@ -71,15 +83,66 @@ class ActionSpec:
     metadata: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
-        # Wrap all Mapping fields in MappingProxyType to enforce immutability.
-        for attr in ("preconditions", "effects"):
-            val = getattr(self, attr)
-            if not isinstance(val, MappingProxyType):
-                object.__setattr__(self, attr, MappingProxyType(dict(val)))
+        # preconditions is always a Mapping; wrap for immutability.
+        if not isinstance(self.preconditions, MappingProxyType):
+            object.__setattr__(
+                self, "preconditions", MappingProxyType(dict(self.preconditions))
+            )
+        # effects is either a Mapping or a callable.  Only wrap Mappings.
+        if callable(self.effects) and not isinstance(self.effects, Mapping):
+            if self.effect_keys is None:
+                raise ValueError(
+                    "ActionSpec with callable effects must declare effect_keys "
+                    "(a frozenset of state keys the effect callable may produce)."
+                )
+        else:
+            if self.effect_keys is not None:
+                raise ValueError(
+                    "ActionSpec.effect_keys is only valid when effects is a "
+                    "callable; for static effects the keys are read from the "
+                    "mapping itself."
+                )
+            if not isinstance(self.effects, MappingProxyType):
+                object.__setattr__(
+                    self, "effects", MappingProxyType(dict(self.effects))
+                )
         for attr in ("resources", "metadata"):
             val = getattr(self, attr)
             if val is not None and not isinstance(val, MappingProxyType):
                 object.__setattr__(self, attr, MappingProxyType(dict(val)))
+
+    @property
+    def has_dynamic_effects(self) -> bool:
+        """Return True if effects is resolved from live world state."""
+        return callable(self.effects) and not isinstance(self.effects, Mapping)
+
+    def effect_key_set(self) -> frozenset[str]:
+        """Return the set of state keys this action may touch.
+
+        For static effects this is the set of mapping keys; for dynamic
+        effects it is the declared :attr:`effect_keys` (required at
+        construction time).  Used by static-analysis passes that need
+        to reason about the action's footprint without executing it.
+        """
+        if self.has_dynamic_effects:
+            return self.effect_keys or frozenset()
+        return frozenset(self.effects.keys())  # type: ignore[union-attr]
+
+    def get_effects(self, world_state: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Resolve effects against ``world_state``.
+
+        For static effects this returns the stored MappingProxyType
+        unchanged.  For callable effects the callable is invoked with
+        ``world_state`` and the result is wrapped in a MappingProxyType
+        so downstream code can treat both shapes uniformly.
+        """
+        if self.has_dynamic_effects:
+            result = self.effects(world_state)  # type: ignore[operator]
+            if isinstance(result, MappingProxyType):
+                return result
+            return MappingProxyType(dict(result))
+        # Static mapping — already a MappingProxyType after __post_init__.
+        return self.effects  # type: ignore[return-value]
 
     def get_cost(self, world_state: dict[str, Any] | None = None) -> float:
         """Resolve the cost, calling the cost function if dynamic."""
@@ -89,7 +152,9 @@ class ActionSpec:
 
     def has_effects(self) -> bool:
         """Return True if this action declares at least one effect."""
-        return len(self.effects) > 0
+        if self.has_dynamic_effects:
+            return True
+        return len(self.effects) > 0  # type: ignore[arg-type]
 
     def is_async_execute(self) -> bool:
         """Return True if this action has an async execute path.
@@ -107,8 +172,12 @@ class ActionSpec:
         parts = [f"name={self.name!r}"]
         if self.preconditions:
             parts.append(f"preconditions={dict(self.preconditions)!r}")
-        if self.effects:
-            parts.append(f"effects={dict(self.effects)!r}")
+        if self.has_dynamic_effects:
+            parts.append(
+                f"effects=<dynamic effect_keys={set(self.effect_keys or ())!r}>"
+            )
+        elif self.effects:
+            parts.append(f"effects={dict(self.effects)!r}")  # type: ignore[arg-type]
         if self.cost != 1.0:
             parts.append(f"cost={self.cost!r}")
         if self.max_retries != 0:
@@ -135,7 +204,10 @@ class ActionSpec:
         if self.effect_validator is not None:
             return self.effect_validator(pre_state, post_state)
         # Default: verify each declared effect is present in post_state.
-        return all(post_state.get(k) == v for k, v in self.effects.items())
+        # For dynamic effects, resolve against pre_state to obtain the
+        # expected post-condition values.
+        expected = self.get_effects(pre_state)
+        return all(post_state.get(k) == v for k, v in expected.items())
 
 
 def goap_action(
