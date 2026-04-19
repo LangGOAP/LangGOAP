@@ -10,6 +10,7 @@ Forward-chaining A* search over GOAP state space. Includes:
 from __future__ import annotations
 
 import heapq
+import logging
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -20,6 +21,8 @@ from langgoap.goals import GoalSpec
 from langgoap.planner.types import Plan, PlanMetadata
 from langgoap.score import SimpleScore
 from langgoap.state import PlanningState
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Internal types
@@ -120,7 +123,14 @@ def _backward_optimization(
     dynamic effects.  A* has already returned an optimal path — the
     pass is a best-effort shortener, and bailing out is safe.
     """
-    if any(a.has_dynamic_effects for a in actions):
+    dynamic = [a.name for a in actions if a.has_dynamic_effects]
+    if dynamic:
+        logger.debug(
+            "skipping backward optimization: plan contains dynamic-effect "
+            "action(s) %s whose state reads cannot be tracked statically; "
+            "returning A* result unmodified",
+            dynamic,
+        )
         return actions
 
     needed: set[tuple[str, Any]] = set(goal_conditions.items())

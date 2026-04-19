@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from langgoap import (
+    ActionSpec,
     ConstraintSpec,
     CSPMetadata,
     CSPStatus,
@@ -234,6 +235,49 @@ class TestDependencyGraph:
         deps = build_dependency_graph((a, b, c))
         # c should depend on b (index 1), not a (index 0)
         assert deps[2] == [1]
+
+    def test_dynamic_effect_is_producer_for_declared_key(self) -> None:
+        """A callable-effect action whose effect_keys covers a precondition
+        key is treated as a potential producer — value-agnostic because the
+        callable's output can't be introspected statically."""
+
+        def dyn(state: dict[str, Any]) -> dict[str, Any]:
+            return {"x": True}
+
+        a = ActionSpec(name="dyn", effects=dyn, effect_keys=frozenset({"x"}))
+        b = make_action("b", pre={"x": True}, eff={"done": True})
+        deps = build_dependency_graph((a, b))
+        assert deps[1] == [0]
+
+    def test_dynamic_effect_shadows_earlier_static_producer(self) -> None:
+        """The dep inference picks the closest producer; a dynamic effect
+        between a static producer and the consumer shadows the static one.
+
+        This is the 'over-inclusive but safe' behavior — we can't prove the
+        dynamic callable produces the required value, so we conservatively
+        treat it as the nearest producer to keep scheduling correct."""
+
+        def dyn(state: dict[str, Any]) -> dict[str, Any]:
+            return {"x": state.get("x")}
+
+        a = make_action("a", eff={"x": True})
+        b = ActionSpec(name="dyn", effects=dyn, effect_keys=frozenset({"x"}))
+        c = make_action("c", pre={"x": True}, eff={"done": True})
+        deps = build_dependency_graph((a, b, c))
+        # c depends on the closest producer, which is the dynamic action b.
+        assert deps[2] == [1]
+
+    def test_dynamic_effect_not_producer_for_unrelated_key(self) -> None:
+        """Dynamic effects whose effect_keys don't include the precondition
+        key must not be treated as producers."""
+
+        def dyn(state: dict[str, Any]) -> dict[str, Any]:
+            return {"y": True}
+
+        a = ActionSpec(name="dyn", effects=dyn, effect_keys=frozenset({"y"}))
+        b = make_action("b", pre={"x": True}, eff={"done": True})
+        deps = build_dependency_graph((a, b))
+        assert deps[1] == []
 
 
 # ---------------------------------------------------------------------------

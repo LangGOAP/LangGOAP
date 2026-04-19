@@ -473,3 +473,33 @@ class TestCallableEffects:
         assert len(eats) == 3
         # Final expected state has food drained to empty.
         assert result.expected_states[-1].get("food") == frozenset()
+
+    def test_backward_optimization_logs_when_skipped(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Users must be able to see, via logs, that dynamic effects
+        caused backward optimization to bail out."""
+
+        def eat_here(state: dict[str, Any]) -> dict[str, Any]:
+            return {"food": state["food"] - frozenset({state["location"]})}
+
+        actions = [
+            _action("goto_a", eff={"location": "a"}),
+            ActionSpec(
+                name="eat",
+                effects=eat_here,
+                effect_keys=frozenset({"food"}),
+            ),
+        ]
+        start = PlanningState.from_dict({"location": "start", "food": frozenset({"a"})})
+        goal = GoalSpec(conditions={"food": frozenset()})
+
+        with caplog.at_level("DEBUG", logger="langgoap.planner.astar"):
+            result = plan(start, goal, actions)
+
+        assert result is not None
+        assert any(
+            "backward optimization" in rec.message.lower()
+            and "dynamic" in rec.message.lower()
+            for rec in caplog.records
+        ), f"expected a debug log mentioning the dynamic-effects bail-out; got {[r.message for r in caplog.records]}"

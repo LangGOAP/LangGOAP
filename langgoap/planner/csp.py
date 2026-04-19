@@ -181,6 +181,14 @@ def build_dependency_graph(
     condition that is in i's effects and no closer producer exists between
     them.
 
+    Dynamic-effect actions are treated as potential producers whenever
+    the precondition key appears in their declared ``effect_keys``.  The
+    value cannot be introspected statically, so this is intentionally
+    over-inclusive: it may add dependency edges that the runtime would
+    not require, but it never drops a real edge.  The resulting
+    schedule remains correct; it may just be less parallel than the
+    theoretical optimum.
+
     Returns:
         Mapping from action index to list of predecessor indices.
     """
@@ -190,10 +198,6 @@ def build_dependency_graph(
         if not actions[j].preconditions:
             continue
         for key, value in actions[j].preconditions.items():
-            # Find the closest producer before j.  Dynamic-effect actions
-            # are treated as potential producers whenever the key appears
-            # in their declared effect_keys (value cannot be introspected
-            # statically).
             for i in range(j - 1, -1, -1):
                 prev = actions[i]
                 produces = (
