@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import replace
+from typing import Any
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import ConstraintSpec, GoalSpec
@@ -99,7 +100,7 @@ def _augment_plan(plan: Plan, goal: GoalSpec, csp_meta: CSPMetadata) -> Plan:
 
 
 def enumerate_alternatives(
-    start: PlanningState,
+    start: PlanningState | dict[str, Any],
     goal: GoalSpec,
     actions: list[ActionSpec],
     blacklisted: list[str] | None,
@@ -134,7 +135,7 @@ _enumerate_alternatives = enumerate_alternatives
 
 
 def plan(
-    start: PlanningState,
+    start: PlanningState | dict[str, Any],
     goal: GoalSpec,
     actions: list[ActionSpec],
     blacklisted_actions: list[str] | None = None,
@@ -144,7 +145,8 @@ def plan(
     """Two-phase planning: A* finds sequences, CSP validates/optimizes.
 
     Args:
-        start: Current world state.
+        start: Current world state.  Accepts a plain ``dict`` for
+            convenience; it will be coerced to ``PlanningState`` internally.
         goal: Goal specification with target conditions, constraints, objectives.
         actions: Available actions.
         blacklisted_actions: Action names to exclude.
@@ -160,6 +162,8 @@ def plan(
         to decide whether to proceed.  Returns ``None`` only when A* cannot
         find any plan at all.
     """
+    if isinstance(start, dict):
+        start = PlanningState.from_dict(start)
     if not needs_csp(goal):
         # No constraints/objectives → pure A* (zero overhead)
         return astar_plan(start, goal, actions, blacklisted_actions=blacklisted_actions)

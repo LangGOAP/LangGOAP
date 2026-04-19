@@ -292,7 +292,7 @@ def _expand_neighbors(
 
 
 def plan(
-    start: PlanningState,
+    start: PlanningState | dict[str, Any],
     goal: GoalSpec,
     actions: list[ActionSpec],
     blacklisted_actions: list[str] | None = None,
@@ -302,7 +302,8 @@ def plan(
     """Find an optimal action sequence from start to goal using A*.
 
     Args:
-        start: Current world state.
+        start: Current world state.  Accepts a plain ``dict`` for
+            convenience; it will be coerced to ``PlanningState`` internally.
         goal: Goal specification with target conditions.
         actions: Available actions to choose from.
         blacklisted_actions: Action names to exclude from planning.
@@ -318,6 +319,8 @@ def plan(
     Returns:
         A Plan if a path exists, None if the goal is unreachable.
     """
+    if isinstance(start, dict):
+        start = PlanningState.from_dict(start)
     t0 = time.monotonic()
     goal_conditions = goal.conditions
     deadline = (t0 + time_budget_ms / 1000.0) if time_budget_ms is not None else None

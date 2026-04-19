@@ -138,6 +138,13 @@ class TestPipelinePlan:
         assert result.metadata.csp.solver_time_ms >= 0
         assert result.metadata.csp.scale_factor == 1000
 
+    def test_pipeline_plan_accepts_dict_start(self) -> None:
+        """pipeline plan() accepts a plain dict and coerces to PlanningState."""
+        a = make_action("a", eff={"done": True})
+        result = plan({"x": True}, GoalSpec(conditions={"done": True}), [a])
+        assert result is not None
+        assert result.action_names == ["a"]
+
     def test_already_satisfied_goal(self) -> None:
         """Goal already satisfied → empty plan returned without CSP metadata.
 

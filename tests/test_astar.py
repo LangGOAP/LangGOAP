@@ -385,6 +385,13 @@ class TestEdgeCases:
         assert result is not None
         assert result.action_names == ["universal"]
 
+    def test_plan_accepts_dict_start(self) -> None:
+        """plan() accepts a plain dict and coerces it to PlanningState."""
+        actions = [_action("act", eff={"done": True})]
+        result = plan({"a": True}, GoalSpec(conditions={"done": True}), actions)
+        assert result is not None
+        assert result.action_names == ["act"]
+
     def test_multi_condition_goal(self) -> None:
         """Goal requiring multiple conditions to be satisfied."""
         actions = [
