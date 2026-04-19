@@ -282,3 +282,42 @@ class TestCallableEffects:
         )
         result = spec.get_effects({"items": frozenset({"a", "b", "c"})})
         assert result["items"] == frozenset({"b", "c"})
+
+    def test_effect_keys_empty_frozenset_rejected(self) -> None:
+        """A dynamic effect that produces nothing has no planning value."""
+
+        def noop(state: dict[str, Any]) -> dict[str, Any]:
+            return {}
+
+        with pytest.raises(ValueError, match="effect_keys.*non-empty"):
+            ActionSpec(name="bad", effects=noop, effect_keys=frozenset())
+
+    def test_effect_keys_plain_set_coerced_to_frozenset(self) -> None:
+        """A plain set is accepted for ergonomics and coerced to frozenset."""
+
+        def f(state: dict[str, Any]) -> dict[str, Any]:
+            return {"x": True}
+
+        spec = ActionSpec(
+            name="a", effects=f, effect_keys={"x", "y"}  # type: ignore[arg-type]
+        )
+        assert isinstance(spec.effect_keys, frozenset)
+        assert spec.effect_keys == frozenset({"x", "y"})
+
+    def test_effect_keys_invalid_type_rejected(self) -> None:
+        """Non-iterable or unexpected types surface a clear TypeError."""
+
+        def f(state: dict[str, Any]) -> dict[str, Any]:
+            return {"x": True}
+
+        with pytest.raises(TypeError, match="effect_keys"):
+            ActionSpec(name="bad", effects=f, effect_keys=42)  # type: ignore[arg-type]
+
+    def test_effect_keys_missing_error_mentions_example(self) -> None:
+        """The 'missing effect_keys' error should show users the right shape."""
+
+        def f(state: dict[str, Any]) -> dict[str, Any]:
+            return {"x": True}
+
+        with pytest.raises(ValueError, match="frozenset"):
+            ActionSpec(name="bad", effects=f)

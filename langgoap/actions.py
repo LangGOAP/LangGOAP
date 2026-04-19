@@ -93,7 +93,27 @@ class ActionSpec:
             if self.effect_keys is None:
                 raise ValueError(
                     "ActionSpec with callable effects must declare effect_keys "
-                    "(a frozenset of state keys the effect callable may produce)."
+                    "— a frozenset[str] of state keys the callable may "
+                    "produce. Example:\n"
+                    "    ActionSpec(\n"
+                    "        name='eat',\n"
+                    "        effects=eat_fn,\n"
+                    "        effect_keys=frozenset({'food'}),\n"
+                    "    )"
+                )
+            if isinstance(self.effect_keys, (set, list, tuple)):
+                object.__setattr__(self, "effect_keys", frozenset(self.effect_keys))
+            elif not isinstance(self.effect_keys, frozenset):
+                raise TypeError(
+                    "ActionSpec.effect_keys must be a frozenset[str] (or a "
+                    f"set/list/tuple coercible to one); got "
+                    f"{type(self.effect_keys).__name__}."
+                )
+            if not self.effect_keys:
+                raise ValueError(
+                    "ActionSpec.effect_keys must be non-empty — a dynamic "
+                    "effect that produces no state changes has no planning "
+                    "value."
                 )
         else:
             if self.effect_keys is not None:
