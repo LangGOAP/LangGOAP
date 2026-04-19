@@ -5,7 +5,10 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from langgoap.actions import ActionSpec
 
 logger = logging.getLogger(__name__)
 
@@ -109,3 +112,32 @@ class PlanningState:
 
     def __repr__(self) -> str:
         return f"PlanningState({self.to_dict()!r})"
+
+
+def infer_start_state(actions: list[ActionSpec]) -> dict[str, bool]:
+    """Build a clean-slate world state from action preconditions and effects.
+
+    Collects every condition key referenced in preconditions and boolean
+    effects, then sets each to ``False``.  Non-boolean effect values are
+    skipped.
+
+    This eliminates the hand-written start-state factories common in
+    notebooks and tutorial modules::
+
+        start = infer_start_state(actions)
+        # → {"has_data": False, "report_complete": False, ...}
+
+    Args:
+        actions: List of actions whose preconditions/effects define the
+            planning state space.
+
+    Returns:
+        A dict mapping every discovered boolean condition key to ``False``.
+    """
+    keys: set[str] = set()
+    for a in actions:
+        keys.update(a.preconditions.keys())
+        for k, v in a.effects.items():
+            if isinstance(v, bool):
+                keys.add(k)
+    return {k: False for k in sorted(keys)}

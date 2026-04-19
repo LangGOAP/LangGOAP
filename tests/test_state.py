@@ -1,4 +1,4 @@
-"""Tests for PlanningState — immutable, hashable world state representation."""
+"""Tests for PlanningState and state-related utilities."""
 
 from __future__ import annotations
 
@@ -170,3 +170,48 @@ class TestPlanningStateAccessors:
         r = repr(state)
         assert "PlanningState" in r
         assert "'a'" in r
+
+
+class TestInferStartState:
+    def test_infer_from_actions(self) -> None:
+        from langgoap.actions import ActionSpec
+        from langgoap.state import infer_start_state
+
+        actions = [
+            ActionSpec(name="gather", effects={"has_data": True}),
+            ActionSpec(
+                name="analyze",
+                preconditions={"has_data": True},
+                effects={"has_result": True},
+            ),
+            ActionSpec(
+                name="report",
+                preconditions={"has_result": True},
+                effects={"done": True},
+            ),
+        ]
+        start = infer_start_state(actions)
+        assert start == {
+            "done": False,
+            "has_data": False,
+            "has_result": False,
+        }
+
+    def test_skips_non_boolean_effects(self) -> None:
+        from langgoap.actions import ActionSpec
+        from langgoap.state import infer_start_state
+
+        actions = [
+            ActionSpec(
+                name="score",
+                effects={"quality": 0.9, "done": True},
+            ),
+        ]
+        start = infer_start_state(actions)
+        # "quality" has a float effect, not bool → excluded
+        assert start == {"done": False}
+
+    def test_empty_actions(self) -> None:
+        from langgoap.state import infer_start_state
+
+        assert infer_start_state([]) == {}

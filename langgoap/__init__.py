@@ -89,7 +89,7 @@ from langgoap.sensors import (
     run_sensors_sync,
 )
 from langgoap.serde import LangGoapSerializer, install_langgoap_serde
-from langgoap.state import PlanningState
+from langgoap.state import PlanningState, infer_start_state
 from langgoap.tracing import (
     LangSmithTracer,
     LoggingTracer,
@@ -162,6 +162,7 @@ __all__ = [
     "Plan",
     "PlanMetadata",
     "PlanningState",
+    "infer_start_state",
     # Planning strategies
     "PlanningStrategy",
     "AStarStrategy",
