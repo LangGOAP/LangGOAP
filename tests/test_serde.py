@@ -497,6 +497,85 @@ class TestInstallLangGoapSerde:
 
 
 # ---------------------------------------------------------------------------
+# Strict allowed_msgpack_modules by default
+# ---------------------------------------------------------------------------
+
+
+class TestAllowedMsgpackModules:
+    """LangGoapSerializer must ship a strict default allowlist covering
+    every LangGoap dataclass that flows through a checkpoint, so users
+    never see the LangGraph 'unregistered type' deprecation warning."""
+
+    _LANGGOAP_LOGGER = "langgraph.checkpoint.serde.jsonplus"
+
+    def test_default_allowlist_is_strict_not_legacy(self) -> None:
+        """Default must not be the legacy ``True`` (allow-all)."""
+        serde = LangGoapSerializer()
+        assert serde._allowed_msgpack_modules is not True
+        assert serde._allowed_msgpack_modules is not None
+
+    def test_round_trip_of_core_types_emits_no_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Every LangGoap dataclass routinely checkpointed must round-trip
+        without an 'unregistered type' log on the langgraph serde logger."""
+        serde = LangGoapSerializer()
+        samples: list[Any] = [
+            ActionSpec(name="a", effects={"x": True}),
+            GoalSpec(conditions={"x": True}),
+            ConstraintSpec(key="tokens", max=100.0),
+            PlanningState.from_dict({"x": True}),
+            SimpleScore(scalar=1.0),
+            HardSoftScore(hard=0.0, soft=1.0),
+            BendableScore(hard_levels=(0.0,), soft_levels=(1.0,)),
+        ]
+        with caplog.at_level("WARNING", logger=self._LANGGOAP_LOGGER):
+            for obj in samples:
+                _round_trip(serde, obj)
+        unregistered = [
+            rec for rec in caplog.records if "unregistered" in rec.message.lower()
+        ]
+        assert unregistered == [], (
+            "LangGoapSerializer should register every LangGoap dataclass in "
+            "its default allowed_msgpack_modules. Got warnings: "
+            f"{[r.getMessage() for r in unregistered]}"
+        )
+
+    def test_user_allowlist_is_merged_with_langgoap_defaults(self) -> None:
+        """Users extending the allowlist must still get LangGoap defaults."""
+        import dataclasses
+
+        @dataclasses.dataclass
+        class UserType:
+            x: int
+
+        serde = LangGoapSerializer(
+            allowed_msgpack_modules=[(UserType.__module__, UserType.__name__)]
+        )
+        allow = serde._allowed_msgpack_modules
+        assert isinstance(allow, set)
+        assert ("langgoap.actions", "ActionSpec") in allow
+        assert (UserType.__module__, UserType.__name__) in allow
+
+    def test_legacy_true_opt_in_still_works(self) -> None:
+        """Users who explicitly pass ``True`` keep legacy allow-all behavior."""
+        serde = LangGoapSerializer(allowed_msgpack_modules=True)
+        assert serde._allowed_msgpack_modules is True
+
+    def test_install_langgoap_serde_uses_strict_default(self) -> None:
+        """install_langgoap_serde on a bare checkpointer must produce a
+        serde with the strict LangGoap allowlist, not legacy ``True``."""
+        from langgraph.checkpoint.memory import MemorySaver
+
+        cp = MemorySaver()
+        install_langgoap_serde(cp)
+        assert isinstance(cp.serde, LangGoapSerializer)
+        assert cp.serde._allowed_msgpack_modules is not True
+        assert isinstance(cp.serde._allowed_msgpack_modules, set)
+        assert ("langgoap.actions", "ActionSpec") in cp.serde._allowed_msgpack_modules
+
+
+# ---------------------------------------------------------------------------
 # Special values: None, bytes, bytearray
 # ---------------------------------------------------------------------------
 

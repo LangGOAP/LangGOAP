@@ -112,7 +112,11 @@ from langgoap.sensors import (
     run_sensors_async,
     run_sensors_sync,
 )
-from langgoap.serde import LangGoapSerializer, install_langgoap_serde
+from langgoap.serde import (
+    LANGGOAP_ALLOWED_MSGPACK_TYPES,
+    LangGoapSerializer,
+    install_langgoap_serde,
+)
 from langgoap.state import PlanningState, infer_start_state
 from langgoap.tracing import (
     LangSmithTracer,
@@ -257,6 +261,7 @@ __all__ = [
     "Reflection",
     "ReflexionTracer",
     # Serde
+    "LANGGOAP_ALLOWED_MSGPACK_TYPES",
     "LangGoapSerializer",
     "install_langgoap_serde",
 ]

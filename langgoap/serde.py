@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import dataclasses
 import pickle
+from collections.abc import Iterable
 from types import MappingProxyType
 from typing import Any
 
@@ -61,11 +62,76 @@ from langgraph.checkpoint.serde.jsonplus import (
 )
 from langgraph.checkpoint.serde.jsonplus import _option as _stock_option
 
+from langgoap.actions import ActionSpec
+from langgoap.goals import ConstraintSpec, GoalSpec, MultiGoal, SoftGoal
+from langgoap.graph.state import ActionResult
+from langgoap.guards import GuardResult
+from langgoap.history import ExecutionRecord
+from langgoap.planner.csp import CSPMetadata, ResourceUsage, ScheduleEntry
+from langgoap.planner.explain import (
+    InfeasibilityExplanation,
+    NoPlanExplanation,
+    ResourceShortfall,
+)
+from langgoap.planner.repair import RepairResult
+from langgoap.planner.types import Plan, PlanMetadata
+from langgoap.reflexion import Reflection
+from langgoap.score import BendableScore, HardSoftScore, Score, SimpleScore
+from langgoap.state import PlanningState
+
 __all__ = [
+    "LANGGOAP_ALLOWED_MSGPACK_TYPES",
     "LangGoapSerializer",
     "LangGoapRedisSerializer",
     "install_langgoap_serde",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Default msgpack allowlist
+# ---------------------------------------------------------------------------
+
+# Every LangGOAP dataclass that routinely flows through a checkpoint.
+# ``LangGoapSerializer`` seeds ``allowed_msgpack_modules`` with these by
+# default so users never hit LangGraph's "Deserializing unregistered
+# type …" deprecation warning for first-party types.  Users extending
+# the allowlist via the constructor or :meth:`with_msgpack_allowlist`
+# keep every entry here in addition to their own.
+#
+# The ``builtins.tuple`` / ``builtins.set`` / ``builtins.frozenset``
+# entries are required because :func:`_langgoap_msgpack_default` emits
+# these as Ext payloads so tuple identity survives the wire (the stock
+# ormsgpack handler would pack them as lists).  Ext reconstruction
+# looks up the class through the allowlist, so the builtins we emit
+# must be explicitly permitted.
+LANGGOAP_ALLOWED_MSGPACK_TYPES: tuple[type, ...] = (
+    tuple,
+    set,
+    frozenset,
+    ActionSpec,
+    ActionResult,
+    BendableScore,
+    ConstraintSpec,
+    CSPMetadata,
+    ExecutionRecord,
+    GoalSpec,
+    GuardResult,
+    HardSoftScore,
+    InfeasibilityExplanation,
+    MultiGoal,
+    NoPlanExplanation,
+    Plan,
+    PlanMetadata,
+    PlanningState,
+    Reflection,
+    RepairResult,
+    ResourceShortfall,
+    ResourceUsage,
+    ScheduleEntry,
+    SimpleScore,
+    SoftGoal,
+    Score,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +240,37 @@ def _langgoap_msgpack_enc(obj: Any) -> bytes:
 # ---------------------------------------------------------------------------
 
 
+def _merge_langgoap_allowlist(
+    user_allowlist: Any,
+) -> Any:
+    """Merge LangGOAP's default msgpack allowlist with a user-provided one.
+
+    Semantics:
+
+    - ``True`` (legacy allow-all) passes through unchanged — users who
+      opt in to the legacy behavior keep it.
+    - Any other value (``None``, an iterable of tuples/types, the
+      LangGraph sentinel) is merged with
+      :data:`LANGGOAP_ALLOWED_MSGPACK_TYPES` so LangGOAP's own
+      dataclasses are always allowed, while user additions are
+      preserved.
+    """
+    if user_allowlist is True:
+        return True
+    extras: Iterable[tuple[str, ...] | type]
+    if user_allowlist is None or user_allowlist is _SERDE_SENTINEL:
+        extras = ()
+    else:
+        extras = user_allowlist
+    return (*LANGGOAP_ALLOWED_MSGPACK_TYPES, *extras)
+
+
+# Module-level sentinel distinct from LangGraph's (which is private).  We
+# only use this to detect whether the caller supplied ``allowed_msgpack_modules``
+# explicitly.
+_SERDE_SENTINEL: Any = object()
+
+
 class LangGoapSerializer(JsonPlusSerializer):
     """``JsonPlusSerializer`` subclass that supports LangGOAP state.
 
@@ -184,7 +281,29 @@ class LangGoapSerializer(JsonPlusSerializer):
     ``cls(arg)``; ``EXT_CONSTRUCTOR_KW_ARGS`` reconstructs dataclasses
     via ``cls(**kwargs)``).  LangGOAP's dataclass ``__post_init__``
     hooks re-wrap decoded dicts into ``MappingProxyType`` automatically.
+
+    Seeds ``allowed_msgpack_modules`` with
+    :data:`LANGGOAP_ALLOWED_MSGPACK_TYPES` by default so LangGOAP's own
+    dataclasses are always permitted during deserialization — no
+    "unregistered type" deprecation warning from the base serializer.
+    User-supplied allowlists are merged with the LangGOAP default;
+    passing ``True`` keeps LangGraph's legacy allow-all behavior.
     """
+
+    def __init__(
+        self,
+        *,
+        pickle_fallback: bool = False,
+        allowed_json_modules: Any = None,
+        allowed_msgpack_modules: Any = _SERDE_SENTINEL,
+        __unpack_ext_hook__: Any = None,
+    ) -> None:
+        super().__init__(
+            pickle_fallback=pickle_fallback,
+            allowed_json_modules=allowed_json_modules,
+            allowed_msgpack_modules=_merge_langgoap_allowlist(allowed_msgpack_modules),
+            __unpack_ext_hook__=__unpack_ext_hook__,
+        )
 
     def dumps_typed(self, obj: Any) -> tuple[str, bytes]:
         if obj is None:
@@ -248,8 +367,28 @@ def _make_langgoap_redis_serializer_cls() -> type:
 
         This subclass adds those branches so the JSON encoding path
         succeeds for the full checkpoint, and overrides the msgpack
-        fallback to use :func:`_langgoap_msgpack_enc`.
+        fallback to use :func:`_langgoap_msgpack_enc`.  Like
+        :class:`LangGoapSerializer`, it seeds
+        ``allowed_msgpack_modules`` with
+        :data:`LANGGOAP_ALLOWED_MSGPACK_TYPES` by default.
         """
+
+        def __init__(
+            self,
+            *,
+            pickle_fallback: bool = False,
+            allowed_json_modules: Any = None,
+            allowed_msgpack_modules: Any = _SERDE_SENTINEL,
+            __unpack_ext_hook__: Any = None,
+        ) -> None:
+            super().__init__(
+                pickle_fallback=pickle_fallback,
+                allowed_json_modules=allowed_json_modules,
+                allowed_msgpack_modules=_merge_langgoap_allowlist(
+                    allowed_msgpack_modules
+                ),
+                __unpack_ext_hook__=__unpack_ext_hook__,
+            )
 
         def _preprocess_interrupts(self, obj: Any) -> Any:
             import enum
@@ -444,6 +583,9 @@ def install_langgoap_serde(
     # Carry over every public configuration field we can see on the
     # existing serde so users who constructed ``JsonPlusSerializer(...)``
     # with custom allowlists or pickle_fallback keep their settings.
+    # The legacy allow-all value (``True``) is *not* carried over: it is
+    # the library-wide default and represents "user didn't specify an
+    # allowlist", so we let LangGoapSerializer apply its strict default.
     init_kwargs: dict[str, Any] = {}
     if current is not None:
         if getattr(current, "pickle_fallback", False):
@@ -452,7 +594,7 @@ def install_langgoap_serde(
         if allowed_json is not None:
             init_kwargs["allowed_json_modules"] = allowed_json
         allowed_msgpack = getattr(current, "_allowed_msgpack_modules", None)
-        if allowed_msgpack is not None:
+        if allowed_msgpack is not None and allowed_msgpack is not True:
             init_kwargs["allowed_msgpack_modules"] = allowed_msgpack
 
     if _is_redis_serde(current):
