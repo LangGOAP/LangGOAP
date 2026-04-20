@@ -183,10 +183,12 @@ class GoapPlanner:
         tracer: PlanningTracer | None = None,
         sensors: list[Sensor | AsyncSensor] | None = None,
         resolvers: list[ConditionResolver | AsyncConditionResolver] | None = None,
+        record_expansions: bool = False,
     ) -> None:
         self.actions = actions
         self._strategy = strategy
         self._tracer: PlanningTracer = tracer or NullTracer()
+        self._record_expansions = record_expansions
         self._sensors: list[Sensor | AsyncSensor] = list(sensors) if sensors else []
         self._resolvers: list[ConditionResolver | AsyncConditionResolver] = (
             list(resolvers) if resolvers else []
@@ -249,7 +251,14 @@ class GoapPlanner:
             return pipeline_plan(
                 start, goal, self.actions, blacklisted_actions=blacklisted
             )
-        return astar_plan(start, goal, self.actions, blacklisted_actions=blacklisted)
+        return astar_plan(
+            start,
+            goal,
+            self.actions,
+            blacklisted_actions=blacklisted,
+            tracer=self._tracer,
+            record_expansions=self._record_expansions,
+        )
 
     def _resolve_sequential_subgoal(
         self, raw_goal: MultiGoal, state: GoapState, was_replan: bool

@@ -78,6 +78,7 @@ class GoapGraph:
         sensors: list[Sensor | AsyncSensor] | None = None,
         guards: list[ActionGuard | AsyncActionGuard] | None = None,
         resolvers: list[ConditionResolver | AsyncConditionResolver] | None = None,
+        record_expansions: bool = False,
     ) -> None:
         self.actions = actions
         self._strategy = strategy
@@ -86,6 +87,7 @@ class GoapGraph:
         self._sensors = sensors
         self._guards = guards
         self._resolvers = resolvers
+        self._record_expansions = record_expansions
 
     def compile(
         self,
@@ -138,6 +140,7 @@ class GoapGraph:
             tracer=self._tracer,
             sensors=self._sensors,
             resolvers=self._resolvers,
+            record_expansions=self._record_expansions,
         )
         executor = GoapExecutor(tracer=self._tracer, guards=self._guards)
         observer = GoapObserver(

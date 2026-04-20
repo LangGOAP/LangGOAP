@@ -385,3 +385,124 @@ class TestDegradedMode:
 
         fake_client_cls.assert_called_once_with()
         assert tracer._client is fake_client_instance  # type: ignore[attr-defined]
+
+
+class TestSearchEvents:
+    """A* search hooks attach as events/metadata to the open ``goap_plan`` run.
+
+    These follow the OpenTelemetry GenAI convention of capturing
+    high-volume content as span *events* rather than nested child spans
+    — LangSmith maps OTel events to LangSmith run events natively.
+    """
+
+    def test_search_expand_updates_root_with_event_metadata(
+        self,
+        tracer: LangSmithTracer,
+        mock_client: MagicMock,
+        goal: GoalSpec,
+    ) -> None:
+        tracer.on_plan_start(goal, {"a": True}, "a_star")
+        root_id = mock_client.create_run.call_args.kwargs["id"]
+        mock_client.update_run.reset_mock()
+
+        tracer.on_search_expand(
+            node_id=1,
+            state={"a": True, "b": True},
+            g=1.0,
+            h=2.0,
+            f=3.0,
+            parent_id=0,
+            action_name="a_to_b",
+        )
+
+        mock_client.update_run.assert_called_once()
+        call = mock_client.update_run.call_args
+        assert call.args[0] == root_id
+        events = call.kwargs["extra"]["metadata"]["search_events"]
+        assert isinstance(events, list) and len(events) == 1
+        e = events[0]
+        assert e["kind"] == "search_expand"
+        assert e["node_id"] == 1
+        assert e["parent_id"] == 0
+        assert e["action_name"] == "a_to_b"
+        assert e["g"] == 1.0 and e["h"] == 2.0 and e["f"] == 3.0
+
+    def test_search_complete_emits_aggregate_metadata(
+        self,
+        tracer: LangSmithTracer,
+        mock_client: MagicMock,
+        goal: GoalSpec,
+    ) -> None:
+        tracer.on_plan_start(goal, {}, "a_star")
+        mock_client.update_run.reset_mock()
+
+        tracer.on_search_complete(nodes_explored=42, duration_ms=5.5, found=True)
+
+        mock_client.update_run.assert_called_once()
+        meta = mock_client.update_run.call_args.kwargs["extra"]["metadata"]
+        assert meta["search_summary"] == {
+            "nodes_explored": 42,
+            "duration_ms": 5.5,
+            "found": True,
+        }
+
+    def test_search_dead_end_records_event(
+        self,
+        tracer: LangSmithTracer,
+        mock_client: MagicMock,
+        goal: GoalSpec,
+    ) -> None:
+        tracer.on_plan_start(goal, {}, "a_star")
+        mock_client.update_run.reset_mock()
+
+        tracer.on_search_dead_end(reason="not_reachable", detail={"missing": ["b"]})
+
+        mock_client.update_run.assert_called_once()
+        events = mock_client.update_run.call_args.kwargs["extra"]["metadata"][
+            "search_events"
+        ]
+        assert events[-1]["kind"] == "search_dead_end"
+        assert events[-1]["reason"] == "not_reachable"
+        assert events[-1]["detail"] == {"missing": ["b"]}
+
+    def test_search_events_are_noops_without_open_root(
+        self,
+        tracer: LangSmithTracer,
+        mock_client: MagicMock,
+    ) -> None:
+        """No root run open → no update_run issued."""
+        tracer.on_search_expand(1, {}, 0.0, 0.0, 0.0, None, None)
+        tracer.on_search_dead_end("exhausted", {})
+        tracer.on_search_complete(0, 0.0, False)
+        mock_client.update_run.assert_not_called()
+
+    def test_search_events_disabled_when_no_api_key(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        goal: GoalSpec,
+    ) -> None:
+        monkeypatch.delenv("LANGCHAIN_API_KEY", raising=False)
+        monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+        tracer = LangSmithTracer()
+        # Must not raise and must not attempt any client access.
+        tracer.on_plan_start(goal, {}, "a_star")
+        tracer.on_search_expand(1, {}, 0.0, 0.0, 0.0, None, None)
+        tracer.on_search_dead_end("exhausted", {})
+        tracer.on_search_complete(0, 0.0, False)
+
+    @pytest.mark.asyncio
+    async def test_async_search_hooks_delegate_to_sync(
+        self,
+        tracer: LangSmithTracer,
+        mock_client: MagicMock,
+        goal: GoalSpec,
+    ) -> None:
+        tracer.on_plan_start(goal, {}, "a_star")
+        mock_client.update_run.reset_mock()
+
+        await tracer.aon_search_expand(1, {}, 1.0, 2.0, 3.0, 0, "move")
+        await tracer.aon_search_dead_end("exhausted", {"nodes_explored": 11})
+        await tracer.aon_search_complete(11, 0.5, False)
+
+        # Three updates total: expand, dead_end (event append), complete (summary).
+        assert mock_client.update_run.call_count == 3

@@ -89,6 +89,31 @@ class PlanningTracer(Protocol):
     def on_sensor_complete(self, sensor_name: str, updates: Any) -> None: ...
 
     # ------------------------------------------------------------------
+    # A* search-tree hooks (gated by ``record_expansions`` on the graph /
+    # planner — silent by default because per-expansion firehose is
+    # high-volume and expensive to persist).  Aligned with the
+    # OpenTelemetry GenAI convention of capturing high-volume content
+    # as span *events* rather than nested child spans; LangSmith maps
+    # OTel events to run events natively.
+    # ------------------------------------------------------------------
+    def on_search_expand(
+        self,
+        node_id: int,
+        state: Any,
+        g: float,
+        h: float,
+        f: float,
+        parent_id: int | None,
+        action_name: str | None,
+    ) -> None: ...
+
+    def on_search_dead_end(self, reason: str, detail: dict[str, Any]) -> None: ...
+
+    def on_search_complete(
+        self, nodes_explored: int, duration_ms: float, found: bool
+    ) -> None: ...
+
+    # ------------------------------------------------------------------
     # Async hooks (parity with CLAUDE.md dual-implementation pattern)
     # ------------------------------------------------------------------
     async def aon_plan_start(
@@ -108,6 +133,25 @@ class PlanningTracer(Protocol):
     async def aon_goal_achieved(self, final_state: Any) -> None: ...
 
     async def aon_sensor_complete(self, sensor_name: str, updates: Any) -> None: ...
+
+    async def aon_search_expand(
+        self,
+        node_id: int,
+        state: Any,
+        g: float,
+        h: float,
+        f: float,
+        parent_id: int | None,
+        action_name: str | None,
+    ) -> None: ...
+
+    async def aon_search_dead_end(
+        self, reason: str, detail: dict[str, Any]
+    ) -> None: ...
+
+    async def aon_search_complete(
+        self, nodes_explored: int, duration_ms: float, found: bool
+    ) -> None: ...
 
 
 class NullTracer:
@@ -162,6 +206,46 @@ class NullTracer:
         pass
 
     async def aon_sensor_complete(self, sensor_name: str, updates: Any) -> None:
+        pass
+
+    def on_search_expand(
+        self,
+        node_id: int,
+        state: Any,
+        g: float,
+        h: float,
+        f: float,
+        parent_id: int | None,
+        action_name: str | None,
+    ) -> None:
+        pass
+
+    def on_search_dead_end(self, reason: str, detail: dict[str, Any]) -> None:
+        pass
+
+    def on_search_complete(
+        self, nodes_explored: int, duration_ms: float, found: bool
+    ) -> None:
+        pass
+
+    async def aon_search_expand(
+        self,
+        node_id: int,
+        state: Any,
+        g: float,
+        h: float,
+        f: float,
+        parent_id: int | None,
+        action_name: str | None,
+    ) -> None:
+        pass
+
+    async def aon_search_dead_end(self, reason: str, detail: dict[str, Any]) -> None:
+        pass
+
+    async def aon_search_complete(
+        self, nodes_explored: int, duration_ms: float, found: bool
+    ) -> None:
         pass
 
 
@@ -221,6 +305,59 @@ class LoggingTracer:
 
     async def aon_sensor_complete(self, sensor_name: str, updates: Any) -> None:
         self.on_sensor_complete(sensor_name, updates)
+
+    def on_search_expand(
+        self,
+        node_id: int,
+        state: Any,
+        g: float,
+        h: float,
+        f: float,
+        parent_id: int | None,
+        action_name: str | None,
+    ) -> None:
+        logger.info(
+            "search_expand node=%d parent=%s g=%.3f h=%.3f f=%.3f action=%s",
+            node_id,
+            parent_id,
+            g,
+            h,
+            f,
+            action_name,
+        )
+
+    def on_search_dead_end(self, reason: str, detail: dict[str, Any]) -> None:
+        logger.info("search_dead_end reason=%s detail=%r", reason, detail)
+
+    def on_search_complete(
+        self, nodes_explored: int, duration_ms: float, found: bool
+    ) -> None:
+        logger.info(
+            "search_complete nodes_explored=%d duration_ms=%.2f found=%s",
+            nodes_explored,
+            duration_ms,
+            found,
+        )
+
+    async def aon_search_expand(
+        self,
+        node_id: int,
+        state: Any,
+        g: float,
+        h: float,
+        f: float,
+        parent_id: int | None,
+        action_name: str | None,
+    ) -> None:
+        self.on_search_expand(node_id, state, g, h, f, parent_id, action_name)
+
+    async def aon_search_dead_end(self, reason: str, detail: dict[str, Any]) -> None:
+        self.on_search_dead_end(reason, detail)
+
+    async def aon_search_complete(
+        self, nodes_explored: int, duration_ms: float, found: bool
+    ) -> None:
+        self.on_search_complete(nodes_explored, duration_ms, found)
 
 
 class MultiTracer:
@@ -297,6 +434,35 @@ class MultiTracer:
     def on_sensor_complete(self, sensor_name: str, updates: Any) -> None:
         self._fan_sync("on_sensor_complete", sensor_name, updates)
 
+    def on_search_expand(
+        self,
+        node_id: int,
+        state: Any,
+        g: float,
+        h: float,
+        f: float,
+        parent_id: int | None,
+        action_name: str | None,
+    ) -> None:
+        self._fan_sync(
+            "on_search_expand",
+            node_id,
+            state,
+            g,
+            h,
+            f,
+            parent_id,
+            action_name,
+        )
+
+    def on_search_dead_end(self, reason: str, detail: dict[str, Any]) -> None:
+        self._fan_sync("on_search_dead_end", reason, detail)
+
+    def on_search_complete(
+        self, nodes_explored: int, duration_ms: float, found: bool
+    ) -> None:
+        self._fan_sync("on_search_complete", nodes_explored, duration_ms, found)
+
     async def aon_plan_start(self, goal: Any, state: Any, strategy_name: str) -> None:
         await self._fan_async("aon_plan_start", goal, state, strategy_name)
 
@@ -320,6 +486,35 @@ class MultiTracer:
 
     async def aon_sensor_complete(self, sensor_name: str, updates: Any) -> None:
         await self._fan_async("aon_sensor_complete", sensor_name, updates)
+
+    async def aon_search_expand(
+        self,
+        node_id: int,
+        state: Any,
+        g: float,
+        h: float,
+        f: float,
+        parent_id: int | None,
+        action_name: str | None,
+    ) -> None:
+        await self._fan_async(
+            "aon_search_expand",
+            node_id,
+            state,
+            g,
+            h,
+            f,
+            parent_id,
+            action_name,
+        )
+
+    async def aon_search_dead_end(self, reason: str, detail: dict[str, Any]) -> None:
+        await self._fan_async("aon_search_dead_end", reason, detail)
+
+    async def aon_search_complete(
+        self, nodes_explored: int, duration_ms: float, found: bool
+    ) -> None:
+        await self._fan_async("aon_search_complete", nodes_explored, duration_ms, found)
 
 
 def _utc_now() -> datetime:
@@ -487,6 +682,11 @@ class LangSmithTracer:
         self._root_start: datetime | None = None
         self._action_run_id: uuid.UUID | None = None
         self._action_start: datetime | None = None
+        # Accumulated A* search events for the currently-open root run.
+        # We send the full list on every update because LangSmith's
+        # ``extra.metadata`` merge semantics replace list-valued keys
+        # rather than concatenating them.
+        self._search_events: list[dict[str, Any]] = []
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -512,6 +712,7 @@ class LangSmithTracer:
         now = _utc_now()
         self._root_run_id = run_id
         self._root_start = now
+        self._search_events = []
         create_kwargs: dict[str, Any] = {
             "name": "goap_plan",
             "run_type": "chain",
@@ -667,6 +868,75 @@ class LangSmithTracer:
         )
 
     # ------------------------------------------------------------------
+    # A* search hooks — attached as OTel-style events on the root
+    # ``goap_plan`` run rather than as nested child runs.  Per-expansion
+    # firehose data is high-volume; LangSmith maps OTel events to run
+    # events natively.
+    # ------------------------------------------------------------------
+    def _append_search_event(self, event: dict[str, Any]) -> None:
+        if self._disabled or self._client is None or self._root_run_id is None:
+            return
+        self._search_events.append(event)
+        self._safe(
+            "update_run",
+            self._client.update_run,
+            self._root_run_id,
+            extra={"metadata": {"search_events": list(self._search_events)}},
+        )
+
+    def on_search_expand(
+        self,
+        node_id: int,
+        state: Any,
+        g: float,
+        h: float,
+        f: float,
+        parent_id: int | None,
+        action_name: str | None,
+    ) -> None:
+        self._append_search_event(
+            {
+                "kind": "search_expand",
+                "node_id": node_id,
+                "parent_id": parent_id,
+                "action_name": action_name,
+                "g": g,
+                "h": h,
+                "f": f,
+                "state": _jsonable(state),
+            }
+        )
+
+    def on_search_dead_end(self, reason: str, detail: dict[str, Any]) -> None:
+        self._append_search_event(
+            {
+                "kind": "search_dead_end",
+                "reason": reason,
+                "detail": _jsonable(detail),
+            }
+        )
+
+    def on_search_complete(
+        self, nodes_explored: int, duration_ms: float, found: bool
+    ) -> None:
+        if self._disabled or self._client is None or self._root_run_id is None:
+            return
+        self._safe(
+            "update_run",
+            self._client.update_run,
+            self._root_run_id,
+            extra={
+                "metadata": {
+                    "search_summary": {
+                        "nodes_explored": nodes_explored,
+                        "duration_ms": duration_ms,
+                        "found": found,
+                    }
+                }
+            },
+        )
+
+    # ------------------------------------------------------------------
     # Async hooks — langsmith.Client is thread-safe and uses its own
     # background sender thread, so delegating to the sync hooks is
     # correct and does not block the event loop beyond a cheap
@@ -695,6 +965,26 @@ class LangSmithTracer:
 
     async def aon_sensor_complete(self, sensor_name: str, updates: Any) -> None:
         self.on_sensor_complete(sensor_name, updates)
+
+    async def aon_search_expand(
+        self,
+        node_id: int,
+        state: Any,
+        g: float,
+        h: float,
+        f: float,
+        parent_id: int | None,
+        action_name: str | None,
+    ) -> None:
+        self.on_search_expand(node_id, state, g, h, f, parent_id, action_name)
+
+    async def aon_search_dead_end(self, reason: str, detail: dict[str, Any]) -> None:
+        self.on_search_dead_end(reason, detail)
+
+    async def aon_search_complete(
+        self, nodes_explored: int, duration_ms: float, found: bool
+    ) -> None:
+        self.on_search_complete(nodes_explored, duration_ms, found)
 
 
 __all__ = [

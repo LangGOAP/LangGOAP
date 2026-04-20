@@ -97,6 +97,90 @@ class TestGoapPlanner:
         result = planner(state)
         assert result["replan_count"] == 3
 
+    def test_record_expansions_forwards_tracer_into_astar(self) -> None:
+        """``GoapPlanner(record_expansions=True)`` must route the tracer
+        into the A* search so per-expansion hooks fire."""
+
+        class _Recorder:
+            def __init__(self) -> None:
+                self.expansions: list[int] = []
+                self.completions: list[tuple[int, float, bool]] = []
+
+            # Only the search hooks we care about here; GoapPlanner also
+            # fires on_plan_start / on_plan_complete which this stub
+            # accepts via **kwargs-friendly no-ops below.
+            def on_plan_start(self, *a: Any, **k: Any) -> None: ...
+            def on_plan_complete(self, *a: Any, **k: Any) -> None: ...
+            def on_plan_failed(self, *a: Any, **k: Any) -> None: ...
+            def on_replan(self, *a: Any, **k: Any) -> None: ...
+
+            def on_search_expand(
+                self,
+                node_id: int,
+                state: Any,
+                g: float,
+                h: float,
+                f: float,
+                parent_id: int | None,
+                action_name: str | None,
+            ) -> None:
+                self.expansions.append(node_id)
+
+            def on_search_dead_end(
+                self, reason: str, detail: dict[str, Any]
+            ) -> None: ...
+
+            def on_search_complete(
+                self, nodes_explored: int, duration_ms: float, found: bool
+            ) -> None:
+                self.completions.append((nodes_explored, duration_ms, found))
+
+        rec = _Recorder()
+        actions = [
+            _action("step1", eff={"a": True}),
+            _action("step2", pre={"a": True}, eff={"b": True}),
+        ]
+        planner = GoapPlanner(actions, tracer=rec, record_expansions=True)
+        state: GoapState = {
+            "world_state": {},
+            "goal": GoalSpec(conditions={"b": True}),
+        }
+        result = planner(state)
+
+        assert result["status"] == "executing"
+        assert rec.expansions, "expected at least one on_search_expand event"
+        assert rec.completions and rec.completions[-1][2] is True
+
+    def test_record_expansions_off_by_default(self) -> None:
+        """Default ``record_expansions=False`` keeps the per-expansion
+        firehose silent even when a tracer is present."""
+
+        class _Recorder:
+            def __init__(self) -> None:
+                self.expansions: list[int] = []
+
+            def on_plan_start(self, *a: Any, **k: Any) -> None: ...
+            def on_plan_complete(self, *a: Any, **k: Any) -> None: ...
+            def on_plan_failed(self, *a: Any, **k: Any) -> None: ...
+            def on_replan(self, *a: Any, **k: Any) -> None: ...
+
+            def on_search_expand(self, *a: Any, **k: Any) -> None:
+                self.expansions.append(0)
+
+            def on_search_dead_end(self, *a: Any, **k: Any) -> None: ...
+            def on_search_complete(self, *a: Any, **k: Any) -> None: ...
+
+        rec = _Recorder()
+        actions = [_action("step1", eff={"done": True})]
+        planner = GoapPlanner(actions, tracer=rec)  # record_expansions default
+        state: GoapState = {
+            "world_state": {},
+            "goal": GoalSpec(conditions={"done": True}),
+        }
+        planner(state)
+
+        assert rec.expansions == []
+
 
 # ---------------------------------------------------------------------------
 # Executor node

@@ -503,3 +503,140 @@ class TestCallableEffects:
             and "dynamic" in rec.message.lower()
             for rec in caplog.records
         ), f"expected a debug log mentioning the dynamic-effects bail-out; got {[r.message for r in caplog.records]}"
+
+
+# ---------------------------------------------------------------------------
+# Observability: A* search tracer hooks
+# ---------------------------------------------------------------------------
+
+
+class _SearchRecorder:
+    """Captures A* search events for assertions; no isinstance coupling."""
+
+    def __init__(self) -> None:
+        self.expansions: list[dict[str, Any]] = []
+        self.dead_ends: list[tuple[str, dict[str, Any]]] = []
+        self.completions: list[tuple[int, float, bool]] = []
+
+    def on_search_expand(
+        self,
+        node_id: int,
+        state: Any,
+        g: float,
+        h: float,
+        f: float,
+        parent_id: int | None,
+        action_name: str | None,
+    ) -> None:
+        self.expansions.append(
+            {
+                "node_id": node_id,
+                "state": state,
+                "g": g,
+                "h": h,
+                "f": f,
+                "parent_id": parent_id,
+                "action_name": action_name,
+            }
+        )
+
+    def on_search_dead_end(self, reason: str, detail: dict[str, Any]) -> None:
+        self.dead_ends.append((reason, detail))
+
+    def on_search_complete(
+        self, nodes_explored: int, duration_ms: float, found: bool
+    ) -> None:
+        self.completions.append((nodes_explored, duration_ms, found))
+
+
+class TestSearchTracerHooks:
+    def test_no_overhead_when_tracer_is_none(self) -> None:
+        """``tracer=None`` preserves the pre-existing behaviour exactly."""
+        actions = [
+            _action("a_to_b", pre={"a": True}, eff={"b": True}),
+            _action("b_to_c", pre={"b": True}, eff={"c": True}),
+        ]
+        start = PlanningState.from_dict({"a": True})
+        goal = GoalSpec(conditions={"c": True})
+        result = plan(start, goal, actions, tracer=None, record_expansions=True)
+        assert result is not None
+        assert result.action_names == ["a_to_b", "b_to_c"]
+
+    def test_opt_in_gate_honored(self) -> None:
+        """``record_expansions=False`` must silence per-expansion hooks."""
+        rec = _SearchRecorder()
+        actions = [_action("a_to_b", pre={"a": True}, eff={"b": True})]
+        start = PlanningState.from_dict({"a": True})
+        goal = GoalSpec(conditions={"b": True})
+        plan(start, goal, actions, tracer=rec, record_expansions=False)
+        assert rec.expansions == []
+        assert rec.dead_ends == []
+        assert rec.completions == []
+
+    def test_expansions_fire_per_popped_node(self) -> None:
+        rec = _SearchRecorder()
+        actions = [
+            _action("a_to_b", pre={"a": True}, eff={"b": True}),
+            _action("b_to_c", pre={"b": True}, eff={"c": True}),
+        ]
+        start = PlanningState.from_dict({"a": True})
+        goal = GoalSpec(conditions={"c": True})
+        result = plan(start, goal, actions, tracer=rec, record_expansions=True)
+
+        assert result is not None
+        # One expansion per popped node; final node count matches metadata.
+        assert len(rec.expansions) == result.metadata.nodes_explored
+        # First expansion is the root: parent_id is None, action_name is None.
+        root = rec.expansions[0]
+        assert root["parent_id"] is None
+        assert root["action_name"] is None
+        # Subsequent expansions carry their parent lineage and the action
+        # taken to reach them.
+        assert any(
+            e["parent_id"] == root["node_id"] and e["action_name"] == "a_to_b"
+            for e in rec.expansions[1:]
+        )
+        # f == g + h for every emission.
+        for e in rec.expansions:
+            assert e["f"] == pytest.approx(e["g"] + e["h"])
+
+    def test_complete_fires_once_with_found_true(self) -> None:
+        rec = _SearchRecorder()
+        actions = [_action("a_to_b", pre={"a": True}, eff={"b": True})]
+        start = PlanningState.from_dict({"a": True})
+        goal = GoalSpec(conditions={"b": True})
+        plan(start, goal, actions, tracer=rec, record_expansions=True)
+
+        assert len(rec.completions) == 1
+        nodes_explored, duration_ms, found = rec.completions[0]
+        assert found is True
+        assert nodes_explored >= 1
+        assert duration_ms >= 0.0
+
+    def test_dead_end_fires_when_goal_is_unreachable(self) -> None:
+        rec = _SearchRecorder()
+        actions = [_action("useless", eff={"x": True})]
+        start = PlanningState.from_dict({})
+        goal = GoalSpec(conditions={"unreachable": True})
+        result = plan(start, goal, actions, tracer=rec, record_expansions=True)
+        assert result is None
+        assert any(reason == "not_reachable" for reason, _ in rec.dead_ends)
+        # A completion event with found=False must still fire.
+        assert rec.completions and rec.completions[-1][2] is False
+
+    def test_legacy_tracer_without_search_hooks_is_tolerated(self) -> None:
+        """Tracers pre-dating the search hooks must continue to work."""
+
+        class _LegacyTracer:
+            # Intentionally missing on_search_* hooks.
+            def on_plan_start(self, *a: Any, **k: Any) -> None: ...
+            def on_plan_complete(self, *a: Any, **k: Any) -> None: ...
+
+        actions = [_action("a_to_b", pre={"a": True}, eff={"b": True})]
+        start = PlanningState.from_dict({"a": True})
+        goal = GoalSpec(conditions={"b": True})
+        # Must not raise AttributeError.
+        result = plan(
+            start, goal, actions, tracer=_LegacyTracer(), record_expansions=True
+        )
+        assert result is not None
