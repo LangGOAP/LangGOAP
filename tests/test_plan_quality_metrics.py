@@ -157,3 +157,56 @@ class TestCSPScoresMetrics:
         plan = result["plan"]
         # After CSP re-scoring the soft term must carry the metric penalty.
         assert plan.score.soft == pytest.approx(-7.0)
+
+
+class TestMetricsOnlyGoalShortCircuitsCSP:
+    """Metrics-only goals skip ``enumerate_alternatives`` + CP-SAT.
+
+    A goal with ``metrics`` but no ``constraints`` and no ``objectives``
+    carries preferences, not constraints — there is nothing for CSP to
+    validate.  The pipeline must return the primary A* plan verbatim
+    with metrics folded into the soft score.  Prior to this fix
+    ``validate_plan`` returned ``SKIPPED`` (its "no-op" sentinel),
+    which the pipeline interpreted as "primary infeasible" and then
+    ran ``enumerate_alternatives`` + ``optimize_plans`` — an
+    unreachable selection path for metric-only goals because CP-SAT
+    cannot express arbitrary Python metric callables.  On
+    long-horizon problems with a low action-name cardinality (e.g.
+    Pac-Man's four macro-actions) the name-blacklist alternatives
+    search explodes into unbounded A* runs; this regression hung the
+    trajectory-cost benchmark for 3+ hours before the fix.
+    """
+
+    def test_metrics_only_goal_does_not_invoke_alternatives_or_cpsat(
+        self,
+    ) -> None:
+        from unittest.mock import patch
+
+        from langgoap import ActionSpec, GoalSpec
+        from langgoap.planner.metrics import MinimizeFinalStateExpression
+        from langgoap.planner.pipeline import plan as pipeline_plan
+
+        actions = [
+            ActionSpec(
+                name="a",
+                preconditions={},
+                effects={"done": True, "penalty": 3.0},
+                cost=1.0,
+            ),
+        ]
+        metric = MinimizeFinalStateExpression(
+            name="terminal_penalty",
+            expression=lambda s: float(s.get("penalty", 0.0)),
+        )
+        goal = GoalSpec(conditions={"done": True}, metrics=(metric,))
+
+        with (
+            patch("langgoap.planner.pipeline.enumerate_alternatives") as enum_spy,
+            patch("langgoap.planner.pipeline.optimize_plans") as cpsat_spy,
+        ):
+            result = pipeline_plan({}, goal, actions)
+
+        assert result is not None
+        assert result.score.soft == pytest.approx(-3.0)
+        enum_spy.assert_not_called()
+        cpsat_spy.assert_not_called()
