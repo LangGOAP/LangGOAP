@@ -222,3 +222,138 @@ class TestEnumerateAlternatives:
         # Even if multiple blacklist attempts find the same alt, only 1 unique
         names = [tuple(alt.action_names) for alt in alts]
         assert len(names) == len(set(names))
+
+
+# ---------------------------------------------------------------------------
+# Observability: pipeline forwards search hooks into A* primary search
+# ---------------------------------------------------------------------------
+
+
+class _PipelineRecorder:
+    """Captures pipeline-level search events for assertions."""
+
+    def __init__(self) -> None:
+        self.expansions: list[dict[str, Any]] = []
+        self.dead_ends: list[tuple[str, dict[str, Any]]] = []
+        self.completions: list[tuple[int, float, bool]] = []
+
+    def on_search_expand(
+        self,
+        node_id: int,
+        state: Any,
+        g: float,
+        h: float,
+        f: float,
+        parent_id: int | None,
+        action_name: str | None,
+    ) -> None:
+        self.expansions.append(
+            {
+                "node_id": node_id,
+                "parent_id": parent_id,
+                "action_name": action_name,
+                "g": g,
+                "h": h,
+                "f": f,
+            }
+        )
+
+    def on_search_dead_end(self, reason: str, detail: dict[str, Any]) -> None:
+        self.dead_ends.append((reason, detail))
+
+    def on_search_complete(
+        self, nodes_explored: int, duration_ms: float, found: bool
+    ) -> None:
+        self.completions.append((nodes_explored, duration_ms, found))
+
+
+class TestPipelineSearchHooks:
+    """CSP pipeline forwards ``tracer`` + ``record_expansions`` into A*.
+
+    Landing 3 of the observability hardening plan: the two-phase
+    pipeline must surface the same per-expansion / dead-end /
+    completion telemetry that pure A* already does, while remaining
+    zero-overhead when the gate is off.
+    """
+
+    def test_primary_expansions_reach_tracer(self) -> None:
+        """Pipeline plan() with a feasible primary forwards expansions."""
+        a = make_action("a", eff={"done": True}, resources={"cost": 10})
+        start = PlanningState.from_dict({})
+        goal = GoalSpec(
+            conditions={"done": True},
+            constraints=(ConstraintSpec(key="cost", max=100),),
+        )
+        rec = _PipelineRecorder()
+        result = plan(start, goal, [a], tracer=rec, record_expansions=True)
+        assert result is not None
+        assert result.metadata.csp is not None
+        assert len(rec.expansions) >= 1
+        # Primary A* succeeded → exactly one completion with found=True.
+        assert len(rec.completions) == 1
+        _, _, found = rec.completions[0]
+        assert found is True
+
+    def test_gate_off_silences_all_pipeline_hooks(self) -> None:
+        """``record_expansions=False`` must silence per-expansion hooks."""
+        a = make_action("a", eff={"done": True}, resources={"cost": 10})
+        start = PlanningState.from_dict({})
+        goal = GoalSpec(
+            conditions={"done": True},
+            constraints=(ConstraintSpec(key="cost", max=100),),
+        )
+        rec = _PipelineRecorder()
+        plan(start, goal, [a], tracer=rec, record_expansions=False)
+        assert rec.expansions == []
+        assert rec.dead_ends == []
+        assert rec.completions == []
+
+    def test_single_completion_across_csp_alternatives(self) -> None:
+        """Pipeline emits exactly one ``on_search_complete`` per call.
+
+        Even when the primary plan is CSP-infeasible and alternatives
+        must be generated (each involving internal A* calls), only the
+        primary search fires the lifecycle completion event. Internal
+        alternative-generation A* calls must not re-emit completions —
+        they are part of a single logical ``plan()`` operation.
+        """
+        expensive = make_action(
+            "expensive", eff={"done": True}, cost=5, resources={"cost": 200}
+        )
+        cheap = make_action("cheap", eff={"done": True}, cost=1, resources={"cost": 50})
+        start = PlanningState.from_dict({})
+        goal = GoalSpec(
+            conditions={"done": True},
+            constraints=(ConstraintSpec(key="cost", max=100),),
+            objectives={"cost": Minimize},
+        )
+        rec = _PipelineRecorder()
+        result = plan(
+            start, goal, [expensive, cheap], tracer=rec, record_expansions=True
+        )
+        assert result is not None
+        assert len(rec.completions) == 1
+
+    def test_csp_rejection_emits_dead_end(self) -> None:
+        """Primary plan rejected by CSP → ``on_search_dead_end`` event.
+
+        Recorded with ``reason='csp_infeasible'`` and a detail payload
+        containing the rejected action sequence so dashboards can show
+        *why* the pipeline had to fall back to alternative enumeration.
+        """
+        a = make_action("a", eff={"done": True}, resources={"cost": 500})
+        start = PlanningState.from_dict({})
+        goal = GoalSpec(
+            conditions={"done": True},
+            constraints=(ConstraintSpec(key="cost", max=100),),
+        )
+        rec = _PipelineRecorder()
+        plan(start, goal, [a], tracer=rec, record_expansions=True)
+        csp_dead_ends = [
+            (reason, detail)
+            for reason, detail in rec.dead_ends
+            if reason == "csp_infeasible"
+        ]
+        assert len(csp_dead_ends) == 1
+        _, detail = csp_dead_ends[0]
+        assert detail.get("plan") == ["a"]

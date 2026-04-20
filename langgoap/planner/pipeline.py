@@ -141,6 +141,8 @@ def plan(
     blacklisted_actions: list[str] | None = None,
     *,
     max_alternatives: int = 5,
+    tracer: Any = None,
+    record_expansions: bool = False,
 ) -> Plan | None:
     """Two-phase planning: A* finds sequences, CSP validates/optimizes.
 
@@ -152,6 +154,14 @@ def plan(
         blacklisted_actions: Action names to exclude.
         max_alternatives: Maximum number of alternative plans to generate
             when the primary plan fails CSP validation.
+        tracer: Optional :class:`~langgoap.tracing.PlanningTracer` whose
+            ``on_search_expand`` / ``on_search_dead_end`` hooks receive
+            primary-search expansions and pipeline-level dead-end events
+            (e.g. ``csp_infeasible``).  The pipeline owns a single
+            ``on_search_complete`` emission for the logical plan call —
+            alternative-enumeration A* runs do **not** re-emit completions.
+        record_expansions: Opt-in gate for the per-expansion firehose.
+            Must be ``True`` *and* a tracer supplied for any hook to fire.
 
     Returns:
         A ``Plan`` with ``metadata.csp`` attached.  When CSP finds the
@@ -166,10 +176,34 @@ def plan(
         start = PlanningState.from_dict(start)
     if not needs_csp(goal):
         # No constraints/objectives → pure A* (zero overhead)
-        return astar_plan(start, goal, actions, blacklisted_actions=blacklisted_actions)
+        return astar_plan(
+            start,
+            goal,
+            actions,
+            blacklisted_actions=blacklisted_actions,
+            tracer=tracer,
+            record_expansions=record_expansions,
+        )
 
-    # Phase 1: A* search for primary plan
-    primary = astar_plan(start, goal, actions, blacklisted_actions=blacklisted_actions)
+    # Resolve the CSP-level dead-end hook up-front, matching the
+    # astar.plan pattern: missing attributes on legacy tracers are
+    # tolerated and the opt-in gate must be honoured.
+    on_dead_end = (
+        getattr(tracer, "on_search_dead_end", None)
+        if tracer is not None and record_expansions
+        else None
+    )
+
+    # Phase 1: A* search for primary plan — the sole owner of
+    # ``on_search_complete`` for this pipeline invocation.
+    primary = astar_plan(
+        start,
+        goal,
+        actions,
+        blacklisted_actions=blacklisted_actions,
+        tracer=tracer,
+        record_expansions=record_expansions,
+    )
     if primary is None:
         logger.warning("A* found no plan; CSP pipeline cannot proceed")
         return None
@@ -189,7 +223,19 @@ def plan(
     if csp_meta.status in (CSPStatus.FEASIBLE, CSPStatus.OPTIMAL):
         return _augment_plan(primary, goal, csp_meta)
 
-    # Primary plan rejected → generate alternatives
+    # Primary plan rejected → emit a pipeline-level dead-end event so
+    # dashboards can render the rejection, then generate alternatives.
+    # Alternatives intentionally run without the tracer: they are
+    # internal retries that belong to this single logical plan() call
+    # and must not re-emit ``on_search_complete``.
+    if on_dead_end is not None:
+        on_dead_end(
+            "csp_infeasible",
+            {
+                "plan": list(primary.action_names),
+                "status": csp_meta.status.value,
+            },
+        )
     logger.info(
         "Primary plan infeasible; generating up to %d alternatives",
         max_alternatives,

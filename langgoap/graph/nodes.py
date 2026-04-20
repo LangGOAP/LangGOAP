@@ -249,7 +249,12 @@ class GoapPlanner:
             from langgoap.planner.pipeline import plan as pipeline_plan
 
             return pipeline_plan(
-                start, goal, self.actions, blacklisted_actions=blacklisted
+                start,
+                goal,
+                self.actions,
+                blacklisted_actions=blacklisted,
+                tracer=self._tracer,
+                record_expansions=self._record_expansions,
             )
         return astar_plan(
             start,
