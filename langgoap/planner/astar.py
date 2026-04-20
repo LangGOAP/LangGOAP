@@ -200,7 +200,8 @@ def _search(
     *,
     tracer: Any = None,
     record_expansions: bool = False,
-) -> Plan | None:
+    attempt: int = 1,
+) -> tuple[Plan | None, int]:
     """Core A* search loop.
 
     Separated from :func:`plan` so the blacklist fallback can call it
@@ -211,10 +212,23 @@ def _search(
             should stop and return the best complete plan found so far.
             ``None`` means no limit (original behaviour).
         tracer: Optional :class:`~langgoap.tracing.PlanningTracer` whose
-            ``on_search_*`` hooks receive per-expansion, dead-end, and
-            completion events.  Defaults to ``None`` (zero overhead).
+            ``on_search_expand`` / ``on_search_dead_end`` hooks receive
+            per-expansion and dead-end events.  ``on_search_complete`` is
+            *not* fired from this function — :func:`plan` owns the single
+            completion event so retry loops do not produce duplicates.
         record_expansions: Opt-in gate for the per-expansion firehose.
             Must be ``True`` *and* a tracer supplied for any hook to fire.
+        attempt: 1-based index of this search invocation within the
+            enclosing :func:`plan` call.  Included in every
+            ``on_search_dead_end`` detail so consumers can reconstruct
+            the retry shape (e.g. blacklist fallback) from the event
+            stream even though only one completion event is emitted.
+
+    Returns:
+        ``(plan, nodes_explored)`` — ``plan`` is ``None`` when no path
+        exists or the deadline expired before a complete plan was found.
+        ``nodes_explored`` is always the number of nodes popped during
+        this attempt and feeds the aggregate reported by :func:`plan`.
     """
     # Resolve hooks once, up-front.  Missing attributes (legacy tracers
     # pre-dating the search hooks) resolve to ``None`` and silently
@@ -223,18 +237,18 @@ def _search(
     record = tracer is not None and record_expansions
     on_expand = getattr(tracer, "on_search_expand", None) if record else None
     on_dead_end = getattr(tracer, "on_search_dead_end", None) if record else None
-    on_complete = getattr(tracer, "on_search_complete", None) if record else None
 
     # Reachability pre-check
     if not _is_reachable(start, goal_conditions, actions):
         if on_dead_end is not None:
             on_dead_end(
                 "not_reachable",
-                {"goal_conditions": dict(goal_conditions)},
+                {
+                    "goal_conditions": dict(goal_conditions),
+                    "attempt": attempt,
+                },
             )
-        if on_complete is not None:
-            on_complete(0, (time.monotonic() - t0) * 1000, False)
-        return None
+        return None, 0
 
     # Sort actions by descending precondition count (specificity tie-breaking)
     sorted_actions = sorted(actions, key=lambda a: len(a.preconditions), reverse=True)
@@ -255,13 +269,7 @@ def _search(
     while open_list:
         # Anytime: stop and return best complete plan found when deadline expires.
         if deadline is not None and time.monotonic() >= deadline:
-            if on_complete is not None:
-                on_complete(
-                    nodes_explored,
-                    (time.monotonic() - t0) * 1000,
-                    best_complete is not None,
-                )
-            return best_complete
+            return best_complete, nodes_explored
         current = heapq.heappop(open_list)
         nodes_explored += 1
 
@@ -283,9 +291,7 @@ def _search(
             built = _build_plan_from_node(
                 current, start, goal_conditions, nodes_explored, t0
             )
-            if on_complete is not None:
-                on_complete(nodes_explored, built.metadata.planning_time_ms, True)
-            return built
+            return built, nodes_explored
 
         # Skip if we've found a better path to this state
         if current.g_score > best_g.get(current.state, float("inf")):
@@ -298,10 +304,11 @@ def _search(
     # Open list exhausted without reaching the goal — reachability pre-check
     # was optimistic (e.g. preconditions unreachable despite effect coverage).
     if on_dead_end is not None:
-        on_dead_end("exhausted", {"nodes_explored": nodes_explored})
-    if on_complete is not None:
-        on_complete(nodes_explored, (time.monotonic() - t0) * 1000, False)
-    return None  # No path found
+        on_dead_end(
+            "exhausted",
+            {"nodes_explored": nodes_explored, "attempt": attempt},
+        )
+    return None, nodes_explored  # No path found
 
 
 def _build_plan_from_node(
@@ -424,9 +431,23 @@ def plan(
     goal_conditions = goal.conditions
     deadline = (t0 + time_budget_ms / 1000.0) if time_budget_ms is not None else None
 
+    # Single owner of ``on_search_complete`` — see :func:`_search` for
+    # the rationale.  Retry loops (blacklist fallback) still produce
+    # exactly one completion event per ``plan()`` invocation.
+    on_complete = (
+        getattr(tracer, "on_search_complete", None)
+        if tracer is not None and record_expansions
+        else None
+    )
+
+    def _emit_complete(found: bool, total_nodes: int) -> None:
+        if on_complete is not None:
+            on_complete(total_nodes, (time.monotonic() - t0) * 1000, found)
+
     # Early exit: goal already satisfied
     if start.satisfies(goal_conditions):
         elapsed_ms = (time.monotonic() - t0) * 1000
+        _emit_complete(True, 0)
         return Plan(
             actions=(),
             expected_states=(),
@@ -442,7 +463,7 @@ def plan(
     blacklist_set = set(blacklisted_actions) if blacklisted_actions else set()
     if blacklist_set:
         available = [a for a in actions if a.name not in blacklist_set]
-        result = _search(
+        result, n1 = _search(
             start,
             goal_conditions,
             available,
@@ -450,12 +471,14 @@ def plan(
             deadline,
             tracer=tracer,
             record_expansions=record_expansions,
+            attempt=1,
         )
         if result is not None:
+            _emit_complete(True, n1)
             return result
         # Blacklist fallback: filtered action set made the goal unreachable
         # — retry with all actions so the executor can decide at runtime.
-        return _search(
+        result, n2 = _search(
             start,
             goal_conditions,
             actions,
@@ -463,9 +486,12 @@ def plan(
             deadline,
             tracer=tracer,
             record_expansions=record_expansions,
+            attempt=2,
         )
+        _emit_complete(result is not None, n1 + n2)
+        return result
 
-    return _search(
+    result, n = _search(
         start,
         goal_conditions,
         actions,
@@ -473,4 +499,7 @@ def plan(
         deadline,
         tracer=tracer,
         record_expansions=record_expansions,
+        attempt=1,
     )
+    _emit_complete(result is not None, n)
+    return result

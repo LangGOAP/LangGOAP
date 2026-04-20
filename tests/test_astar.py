@@ -640,3 +640,105 @@ class TestSearchTracerHooks:
             start, goal, actions, tracer=_LegacyTracer(), record_expansions=True
         )
         assert result is not None
+
+
+class TestTriviallySatisfiedGoal:
+    """``plan()`` must always emit exactly one completion event so
+    downstream consumers (dashboards, LangSmith) can close their
+    plan lifecycle without extra bookkeeping.
+
+    The trivial-goal early-exit in ``plan()`` was silent prior to
+    enterprise hardening; now it fires ``on_search_complete`` with
+    ``nodes_explored=0`` and ``found=True``.
+    """
+
+    def test_already_satisfied_start_fires_one_complete_found_true(self) -> None:
+        rec = _SearchRecorder()
+        actions = [_action("noop", eff={"x": True})]
+        start = PlanningState.from_dict({"done": True})
+        goal = GoalSpec(conditions={"done": True})
+
+        result = plan(start, goal, actions, tracer=rec, record_expansions=True)
+
+        assert result is not None
+        assert len(rec.completions) == 1
+        nodes_explored, duration_ms, found = rec.completions[0]
+        assert nodes_explored == 0
+        assert found is True
+        assert duration_ms >= 0.0
+
+    def test_already_satisfied_fires_no_expand_or_dead_end(self) -> None:
+        rec = _SearchRecorder()
+        actions = [_action("noop", eff={"x": True})]
+        start = PlanningState.from_dict({"done": True})
+        goal = GoalSpec(conditions={"done": True})
+
+        plan(start, goal, actions, tracer=rec, record_expansions=True)
+
+        assert rec.expansions == []
+        assert rec.dead_ends == []
+
+
+class TestSingleCompletionPerPlanCall:
+    """Exactly one ``on_search_complete`` fires per ``plan()`` call,
+    even when the blacklist fallback triggers a second A* search.
+    Dead-end events carry an ``attempt`` breadcrumb so the retry
+    shape is still observable."""
+
+    def test_blacklist_fallback_emits_exactly_one_completion(self) -> None:
+        # Two action paths to the goal: one via a blacklisted action,
+        # one via a fallback action.  Blacklisting the first forces
+        # _search to fail, then plan() retries with all actions and
+        # succeeds.
+        rec = _SearchRecorder()
+        actions = [
+            _action("blocked", pre={"a": True}, eff={"b": True}),
+            _action("via_c", pre={"a": True}, eff={"c": True}),
+            _action("c_to_b", pre={"c": True}, eff={"b": True}),
+        ]
+        start = PlanningState.from_dict({"a": True})
+        goal = GoalSpec(conditions={"b": True})
+        # Force the first search to produce a plan through "blocked",
+        # then blacklist that action so the first attempt returns None
+        # and the fallback retries with the full action set.
+        result = plan(
+            start,
+            goal,
+            actions,
+            blacklisted_actions=["blocked", "via_c"],
+            tracer=rec,
+            record_expansions=True,
+        )
+
+        assert result is not None
+        assert len(rec.completions) == 1
+        assert rec.completions[0][2] is True
+
+    def test_dead_end_details_carry_attempt_breadcrumb(self) -> None:
+        """When the first attempt fails and the fallback succeeds,
+        the dead-end event carries ``attempt=1`` so consumers can
+        reconstruct the retry shape from the event stream."""
+        rec = _SearchRecorder()
+        actions = [
+            _action("needs_x", pre={"x": True}, eff={"goal": True}),
+            _action("makes_x", eff={"x": True}),
+        ]
+        start = PlanningState.from_dict({})
+        goal = GoalSpec(conditions={"goal": True})
+        # Blacklist makes_x; first attempt fails reachability, fallback
+        # with all actions succeeds.
+        result = plan(
+            start,
+            goal,
+            actions,
+            blacklisted_actions=["makes_x"],
+            tracer=rec,
+            record_expansions=True,
+        )
+
+        assert result is not None
+        # At least one dead_end fired, and it carries attempt=1
+        # (the blacklisted first search).
+        assert any(
+            detail.get("attempt") == 1 for _, detail in rec.dead_ends
+        ), f"expected attempt=1 in one of {rec.dead_ends!r}"
