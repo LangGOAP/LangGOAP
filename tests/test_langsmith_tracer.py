@@ -506,3 +506,155 @@ class TestSearchEvents:
 
         # Three updates total: expand, dead_end (event append), complete (summary).
         assert mock_client.update_run.call_count == 3
+
+
+class TestBoundedSearchBuffer:
+    """Enterprise-hardening: the search-event buffer must be bounded
+    and batched to protect LangSmith quotas and avoid O(n^2) upload
+    growth for long plans.
+
+    - ``max_search_events`` caps how many ``search_expand`` events are
+      retained for a single root run.  When the cap fires, exactly one
+      synthetic ``search_truncated`` marker is appended.
+    - ``search_dead_end`` events bypass the cap (always low-cardinality
+      and diagnostically valuable).
+    - ``flush_every`` batches uploads to amortise the quadratic cost of
+      resending the full list on every update.  Terminal lifecycle
+      events (``on_plan_complete`` / ``on_plan_failed`` /
+      ``on_goal_achieved``) force a final flush so no pending events
+      are ever lost.
+    """
+
+    def test_default_cap_truncates_after_max_search_events(
+        self, mock_client: MagicMock, goal: GoalSpec
+    ) -> None:
+        tracer = LangSmithTracer(
+            client=mock_client,
+            project_name="test",
+            max_search_events=3,
+        )
+        tracer.on_plan_start(goal, {}, "a_star")
+        for i in range(5):
+            tracer.on_search_expand(
+                node_id=i,
+                state={},
+                g=0.0,
+                h=0.0,
+                f=0.0,
+                parent_id=None,
+                action_name=None,
+            )
+        tracer.on_plan_complete(
+            Plan(actions=(), total_cost=0.0),
+            duration_ms=1.0,
+        )
+
+        # Find the last update_run call that carries search_events.
+        search_event_calls = [
+            c
+            for c in mock_client.update_run.call_args_list
+            if "search_events" in (c.kwargs.get("extra", {}).get("metadata", {}) or {})
+        ]
+        assert search_event_calls, "no update_run carried search_events"
+        final_events = search_event_calls[-1].kwargs["extra"]["metadata"][
+            "search_events"
+        ]
+        expand_events = [e for e in final_events if e["kind"] == "search_expand"]
+        truncated = [e for e in final_events if e["kind"] == "search_truncated"]
+        assert len(expand_events) == 3
+        assert len(truncated) == 1
+        assert truncated[0]["dropped"] == 2
+
+    def test_truncation_event_recorded_once(
+        self, mock_client: MagicMock, goal: GoalSpec
+    ) -> None:
+        tracer = LangSmithTracer(
+            client=mock_client,
+            project_name="test",
+            max_search_events=2,
+        )
+        tracer.on_plan_start(goal, {}, "a_star")
+        for i in range(10):
+            tracer.on_search_expand(i, {}, 0.0, 0.0, 0.0, None, None)
+        tracer.on_plan_complete(Plan(actions=(), total_cost=0.0), 0.0)
+
+        search_event_calls = [
+            c
+            for c in mock_client.update_run.call_args_list
+            if "search_events" in (c.kwargs.get("extra", {}).get("metadata", {}) or {})
+        ]
+        final_events = search_event_calls[-1].kwargs["extra"]["metadata"][
+            "search_events"
+        ]
+        truncated = [e for e in final_events if e["kind"] == "search_truncated"]
+        assert len(truncated) == 1
+        assert truncated[0]["dropped"] == 8
+
+    def test_flush_every_batches_uploads(
+        self, mock_client: MagicMock, goal: GoalSpec
+    ) -> None:
+        tracer = LangSmithTracer(
+            client=mock_client,
+            project_name="test",
+            flush_every=3,
+        )
+        tracer.on_plan_start(goal, {}, "a_star")
+        mock_client.update_run.reset_mock()
+
+        for i in range(5):
+            tracer.on_search_expand(i, {}, 0.0, 0.0, 0.0, None, None)
+
+        # With flush_every=3, only one batched upload has fired after
+        # 5 expands (at the 3rd event); the remaining 2 are pending
+        # in the buffer.  Default (flush_every=1) would issue 5.
+        assert mock_client.update_run.call_count == 1
+
+    def test_plan_complete_forces_final_flush(
+        self, mock_client: MagicMock, goal: GoalSpec, plan: Plan
+    ) -> None:
+        tracer = LangSmithTracer(
+            client=mock_client,
+            project_name="test",
+            flush_every=100,
+        )
+        tracer.on_plan_start(goal, {}, "a_star")
+        for i in range(3):
+            tracer.on_search_expand(i, {}, 0.0, 0.0, 0.0, None, None)
+        # Nothing flushed yet under flush_every=100.
+        mock_client.update_run.reset_mock()
+        tracer.on_plan_complete(plan, duration_ms=1.0)
+
+        # on_plan_complete must flush the pending events.
+        payloads = [
+            c.kwargs.get("extra", {}).get("metadata", {})
+            for c in mock_client.update_run.call_args_list
+        ]
+        flushed = [p for p in payloads if "search_events" in p]
+        assert flushed, "pending search_events were not flushed on plan_complete"
+        assert len(flushed[-1]["search_events"]) == 3
+
+    def test_dead_end_events_bypass_truncation_cap(
+        self, mock_client: MagicMock, goal: GoalSpec
+    ) -> None:
+        tracer = LangSmithTracer(
+            client=mock_client,
+            project_name="test",
+            max_search_events=2,
+        )
+        tracer.on_plan_start(goal, {}, "a_star")
+        for i in range(10):  # blow past the cap
+            tracer.on_search_expand(i, {}, 0.0, 0.0, 0.0, None, None)
+        tracer.on_search_dead_end("exhausted", {"nodes_explored": 10})
+        tracer.on_plan_complete(Plan(actions=(), total_cost=0.0), 0.0)
+
+        search_event_calls = [
+            c
+            for c in mock_client.update_run.call_args_list
+            if "search_events" in (c.kwargs.get("extra", {}).get("metadata", {}) or {})
+        ]
+        final_events = search_event_calls[-1].kwargs["extra"]["metadata"][
+            "search_events"
+        ]
+        dead_ends = [e for e in final_events if e["kind"] == "search_dead_end"]
+        assert len(dead_ends) == 1
+        assert dead_ends[0]["reason"] == "exhausted"

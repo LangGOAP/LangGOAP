@@ -623,6 +623,21 @@ class LangSmithTracer:
             Injectable for tests via a mock.
         project_name: Project name override.  When omitted, LangSmith
             uses ``LANGCHAIN_PROJECT`` or its built-in default.
+        max_search_events: Cap on ``search_expand`` events retained for
+            a single root run (default ``1000``).  Beyond the cap a
+            single ``search_truncated`` marker is appended and further
+            expansions are dropped for that run; ``search_dead_end``
+            events bypass the cap since they are always low-cardinality
+            and diagnostically valuable.
+        flush_every: Number of appended search events that must
+            accumulate before a batched ``update_run`` upload fires
+            (default ``1`` — send every event, preserving pre-existing
+            behaviour).  Enterprise deployments typically set this to
+            ``50`` or higher to amortise the quadratic upload cost of
+            resending the full event list on every update.  Terminal
+            lifecycle events (``on_plan_complete`` / ``on_plan_failed``
+            / ``on_goal_achieved``) always force a final flush so no
+            pending events are lost.
 
     The tracer degrades to no-op behaviour and emits a single
     ``logger.warning`` when no API key is configured, so misconfigured
@@ -648,8 +663,16 @@ class LangSmithTracer:
         *,
         client: Any | None = None,
         project_name: str | None = None,
+        max_search_events: int = 1000,
+        flush_every: int = 1,
     ) -> None:
+        if max_search_events < 1:
+            raise ValueError("max_search_events must be >= 1")
+        if flush_every < 1:
+            raise ValueError("flush_every must be >= 1")
         self._project_name = project_name or os.environ.get("LANGCHAIN_PROJECT")
+        self._max_search_events = max_search_events
+        self._flush_every = flush_every
         self._client: Any | None = None
         self._disabled = False
 
@@ -683,10 +706,16 @@ class LangSmithTracer:
         self._action_run_id: uuid.UUID | None = None
         self._action_start: datetime | None = None
         # Accumulated A* search events for the currently-open root run.
-        # We send the full list on every update because LangSmith's
+        # We send the full list on every flush because LangSmith's
         # ``extra.metadata`` merge semantics replace list-valued keys
-        # rather than concatenating them.
+        # rather than concatenating them; the ``max_search_events`` cap
+        # and ``flush_every`` batching amortise the quadratic cost.
         self._search_events: list[dict[str, Any]] = []
+        self._events_since_flush = 0
+        self._expand_count = 0
+        self._dropped_expansions = 0
+        self._truncation_recorded = False
+        self._truncation_index: int | None = None
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -713,6 +742,11 @@ class LangSmithTracer:
         self._root_run_id = run_id
         self._root_start = now
         self._search_events = []
+        self._events_since_flush = 0
+        self._expand_count = 0
+        self._dropped_expansions = 0
+        self._truncation_recorded = False
+        self._truncation_index = None
         create_kwargs: dict[str, Any] = {
             "name": "goap_plan",
             "run_type": "chain",
@@ -773,6 +807,10 @@ class LangSmithTracer:
         # instead of only on goal_achieved.
         if self._disabled or self._client is None or self._root_run_id is None:
             return
+        # Terminal lifecycle boundary: flush any pending search events
+        # so consumers never lose the tail of the search tree when
+        # ``flush_every`` is set above 1.
+        self._flush_search_events()
         self._safe(
             "update_run",
             self._client.update_run,
@@ -786,6 +824,7 @@ class LangSmithTracer:
         )
 
     def on_plan_failed(self, reason: str, duration_ms: float) -> None:
+        self._flush_search_events()
         self._finalize_root(
             outputs={"reason": reason, "duration_ms": duration_ms},
             error=f"plan_failed: {reason}",
@@ -852,6 +891,7 @@ class LangSmithTracer:
         )
 
     def on_goal_achieved(self, final_state: Any) -> None:
+        self._flush_search_events()
         self._finalize_root(
             outputs={"status": "goal_achieved", "final_state": _jsonable(final_state)}
         )
@@ -872,17 +912,80 @@ class LangSmithTracer:
     # ``goap_plan`` run rather than as nested child runs.  Per-expansion
     # firehose data is high-volume; LangSmith maps OTel events to run
     # events natively.
+    #
+    # Two enterprise-hardening guarantees apply here:
+    #
+    #   1. ``max_search_events`` caps the number of ``search_expand``
+    #      events retained for a single root.  ``search_dead_end``
+    #      events bypass the cap because they are always low-cardinality
+    #      and carry diagnostic value disproportionate to their volume.
+    #   2. ``flush_every`` batches ``update_run`` uploads.  Terminal
+    #      lifecycle events (``on_plan_complete`` / ``on_plan_failed``
+    #      / ``on_goal_achieved``) force a final flush so no pending
+    #      events are lost at the end of a run.
     # ------------------------------------------------------------------
-    def _append_search_event(self, event: dict[str, Any]) -> None:
+    def _flush_search_events(self) -> None:
+        """Send the accumulated search-event list to LangSmith.
+
+        No-op when disabled, no root is open, or nothing is pending.
+        Called at every ``flush_every`` boundary and forced at
+        terminal lifecycle events.
+        """
         if self._disabled or self._client is None or self._root_run_id is None:
+            self._events_since_flush = 0
             return
-        self._search_events.append(event)
+        if not self._search_events:
+            self._events_since_flush = 0
+            return
         self._safe(
             "update_run",
             self._client.update_run,
             self._root_run_id,
             extra={"metadata": {"search_events": list(self._search_events)}},
         )
+        self._events_since_flush = 0
+
+    def _record_expand_event(self, event: dict[str, Any]) -> None:
+        """Capped append for ``search_expand`` events.
+
+        Once the cap fires, a single ``search_truncated`` marker is
+        appended (or its ``dropped`` counter is updated in place) and
+        further expansions are not retained — only counted.  The
+        expansion counter is maintained incrementally so this path is
+        O(1) per call and does not re-scan ``_search_events``.
+        """
+        if self._disabled or self._client is None or self._root_run_id is None:
+            return
+        if self._expand_count >= self._max_search_events:
+            self._dropped_expansions += 1
+            if not self._truncation_recorded:
+                self._truncation_index = len(self._search_events)
+                self._search_events.append(
+                    {
+                        "kind": "search_truncated",
+                        "dropped": self._dropped_expansions,
+                    }
+                )
+                self._truncation_recorded = True
+            elif self._truncation_index is not None:
+                self._search_events[self._truncation_index][
+                    "dropped"
+                ] = self._dropped_expansions
+        else:
+            self._search_events.append(event)
+            self._expand_count += 1
+        self._events_since_flush += 1
+        if self._events_since_flush >= self._flush_every:
+            self._flush_search_events()
+
+    def _record_uncapped_event(self, event: dict[str, Any]) -> None:
+        """Uncapped append for low-cardinality events (``search_dead_end``)."""
+        if self._disabled or self._client is None or self._root_run_id is None:
+            return
+        self._search_events.append(event)
+        self._events_since_flush += 1
+        if self._events_since_flush >= self._flush_every:
+            self._flush_search_events()
 
     def on_search_expand(
         self,
@@ -894,7 +997,7 @@ class LangSmithTracer:
         parent_id: int | None,
         action_name: str | None,
     ) -> None:
-        self._append_search_event(
+        self._record_expand_event(
             {
                 "kind": "search_expand",
                 "node_id": node_id,
@@ -908,7 +1011,7 @@ class LangSmithTracer:
         )
 
     def on_search_dead_end(self, reason: str, detail: dict[str, Any]) -> None:
-        self._append_search_event(
+        self._record_uncapped_event(
             {
                 "kind": "search_dead_end",
                 "reason": reason,
