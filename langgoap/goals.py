@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, Mapping, Sequence
 
 from langgoap.types import ObjectiveDirection, ReplanStrategy
 
@@ -196,6 +196,75 @@ class GoalSpec:
             objectives=objectives,
             **kwargs,
         )
+
+    @classmethod
+    def per_entity(
+        cls,
+        entity_ids: Sequence[str],
+        conditions: Mapping[str, Any],
+        *,
+        mode: Literal["sequential", "any"] = "any",
+        **goal_kwargs: Any,
+    ) -> "MultiGoal":
+        """Build a :class:`MultiGoal` with one :class:`GoalSpec` per entity.
+
+        The ``conditions`` mapping is treated as a template: every
+        string key and every string value is formatted with
+        :py:meth:`str.format`, substituting the placeholder
+        ``{entity}`` with each entity id in turn.  Non-string values
+        pass through unchanged so callers can parameterise e.g.
+        ``{"safe_from_{entity}": True}`` or
+        ``{"target_{entity}": (x, y)}``.
+
+        Args:
+            entity_ids: Non-empty sequence of entity identifiers.  The
+                returned :class:`MultiGoal` holds one child goal per
+                id, in input order.
+            conditions: Template mapping.  At least one key or string
+                value must contain ``{entity}`` — otherwise every
+                generated child would be identical, which is almost
+                certainly a caller mistake.
+            mode: Forwarded to :class:`MultiGoal`.  Defaults to
+                ``"any"`` because the canonical use case (per-
+                adversary escape goals) is "satisfy whichever is
+                cheapest".  Use ``"sequential"`` when the per-entity
+                ordering encodes execution intent.
+            **goal_kwargs: Forwarded verbatim to every :class:`GoalSpec`
+                child (``priority``, ``max_replans``,
+                ``replan_strategy``, etc.).
+
+        Returns:
+            A :class:`MultiGoal` whose ``goals`` tuple has one
+            :class:`GoalSpec` per entity id, in input order.
+
+        Raises:
+            ValueError: If ``entity_ids`` is empty, or if no key /
+                string value in ``conditions`` contains the
+                ``{entity}`` placeholder.
+        """
+        ids = list(entity_ids)
+        if not ids:
+            raise ValueError("GoalSpec.per_entity requires at least one entity id.")
+        template_has_placeholder = any(
+            "{entity}" in k or (isinstance(v, str) and "{entity}" in v)
+            for k, v in conditions.items()
+        )
+        if not template_has_placeholder:
+            raise ValueError(
+                "GoalSpec.per_entity requires '{entity}' in at least one "
+                "condition key or string value; otherwise every child "
+                "goal would be identical.  Got conditions="
+                f"{dict(conditions)!r}."
+            )
+        children: list[GoalSpec] = []
+        for eid in ids:
+            formatted: dict[str, Any] = {}
+            for k, v in conditions.items():
+                new_k = k.format(entity=eid)
+                new_v = v.format(entity=eid) if isinstance(v, str) else v
+                formatted[new_k] = new_v
+            children.append(cls(conditions=MappingProxyType(formatted), **goal_kwargs))
+        return MultiGoal(goals=tuple(children), mode=mode)
 
 
 # Public alias for GoalSpec. Use ``Goal`` in user-facing code.
