@@ -280,6 +280,79 @@ class GoapPlanner:
             )
         return effective_goal
 
+    def _plan_sequential_best_effort(
+        self,
+        raw_goal: MultiGoal,
+        start_idx: int,
+        world_state: dict[str, Any],
+        state: GoapState,
+        was_replan: bool,
+        blacklisted: list[str],
+    ) -> tuple[Plan | None, GoalSpec, int]:
+        """Best-effort sequential sub-goal dispatch.
+
+        Starting from ``start_idx`` the planner tries each sub-goal in
+        order: the first one that (a) is already satisfied in the
+        sensed world state or (b) yields an A* plan becomes the
+        effective goal.  Infeasible sub-goals along the way are
+        skipped rather than failing the whole invocation.  The
+        previous strict-sequential behaviour would get stuck on the
+        first unreachable sub-goal (e.g. a per-ghost escape whose
+        single flee step is not enough) and collapse Pac-Man to
+        ``STOP``; the best-effort variant preserves forward progress
+        on later sub-goals even when an earlier one cannot be
+        established this tick.
+
+        Returns ``(plan, effective_goal, landed_idx)``.  ``plan`` may
+        be ``None`` iff every sub-goal from ``start_idx`` onward
+        failed; in that case ``effective_goal`` and ``landed_idx``
+        refer to the final attempt so the caller's ``no_plan``
+        reporting still carries meaningful conditions.
+        """
+        total = len(raw_goal.goals)
+        last_goal = raw_goal.goals[start_idx]
+        last_idx = start_idx
+        for idx in range(start_idx, total):
+            candidate = raw_goal.goals[idx]
+            last_goal = candidate
+            last_idx = idx
+            if _is_goal_satisfied(candidate, world_state):
+                if not was_replan:
+                    logger.info(
+                        "MultiGoal (sequential) sub-goal %d/%d already satisfied, "
+                        "preflight advance: %s",
+                        idx + 1,
+                        total,
+                        dict(candidate.conditions),
+                    )
+                continue
+            if not was_replan:
+                logger.info(
+                    "Planning for MultiGoal (sequential, subgoal %d/%d): %s",
+                    idx + 1,
+                    total,
+                    dict(candidate.conditions),
+                )
+            pkeys = _planning_keys(self.actions, candidate)
+            start = PlanningState.from_dict(world_state, keys=pkeys)
+            plan = self._plan_single(start, candidate, blacklisted)
+            if plan is not None:
+                return plan, candidate, idx
+            if idx + 1 < total:
+                logger.info(
+                    "MultiGoal (sequential) sub-goal %d/%d infeasible, "
+                    "best-effort fallback to %d/%d",
+                    idx + 1,
+                    total,
+                    idx + 2,
+                    total,
+                )
+        # Every sub-goal from ``start_idx`` onward was infeasible or
+        # already satisfied without an actionable successor.  Return
+        # ``None`` so the caller emits ``no_plan`` using the last
+        # attempted goal's conditions for diagnostics.
+        return None, last_goal, last_idx
+
     def _resolve_any_subgoal(
         self,
         raw_goal: MultiGoal,
@@ -350,11 +423,24 @@ class GoapPlanner:
         # that abstraction lives at the planner/observer dispatch layer.
         extra_updates: dict[str, Any] = {}
         precomputed_result: Plan | None = None
+        # For sequential best-effort fallback: if the current sub-goal is
+        # unreachable, advance to the next and retry.  ``start`` is set
+        # inside the loop (it depends on ``effective_goal``) so the
+        # planning-key filter stays correct per sub-goal.
+        effective_goal: GoalSpec
+        start: PlanningState
         if isinstance(raw_goal, MultiGoal):
             if raw_goal.mode == "sequential":
-                effective_goal = self._resolve_sequential_subgoal(
-                    raw_goal, state, was_replan
+                start_idx = state.get("current_subgoal_index", 0)
+                result, effective_goal, landed_idx = self._plan_sequential_best_effort(
+                    raw_goal, start_idx, world_state, state, was_replan, blacklisted
                 )
+                if landed_idx != start_idx:
+                    # Fallback fired — observer picks up from the
+                    # landed sub-goal on the next tick.
+                    extra_updates["current_subgoal_index"] = landed_idx
+                pkeys = _planning_keys(self.actions, effective_goal)
+                start = PlanningState.from_dict(world_state, keys=pkeys)
             else:  # "any"
                 resolved = self._resolve_any_subgoal(raw_goal, world_state, blacklisted)
                 if resolved is None:
@@ -377,16 +463,15 @@ class GoapPlanner:
                 effective_goal = raw_goal.goals[best_idx]
                 precomputed_result = best_plan
                 extra_updates["current_subgoal_index"] = best_idx
+                pkeys = _planning_keys(self.actions, effective_goal)
+                start = PlanningState.from_dict(world_state, keys=pkeys)
+                result = precomputed_result
         else:
             effective_goal = raw_goal
             if not was_replan:
                 logger.info("Planning for goal %s", dict(effective_goal.conditions))
-
-        pkeys = _planning_keys(self.actions, effective_goal)
-        start = PlanningState.from_dict(world_state, keys=pkeys)
-        if precomputed_result is not None:
-            result: Plan | None = precomputed_result
-        else:
+            pkeys = _planning_keys(self.actions, effective_goal)
+            start = PlanningState.from_dict(world_state, keys=pkeys)
             result = self._plan_single(start, effective_goal, blacklisted)
 
         # Detect blacklist fallback: if the plan uses a blacklisted action,
