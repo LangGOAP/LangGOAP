@@ -65,6 +65,13 @@ def _score_from_csp(plan: Plan, goal: GoalSpec, meta: CSPMetadata) -> HardSoftSc
             v = meta.objective_values.get(key, 0.0)
             soft += -v if direction == ObjectiveDirection.MINIMIZE else v
 
+    # Plan-quality metrics contribute to soft as weighted minimisation
+    # penalties: ``soft -= weight * metric.evaluate(plan)``.  Metrics
+    # are declarative minimise-semantics; clients wanting a maximise
+    # metric set ``weight=-1.0`` or invert the expression.
+    for metric in goal.metrics:
+        soft -= metric.weight * metric.evaluate(plan)
+
     return HardSoftScore(hard=hard, soft=soft)
 
 
@@ -78,8 +85,8 @@ def _constraint_penalty(c: ConstraintSpec, total: float) -> float:
 
 
 def needs_csp(goal: GoalSpec) -> bool:
-    """Return True if the goal has constraints or objectives requiring CSP."""
-    return bool(goal.constraints) or goal.objectives is not None
+    """Return True if the goal has constraints, objectives, or quality metrics."""
+    return bool(goal.constraints) or goal.objectives is not None or bool(goal.metrics)
 
 
 # Back-compat alias; prefer needs_csp in new code.

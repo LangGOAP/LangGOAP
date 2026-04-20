@@ -10,6 +10,7 @@ from langgoap.types import ObjectiveDirection, ReplanStrategy
 
 if TYPE_CHECKING:
     from langgoap.constraints import BuilderOutput
+    from langgoap.planner.metrics import PlanQualityMetric
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +115,7 @@ class GoalSpec:
     objectives: MappingProxyType[str, ObjectiveDirection] | None = None
     constraints: tuple[ConstraintSpec, ...] = field(default_factory=tuple)
     soft_goals: tuple[SoftGoal, ...] = field(default_factory=tuple)
+    metrics: tuple["PlanQualityMetric", ...] = field(default_factory=tuple)
     priority: int = 0
     max_replans: int = 10
     """Maximum number of replanning cycles before the observer gives up.
@@ -144,6 +146,9 @@ class GoalSpec:
         # Normalise soft_goals: accept list or tuple from callers.
         if not isinstance(self.soft_goals, tuple):
             object.__setattr__(self, "soft_goals", tuple(self.soft_goals))
+        # Normalise metrics: accept list or tuple from callers.
+        if not isinstance(self.metrics, tuple):
+            object.__setattr__(self, "metrics", tuple(self.metrics))
 
     def __repr__(self) -> str:
         parts = [f"conditions={dict(self.conditions)!r}"]

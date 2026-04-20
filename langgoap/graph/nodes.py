@@ -245,7 +245,7 @@ class GoapPlanner:
                 self.actions,
                 blacklisted_actions=blacklisted,
             )
-        if goal.constraints or goal.objectives is not None:
+        if goal.constraints or goal.objectives is not None or goal.metrics:
             from langgoap.planner.pipeline import plan as pipeline_plan
 
             return pipeline_plan(
