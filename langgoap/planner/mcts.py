@@ -16,6 +16,7 @@ Pre-registered experiment:
 
 from __future__ import annotations
 
+import logging
 import math
 import random
 import time
@@ -31,6 +32,8 @@ from langgoap.planner.transitions import (
 from langgoap.planner.types import Plan, PlanMetadata
 from langgoap.score import SimpleScore
 from langgoap.state import PlanningState
+
+logger = logging.getLogger("langgoap.planner.mcts")
 
 
 @dataclass(slots=True)
@@ -119,22 +122,69 @@ def _applicable_actions(
     return [a for a in actions if state.satisfies(a.preconditions)]
 
 
-def _shape_reward(state: PlanningState, goal: GoalSpec) -> float:
+@runtime_checkable
+class ScalarHeuristic(Protocol):
+    """Continuous state-value function consumed by MCTS rollouts.
+
+    Maps ``(state, goal)`` onto ``[-1.0, +1.0]`` where higher values
+    indicate states closer to satisfaction.  ``+1.0`` is reserved for
+    fully satisfied states (set automatically by :func:`_shape_reward`
+    when ``state.satisfies(goal.conditions)``), so implementations
+    should return strictly less than ``+1.0`` for non-terminal states.
+
+    Used instead of the default goal-condition-count reward when
+    supplied to :class:`MCTSStrategy` or a rollout policy; gives UCB1
+    a continuous gradient on GOAP problems whose binary condition
+    reward would otherwise collapse to a single value.  Not required
+    to be admissible (that's an A* property); better-is-higher is
+    the only contract.
+    """
+
+    def __call__(
+        self, state: PlanningState, goal: GoalSpec
+    ) -> float: ...
+
+
+# Strict upper bar for non-satisfied states; reserves ``+1.0`` for true
+# goal satisfaction so UCB1 always prefers solved leaves.
+_NON_TERMINAL_UPPER = 0.999
+
+
+def _shape_reward(
+    state: PlanningState,
+    goal: GoalSpec,
+    *,
+    heuristic: ScalarHeuristic | None = None,
+) -> float:
     """Reward in ``[-1.0, +1.0]`` for a rollout's terminal state.
 
-    Goal satisfied → ``+1.0``.  Otherwise ``-h(state, goal) / max_h``
-    where ``max_h`` is the number of goal conditions, so the reward
-    is ``0.0`` only when every condition is met and strictly negative
-    otherwise.  Keeps UCB1's exploitation term in a well-conditioned
-    range and makes deeper-but-failed rollouts preferable to earlier-
-    but-failed ones as the tree deepens.
+    Goal satisfied → ``+1.0`` regardless of ``heuristic``.  Otherwise
+    when ``heuristic`` is supplied, its value is clamped to
+    ``[-1.0, +0.999]`` and returned; when ``None`` the default
+    goal-condition-count shape is used (``-unsatisfied / total``).
+    If ``heuristic`` raises, a warning is logged once and the
+    default shape is returned for this call.
     """
+    if state.satisfies(goal.conditions):
+        return 1.0
+    if heuristic is not None:
+        try:
+            value = float(heuristic(state, goal))
+        except Exception:
+            logger.warning(
+                "scalar heuristic raised; falling back to default reward shape",
+                exc_info=True,
+            )
+        else:
+            if value > _NON_TERMINAL_UPPER:
+                return _NON_TERMINAL_UPPER
+            if value < -1.0:
+                return -1.0
+            return value
     total = len(goal.conditions)
     if total == 0:
         return 1.0
     unsatisfied = _heuristic(state, goal)
-    if unsatisfied == 0:
-        return 1.0
     return -float(unsatisfied) / float(total)
 
 
@@ -166,6 +216,7 @@ class RandomRollout:
 
     max_depth: int = 4
     rng: random.Random = field(default_factory=random.Random)
+    scalar_heuristic: ScalarHeuristic | None = None
 
     def rollout(
         self,
@@ -185,7 +236,7 @@ class RandomRollout:
             cursor = cursor.apply(chosen.get_effects(cursor.to_dict()))
             if cursor.satisfies(goal.conditions):
                 return 1.0
-        return _shape_reward(cursor, goal)
+        return _shape_reward(cursor, goal, heuristic=self.scalar_heuristic)
 
 
 @dataclass(slots=True)
@@ -194,10 +245,15 @@ class HeuristicRollout:
 
     Reuses the A* admissible heuristic (count of unsatisfied goal
     conditions).  Ties are broken by action-precondition specificity,
-    mirroring A*'s expansion order.
+    mirroring A*'s expansion order.  A ``scalar_heuristic`` may be
+    supplied to replace the default binary reward shape at rollout
+    leaves with a continuous value; action selection during rollout
+    continues to use the integer admissible heuristic so the greedy
+    choice rule is decoupled from the leaf value function.
     """
 
     max_depth: int = 4
+    scalar_heuristic: ScalarHeuristic | None = None
 
     def rollout(
         self,
@@ -220,7 +276,7 @@ class HeuristicRollout:
 
             chosen = min(applicable, key=_score)
             cursor = cursor.apply(chosen.get_effects(cursor.to_dict()))
-        return _shape_reward(cursor, goal)
+        return _shape_reward(cursor, goal, heuristic=self.scalar_heuristic)
 
 
 @dataclass(slots=True)
@@ -242,6 +298,7 @@ class StochasticRollout:
     max_depth: int
     model: TransitionModel
     rng: random.Random = field(default_factory=random.Random)
+    scalar_heuristic: ScalarHeuristic | None = None
 
     def rollout(
         self,
@@ -269,7 +326,7 @@ class StochasticRollout:
             chosen = min(applicable, key=_score)
             sampled_effects = self.model.sample(cursor.to_dict(), chosen, self.rng)
             cursor = cursor.apply(dict(sampled_effects))
-        return _shape_reward(cursor, goal)
+        return _shape_reward(cursor, goal, heuristic=self.scalar_heuristic)
 
 
 @dataclass(slots=True)
@@ -305,6 +362,12 @@ class MCTSStrategy:
     transition_model: TransitionModel = field(
         default_factory=DeterministicTransitionModel
     )
+    # Continuous state-value function consumed by rollouts when they
+    # terminate below the goal.  When ``None`` the default
+    # goal-condition-count reward shape is used; when supplied the
+    # default rollout policy threads it through so UCB1 statistics
+    # gain a continuous gradient on sparse-goal problems.
+    scalar_heuristic: ScalarHeuristic | None = None
     # Kocsis\u2013Szepesv\xe1ri ``robust'' anytime fallback: when ``True`` and
     # no goal-terminal leaf was discovered, return a partial plan whose
     # first action is the most-visited root child.  Required for deep
@@ -389,14 +452,20 @@ class MCTSStrategy:
         :class:`DeterministicTransitionModel`,
         :class:`HeuristicRollout` is used.  When a non-default model
         is wired in, :class:`StochasticRollout` is selected so the
-        ``sample`` path is exercised during simulation.
+        ``sample`` path is exercised during simulation.  Both
+        receive ``self.scalar_heuristic`` unchanged so the strategy's
+        leaf-value function is honoured in either dynamics regime.
         """
         if isinstance(self.transition_model, DeterministicTransitionModel):
-            return HeuristicRollout(max_depth=self.rollout_depth)
+            return HeuristicRollout(
+                max_depth=self.rollout_depth,
+                scalar_heuristic=self.scalar_heuristic,
+            )
         return StochasticRollout(
             max_depth=self.rollout_depth,
             model=self.transition_model,
             rng=rng,
+            scalar_heuristic=self.scalar_heuristic,
         )
 
 
@@ -527,6 +596,7 @@ __all__ = [
     "MCTSStrategy",
     "RandomRollout",
     "RolloutPolicy",
+    "ScalarHeuristic",
     "StochasticRollout",
     "backpropagate",
     "ucb1",
