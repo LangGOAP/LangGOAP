@@ -78,6 +78,25 @@ class TestMCTSStrategyPlanning:
         plan = strategy.plan(PlanningState.from_dict({}), goal, actions)
         assert plan is None
 
+    def test_anytime_fallback_returns_partial_plan_without_terminal(self) -> None:
+        """With ``anytime_fallback=True`` MCTS returns the most-visited
+        root child as a 1-step plan even when no goal-terminal leaf was
+        discovered \u2014 required for MDP-style replanning on domains too
+        deep for the tree to reach the goal within budget."""
+        from langgoap.planner.mcts import MCTSStrategy
+
+        actions = [
+            ActionSpec(name="a", preconditions={}, effects={"x": 1}, cost=1.0),
+        ]
+        goal = GoalSpec(conditions={"done": True})
+        strategy = MCTSStrategy(
+            iterations=32, rollout_depth=3, seed=7, anytime_fallback=True
+        )
+        plan = strategy.plan(PlanningState.from_dict({}), goal, actions)
+        assert plan is not None
+        assert len(plan.actions) >= 1
+        assert plan.actions[0].name == "a"
+
     def test_wall_clock_budget_is_respected(
         self, two_step_actions: list[ActionSpec]
     ) -> None:

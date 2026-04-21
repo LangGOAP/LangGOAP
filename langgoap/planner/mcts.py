@@ -24,6 +24,10 @@ from typing import Protocol, runtime_checkable
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
+from langgoap.planner.transitions import (
+    DeterministicTransitionModel,
+    TransitionModel,
+)
 from langgoap.planner.types import Plan, PlanMetadata
 from langgoap.score import SimpleScore
 from langgoap.state import PlanningState
@@ -222,6 +226,57 @@ class HeuristicRollout:
 
 
 @dataclass(slots=True)
+class StochasticRollout:
+    """Rollout policy that advances via a :class:`TransitionModel`.
+
+    Distinct from :class:`RandomRollout` / :class:`HeuristicRollout` in
+    one dimension: state transitions are sampled through
+    ``model.sample(state, action, rng)`` rather than applied directly
+    from ``action.get_effects``.  This is the hook that lets MCTS
+    observe transition noise (slip, learned-model drift, risk-averse
+    pessimism) during simulation, per the Phase 5 pre-registration.
+
+    Action selection remains greedy on the heuristic of the *expected*
+    (not sampled) successor so the policy's bias is orthogonal to the
+    noise source under test \u2014 the thesis is that sampling the
+    *realised* outcome, not the choice rule, is what MCTS needs to
+    beat A* under stochastic dynamics.
+    """
+
+    max_depth: int
+    model: TransitionModel
+    rng: random.Random = field(default_factory=random.Random)
+
+    def rollout(
+        self,
+        *,
+        state: PlanningState,
+        goal: GoalSpec,
+        actions: list[ActionSpec],
+    ) -> float:
+        cursor = state
+        for _ in range(self.max_depth):
+            if cursor.satisfies(goal.conditions):
+                return 1.0
+            applicable = _applicable_actions(cursor, actions)
+            if not applicable:
+                break
+
+            def _score(a: ActionSpec) -> tuple[int, int]:
+                # Score successors by *expected* outcome so the rollout's
+                # choice rule is noise-free; only the realised transition
+                # is sampled.
+                expected_effects = self.model.expected(cursor.to_dict(), a)
+                next_state = cursor.apply(dict(expected_effects))
+                return (_heuristic(next_state, goal), -len(a.preconditions))
+
+            chosen = min(applicable, key=_score)
+            sampled_effects = self.model.sample(cursor.to_dict(), chosen, self.rng)
+            cursor = cursor.apply(dict(sampled_effects))
+        return _shape_reward(cursor, goal)
+
+
+@dataclass(slots=True)
 class MCTSStrategy:
     """Monte Carlo Tree Search planning strategy.
 
@@ -251,6 +306,16 @@ class MCTSStrategy:
     rollout_depth: int = 4
     rollout_policy: RolloutPolicy | None = None
     seed: int = 0
+    transition_model: TransitionModel = field(
+        default_factory=DeterministicTransitionModel
+    )
+    # Kocsis\u2013Szepesv\xe1ri ``robust'' anytime fallback: when ``True`` and
+    # no goal-terminal leaf was discovered, return a partial plan whose
+    # first action is the most-visited root child.  Required for deep
+    # MDP replanning loops where the tree cannot reach the goal within
+    # the per-tick budget; off by default so the infeasible-goal
+    # contract (``plan() -> None``) is preserved for classical GOAP.
+    anytime_fallback: bool = False
 
     def plan(
         self,
@@ -275,9 +340,7 @@ class MCTSStrategy:
             if not blacklisted_actions or a.name not in blacklisted_actions
         ]
         rng = random.Random(self.seed)
-        policy: RolloutPolicy = self.rollout_policy or HeuristicRollout(
-            max_depth=self.rollout_depth
-        )
+        policy: RolloutPolicy = self.rollout_policy or self._default_rollout(rng)
 
         root = MCTSNode(state=start)
         root.untried_actions = _applicable_actions(start, filtered_actions)
@@ -289,14 +352,26 @@ class MCTSStrategy:
             if wall_budget_s and (time.monotonic() - t0) >= wall_budget_s:
                 break
             leaf = _select(root, c=self.c)
-            leaf = _expand(leaf, goal=goal, actions=filtered_actions, rng=rng)
+            leaf = _expand(
+                leaf,
+                goal=goal,
+                actions=filtered_actions,
+                rng=rng,
+                model=self.transition_model,
+            )
             reward = policy.rollout(
                 state=leaf.state, goal=goal, actions=filtered_actions
             )
             backpropagate(leaf, reward=reward)
             iters_done = i + 1
 
-        plan = _extract_plan(root, goal=goal, start=start)
+        plan = _extract_plan(
+            root,
+            goal=goal,
+            start=start,
+            model=self.transition_model,
+            anytime_fallback=self.anytime_fallback,
+        )
         if plan is None:
             return None
         elapsed_ms = (time.monotonic() - t0) * 1000
@@ -309,6 +384,26 @@ class MCTSStrategy:
                 planning_time_ms=elapsed_ms,
             ),
             score=SimpleScore(scalar=plan.total_cost),
+        )
+
+    def _default_rollout(self, rng: random.Random) -> "RolloutPolicy":
+        """Pick the rollout policy appropriate for ``transition_model``.
+
+        When the model is the default :class:`DeterministicTransitionModel`
+        (i.e. the caller has not opted into stochastic dynamics), the
+        existing :class:`HeuristicRollout` is preserved so pre-Phase-5
+        MCTS behaviour is bit-identical.  When a non-default model is
+        wired in, :class:`StochasticRollout` is selected automatically
+        so the ``sample`` path is actually exercised \u2014 otherwise the
+        tree would observe expected transitions only and the Phase 5
+        thesis would never reach the simulation step.
+        """
+        if isinstance(self.transition_model, DeterministicTransitionModel):
+            return HeuristicRollout(max_depth=self.rollout_depth)
+        return StochasticRollout(
+            max_depth=self.rollout_depth,
+            model=self.transition_model,
+            rng=rng,
         )
 
 
@@ -326,11 +421,14 @@ def _expand(
     goal: GoalSpec,
     actions: list[ActionSpec],
     rng: random.Random,
+    model: TransitionModel,
 ) -> MCTSNode:
     """Expand one untried action into a new child, or return ``node``.
 
     If ``node`` has no untried actions (fully expanded leaf or
     terminal), return it unchanged so the caller rolls out from it.
+    Tree edges use ``model.expected`` so the tree statistics reflect
+    the planner's deterministic world view; only rollouts sample.
     """
     if node.state.satisfies(goal.conditions):
         node.is_terminal = True
@@ -340,7 +438,8 @@ def _expand(
     # Pop a random untried action for diversity under the fixed seed.
     idx = rng.randrange(len(node.untried_actions))
     action = node.untried_actions.pop(idx)
-    next_state = node.state.apply(action.get_effects(node.state.to_dict()))
+    expected_effects = model.expected(node.state.to_dict(), action)
+    next_state = node.state.apply(dict(expected_effects))
     child = MCTSNode(state=next_state, parent=node, action=action)
     child.untried_actions = _applicable_actions(next_state, actions)
     if next_state.satisfies(goal.conditions):
@@ -350,18 +449,33 @@ def _expand(
 
 
 def _extract_plan(
-    root: MCTSNode, *, goal: GoalSpec, start: PlanningState
+    root: MCTSNode,
+    *,
+    goal: GoalSpec,
+    start: PlanningState,
+    model: TransitionModel,
+    anytime_fallback: bool = False,
 ) -> Plan | None:
     """Greedy descent by child visits, preferring terminal leaves.
 
-    Matches LATS's plan-extraction heuristic: at each depth pick the
-    most-visited child and stop at a terminal (goal-satisfying) node.
-    Returns ``None`` if no terminal was ever discovered.
+    Prefers a terminal (goal-satisfying) leaf when one was discovered
+    in the search tree \u2014 that matches LATS's plan-extraction heuristic
+    and keeps existing unit tests bit-identical.  When no terminal was
+    found (common on deep MDPs where the tree cannot reach the goal
+    within the per-tick iteration budget), falls back to Kocsis\u2013
+    Szepesv\xe1ri's ``robust'' rule: greedy descent by visit count from
+    the root, producing an anytime partial plan whose *first* action
+    is the one MCTS has the most statistical evidence for.  This is
+    what lets MCTS be driven in a "plan-per-tick, execute-first-action"
+    replanning loop on domains where a complete plan never fits in
+    the tree.
     """
     best_leaf = _find_best_terminal(root)
     if best_leaf is None:
-        return None
-    # Walk up from the terminal to reconstruct action / state lists.
+        if not anytime_fallback or not root.children:
+            return None
+        best_leaf = _robust_descent(root)
+    # Walk up from the chosen leaf to reconstruct action / state lists.
     rev_actions: list[ActionSpec] = []
     rev_states: list[PlanningState] = []
     cursor: MCTSNode | None = best_leaf
@@ -376,7 +490,7 @@ def _extract_plan(
     sim = start
     for a in rev_actions:
         total_cost += a.get_cost(sim.to_dict())
-        sim = sim.apply(a.get_effects(sim.to_dict()))
+        sim = sim.apply(dict(model.expected(sim.to_dict(), a)))
     return Plan(
         actions=tuple(rev_actions),
         expected_states=tuple(rev_states),
@@ -399,12 +513,28 @@ def _find_best_terminal(root: MCTSNode) -> MCTSNode | None:
     return best
 
 
+def _robust_descent(root: MCTSNode) -> MCTSNode:
+    """Greedy descent from ``root`` by visit count (Kocsis\u2013Szepesv\xe1ri
+    ``robust'' action-selection rule).
+
+    Terminates at the first node with no expanded children so the
+    returned leaf has at least one full rollout's worth of statistics
+    along every edge above it.  Used as the anytime fallback when no
+    goal-terminal leaf was discovered during search.
+    """
+    cursor = root
+    while cursor.children:
+        cursor = max(cursor.children, key=lambda n: n.visits)
+    return cursor
+
+
 __all__ = [
     "HeuristicRollout",
     "MCTSNode",
     "MCTSStrategy",
     "RandomRollout",
     "RolloutPolicy",
+    "StochasticRollout",
     "backpropagate",
     "ucb1",
 ]
