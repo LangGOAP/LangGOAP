@@ -80,6 +80,70 @@ Every finished plan carries a `Score`:
 Scores compare lexicographically (hard first, then soft) so that
 `min(plans, key=lambda p: p.score)` returns the best feasible plan.
 
+## Transition models
+
+Classical GOAP treats an action's declared `effects` as both the
+planning view *and* the runtime view — "what I expect" equals "what
+happens." That works for deterministic domains but breaks as soon as
+the world pushes back: API calls jitter, grid tiles are slippery,
+tool outputs are non-deterministic, learned models return
+distributions.
+
+`TransitionModel` decouples the two views:
+
+- `expected(state, action)` — the planner's deterministic view. A\*,
+  CSP, and MCTS tree expansion all consume this. It must equal the
+  action's declared effects unless a `DivergencePolicy` opts out.
+- `sample(state, action, rng)` — one draw from the effect
+  distribution. MCTS rollouts and the graph action-executor consume
+  this. Free to diverge from `expected`; that divergence is the
+  whole point of a non-deterministic model.
+
+`DeterministicTransitionModel` is the zero-configuration default:
+`expected` and `sample` both return the action's declared effects,
+regardless of RNG state. Every call site that does not wire a
+transition model sees this instance and behaves bit-identically to
+the pre-`TransitionModel` code.
+
+`DivergencePolicy` is the structured opt-out when a planner
+legitimately wants `expected() != action.get_effects(state)` — for
+example, a CVaR or robust-control planner whose point estimate is
+pessimistically shaded relative to the nominal effect. The policy
+carries a non-empty `reason`, a `kind` taxonomy slot
+(`"risk-averse"`, `"learned"`, `"hierarchical"`, `"other"`), an
+optional `max_relative_deviation` bound, and free-form `extra`
+configuration. `assert_expected_matches_declared` enforces the bound
+when present and the non-empty-reason invariant when not.
+
+## Strategy routing
+
+`StrategyRouter` dispatches to the right `PlanningStrategy` based on
+the problem. It reads cheap `ProblemFeatures` at `plan()` time —
+action count, goal-condition count, hard-constraint / soft-objective
+presence, trajectory-metric presence, `is_stochastic`, and
+`risk_profile` — and asks its `classifier` which registered
+strategy to invoke. Because `StrategyRouter` itself satisfies
+`PlanningStrategy`, callers that already accept a strategy (e.g.
+`GoapPlanner(strategy=...)`) can opt in by passing a router with no
+other changes.
+
+The default `RuleBasedClassifier` is lexicographic and conservative:
+
+1. Hard constraints, soft objectives, or trajectory metrics →
+   `"csp-pipeline"` (CP-SAT refinement).
+2. `risk_profile == "risk-averse"` → `"mcts"` (explicit user opt-in
+   via `DivergencePolicy(kind="risk-averse")`).
+3. `is_stochastic` **and** `prefer_mcts_for_stochastic=True` →
+   `"mcts"` (flag-gated opt-in; see the outcome-3 gate in
+   `research/experiments/2026-04-20-mcts-on-stochastic.md`).
+4. High branching × deep horizon → `"mcts"`.
+5. Otherwise → `"astar"`.
+
+Routing is a pure function of the problem, so decisions are
+reproducible and easy to test. Custom classifiers are ordinary
+callables: any `Callable[[ProblemFeatures], str]` satisfies the
+`StrategyClassifier` Protocol.
+
 ## Natural-language goals
 
 `GoalInterpreter(llm, actions)` converts a plain-English request into

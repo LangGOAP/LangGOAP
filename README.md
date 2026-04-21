@@ -32,6 +32,8 @@ Built by [Integrallis Software](https://integrallis.com).
 | Execution history in `BaseStore`        |    Yes   |          —           |
 | Checkpointing (Memory / Postgres / Redis) |  Yes   |         Yes          |
 | Plan visualization (Mermaid / DOT)      |    Yes   |          No          |
+| Stochastic dynamics (`TransitionModel`) |    Yes   |          No          |
+| Feature-based strategy routing          |    Yes   |          No          |
 
 ---
 
@@ -169,9 +171,17 @@ and Layer B (`goapify_tool`) on real problems.
   candidate plan, then CSP refines or replaces it with a better
   alternative when the goal has constraints or objectives.
 - **Planning strategy hierarchy** — `PlanningStrategy` Protocol with
-  built-in `AStarStrategy`, `CSPRefinementStrategy`, and
-  `TwoPhasePipelineStrategy`. Pass your own strategy to
+  built-in `AStarStrategy`, `MCTSStrategy`, `CSPRefinementStrategy`,
+  and `TwoPhasePipelineStrategy`. Pass your own strategy to
   `GoapPlanner(strategy=...)`.
+- **`StrategyRouter`** — dispatches to the best built-in strategy
+  based on cheap-to-compute `ProblemFeatures` (hard constraints,
+  stochasticity, branching factor). Composes transparently: the
+  router itself satisfies `PlanningStrategy`.
+- **`TransitionModel`** — separates declared action effects from
+  sampled world dynamics so A\* plans under an expected-value view
+  while MCTS rollouts and the graph runtime see the actual sampled
+  view. `DeterministicTransitionModel` is the zero-config default.
 
 ### Constraints and scoring
 
@@ -229,6 +239,34 @@ and Layer B (`goapify_tool`) on real problems.
   `MappingProxyType`, `frozenset`, `timedelta`, and `tuple` correctly.
   Install optional extras: `pip install langgoap[checkpoint-postgres]`
   or `pip install langgoap[checkpoint-redis]`.
+
+### Stochastic domains and strategy routing
+
+Two opt-in APIs let LangGOAP plan under uncertainty without disturbing
+the deterministic default path:
+
+- **`TransitionModel`** — user-supplied dynamics. `expected(state,
+  action)` is consumed by A\* / CSP / MCTS tree expansion and must
+  match the action's declared effects unless a `DivergencePolicy`
+  opts out (e.g. CVaR / risk-averse planners). `sample(state,
+  action, rng)` is consumed by MCTS rollouts and the graph executor
+  and is free to diverge — that divergence is the whole point of a
+  non-deterministic model.
+- **`StrategyRouter`** — rule-based dispatcher keyed on
+  `ProblemFeatures`. The default `RuleBasedClassifier` is
+  conservative: it routes to `"csp-pipeline"` when the goal carries
+  hard constraints, soft objectives, or trajectory metrics; to
+  `"mcts"` when the user declared a risk-averse `DivergencePolicy`
+  or passed `prefer_mcts_for_stochastic=True`; and to `"astar"`
+  otherwise. Routing is a pure function of the problem, so results
+  are reproducible.
+
+Users on the 90% deterministic path need not wire either API.
+Passing a router or a non-default transition model is additive; the
+pre-existing behaviour is bit-identical when neither is supplied.
+
+See `examples/basics/stochastic_gridworld.ipynb` for the canonical
+end-to-end flow on `FrozenLake-4x4`.
 
 ### Natural-language goals
 
