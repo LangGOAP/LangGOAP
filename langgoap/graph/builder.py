@@ -166,7 +166,7 @@ class GoapGraph:
         # dispatches to the async variant under ``ainvoke`` and the sync
         # variant under ``invoke``.  Without this wiring, the planner
         # and observer would only ever see the sync ``__call__`` path
-        # and their async tracer hooks would never fire (audit NS2).
+        # and their async tracer hooks would never fire.
         planner = GoapPlanner(
             self.actions,
             strategy=self._strategy,

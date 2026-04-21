@@ -102,10 +102,8 @@ def _heuristic(state: PlanningState, goal: GoalSpec) -> int:
     """Count of goal conditions currently unsatisfied by ``state``.
 
     Identical in shape to ``langgoap.planner.astar._heuristic`` — kept
-    local to avoid a cross-module import cycle (A* imports from
-    types / state; MCTS may be composed into pipelines that A* already
-    participates in).  The two implementations must agree to keep the
-    heuristic-sharing thesis of the Phase 4 experiment honest.
+    local to avoid a cross-module import cycle.  The two
+    implementations must agree so A* and MCTS share one heuristic.
     """
     unsatisfied = 0
     sd = state.to_dict()
@@ -234,13 +232,11 @@ class StochasticRollout:
     ``model.sample(state, action, rng)`` rather than applied directly
     from ``action.get_effects``.  This is the hook that lets MCTS
     observe transition noise (slip, learned-model drift, risk-averse
-    pessimism) during simulation, per the Phase 5 pre-registration.
+    pessimism) during simulation.
 
     Action selection remains greedy on the heuristic of the *expected*
-    (not sampled) successor so the policy's bias is orthogonal to the
-    noise source under test \u2014 the thesis is that sampling the
-    *realised* outcome, not the choice rule, is what MCTS needs to
-    beat A* under stochastic dynamics.
+    (not sampled) successor so the policy's bias is orthogonal to
+    the noise source.
     """
 
     max_depth: int
@@ -389,14 +385,11 @@ class MCTSStrategy:
     def _default_rollout(self, rng: random.Random) -> "RolloutPolicy":
         """Pick the rollout policy appropriate for ``transition_model``.
 
-        When the model is the default :class:`DeterministicTransitionModel`
-        (i.e. the caller has not opted into stochastic dynamics), the
-        existing :class:`HeuristicRollout` is preserved so pre-Phase-5
-        MCTS behaviour is bit-identical.  When a non-default model is
-        wired in, :class:`StochasticRollout` is selected automatically
-        so the ``sample`` path is actually exercised \u2014 otherwise the
-        tree would observe expected transitions only and the Phase 5
-        thesis would never reach the simulation step.
+        When the model is the default
+        :class:`DeterministicTransitionModel`,
+        :class:`HeuristicRollout` is used.  When a non-default model
+        is wired in, :class:`StochasticRollout` is selected so the
+        ``sample`` path is exercised during simulation.
         """
         if isinstance(self.transition_model, DeterministicTransitionModel):
             return HeuristicRollout(max_depth=self.rollout_depth)

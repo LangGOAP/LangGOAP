@@ -233,14 +233,13 @@ def plan(
     # metrics" so we do not spin up the alternatives search for a
     # preference-only goal.  Metric values still contribute to the
     # plan's ``soft`` score via ``_score_from_csp`` regardless of
-    # status.  Note: metrics on their own cannot *select* among
-    # alternatives with this pipeline because ``enumerate_alternatives``
-    # is name-blacklist based and planners with a small action-name
-    # cardinality (Pac-Man's macro-action model) produce no diverse
-    # pool to re-rank over; metric-driven selection belongs in the
-    # MCTS strategy (Phase 4) where rollouts naturally produce diverse
-    # trajectories.  See ``research/experiments/2026-04-20-trajectory-
-    # cost.md`` for the pre-registered verdict.
+    # status.  Metrics on their own cannot *select* among
+    # alternatives with this pipeline because
+    # ``enumerate_alternatives`` is name-blacklist based and planners
+    # with a small action-name cardinality (Pac-Man's macro-action
+    # model) produce no diverse pool to re-rank over; metric-driven
+    # selection belongs in the MCTS strategy where rollouts naturally
+    # produce diverse trajectories.
     if csp_meta.status in (CSPStatus.FEASIBLE, CSPStatus.OPTIMAL, CSPStatus.SKIPPED):
         return _augment_plan(primary, goal, csp_meta)
 

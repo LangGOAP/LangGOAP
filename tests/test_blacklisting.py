@@ -1,4 +1,4 @@
-"""Unit tests for error recovery / blacklisting (Phase 8).
+"""Unit tests for error recovery / blacklisting.
 
 Tests cover:
 - max_retries field on ActionSpec, goap_action, GoapAction

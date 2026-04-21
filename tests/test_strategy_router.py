@@ -1,12 +1,12 @@
 """Tests for :mod:`langgoap.planner.router` \u2014 ``StrategyRouter`` +
 ``ProblemFeatures`` + ``RuleBasedClassifier``.
 
-Spec: ``research/plans/strategy-router.md``.  Gating invariant from
-``research/experiments/2026-04-20-mcts-on-stochastic.md`` Outcome-3:
-the default classifier does **not** auto-promote MCTS for
-``is_stochastic=True``; it routes there only on explicit opt-in
-(``prefer_mcts_for_stochastic=True``) or when the user declared a
-risk-averse :class:`DivergencePolicy`.
+Gating invariant: the default classifier does **not** auto-promote
+MCTS for ``is_stochastic=True``; it routes there only on explicit
+opt-in (``prefer_mcts_for_stochastic=True``) or when the user
+declared a risk-averse :class:`DivergencePolicy`.
+
+See ``research/plans/strategy-router.md``.
 """
 
 from __future__ import annotations
@@ -169,7 +169,7 @@ class TestRuleBasedClassifier:
         assert c(self._features(risk_profile="risk-averse")) == "mcts"
 
     def test_stochastic_default_gate_routes_to_astar(self) -> None:
-        """Outcome-3 gate: stochastic alone does NOT auto-promote MCTS."""
+        """Default gate: stochastic alone does NOT auto-promote MCTS."""
         from langgoap.planner.router import RuleBasedClassifier
 
         c = RuleBasedClassifier()
@@ -359,7 +359,7 @@ class TestStrategyRouterEndToEnd:
         assert len(astar_rec.calls) == 0
 
     def test_stochastic_no_opt_in_routes_to_astar_by_default(self) -> None:
-        """Outcome-3 gate: stochastic alone is not enough."""
+        """Default gate: stochastic alone is not enough."""
         from langgoap.planner.router import (
             RuleBasedClassifier,
             StrategyRouter,

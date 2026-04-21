@@ -75,7 +75,7 @@ class ActionSpec:
             execution; ``False`` or ``{"approved": False}`` deny the
             action and trigger replanning.
         resources: Estimated resource consumption for this action.
-            Used by the CSP optimizer (Phase 2).
+            Used by the CSP optimizer.
             Example: ``{"tokens": 500, "cost_usd": 0.02, "api_calls": 1}``.
         duration: Estimated wall-clock duration.
             Used by the CSP optimizer for temporal scheduling.

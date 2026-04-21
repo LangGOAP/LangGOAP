@@ -1,18 +1,15 @@
 """Integration tests for ``TransitionModel`` threaded through the
 LangGraph action-executor.
 
-Closes the runtime gap documented in Phase 5.7: ``TransitionModel.sample``
-is consumed by MCTS rollouts but was **not** consumed by the compiled
-graph's executor node.  These tests assert the full opt-in path:
 ``GoapGraph(transition_model=model)`` causes the executor to call
-``model.sample(world_state, action, rng)`` instead of falling back to
-``action.get_effects(world_state)`` whenever the action did not itself
-return a dict.
+``model.sample(world_state, action, rng)`` instead of falling back
+to ``action.get_effects(world_state)`` whenever the action did not
+itself return a dict.
 
 Actions that return a dict at runtime (real LLM calls, real tool
-outputs) are unaffected \u2014 their return value continues to be the
-authoritative truth, since the whole point of those actions is that
-the real world *is* the runtime oracle.
+outputs) are unaffected \u2014 their return value remains
+authoritative, since the whole point of those actions is that the
+real world *is* the runtime oracle.
 """
 
 from __future__ import annotations

@@ -6,14 +6,13 @@ from a registered mapping.  The router itself satisfies
 ``PlanningStrategy`` so it composes transparently with existing
 callers (``GoapPlanner(strategy=StrategyRouter(...))``).
 
-Design: ``research/plans/strategy-router.md``.
-
-Outcome-3 gate (from ``2026-04-20-mcts-on-stochastic.md``): the
-default :class:`RuleBasedClassifier` does **not** auto-promote MCTS
-for ``is_stochastic=True``.  Promotion requires either an explicit
-:class:`~langgoap.planner.transitions.DivergencePolicy` of kind
-``"risk-averse"`` (structured user opt-in) or the
+The default :class:`RuleBasedClassifier` does **not** auto-promote
+MCTS for ``is_stochastic=True``.  Promotion requires either an
+explicit :class:`~langgoap.planner.transitions.DivergencePolicy`
+of kind ``"risk-averse"`` (structured user opt-in) or the
 ``prefer_mcts_for_stochastic=True`` classifier flag.
+
+See ``research/plans/strategy-router.md``.
 """
 
 from __future__ import annotations
@@ -106,7 +105,7 @@ class RuleBasedClassifier:
         2. ``risk_profile == "risk-averse"`` \u2192 ``"mcts"`` (explicit
            user opt-in via :class:`DivergencePolicy`).
         3. ``is_stochastic`` + ``prefer_mcts_for_stochastic=True``
-           \u2192 ``"mcts"`` (Outcome-3 gated opt-in).
+           \u2192 ``"mcts"`` (gated opt-in).
         4. Large branching (``action_count >= branching_threshold``)
            + deep horizon (``horizon_estimate >= horizon_threshold``)
            \u2192 ``"mcts"``.

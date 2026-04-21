@@ -5,7 +5,7 @@ for a bounded horizon and returning a scalar reward.  Two policies
 are shipped in the initial MCTS strategy:
 
 - :class:`RandomRollout` — picks a uniformly random applicable action
-  per step.  Baseline control condition for the Phase 4 A/B.
+  per step.
 - :class:`HeuristicRollout` — greedily picks the applicable action
   whose effects minimise ``h(state, goal)``.  Reuses A*'s admissible
   heuristic (count of unsatisfied conditions) so the thesis is

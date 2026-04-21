@@ -1,12 +1,11 @@
-"""Stochastic gridworld fixture for the Phase 5 MCTS-vs-A* benchmark.
+"""Stochastic gridworld fixture for the MCTS-vs-A* benchmark.
 
-Implements two pre-registered topologies (``CliffWalking-v1`` and
-``FrozenLake-v1``, both following Gymnasium conventions) and a
+Implements two topologies (``CliffWalking-v1`` and ``FrozenLake-v1``,
+both following Gymnasium conventions) and a
 ``SlipperyTransitionModel`` that conforms to
 :class:`~langgoap.planner.transitions.TransitionModel`.
 
-See ``research/experiments/2026-04-20-mcts-on-stochastic.md`` for the
-falsifiable hypothesis, seed matrix, and acceptance criteria.
+See ``research/experiments/2026-04-20-mcts-on-stochastic.md``.
 """
 
 from __future__ import annotations

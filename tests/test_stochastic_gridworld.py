@@ -1,9 +1,8 @@
-"""Failing unit tests for the stochastic-gridworld fixture.
+"""Unit tests for the stochastic-gridworld fixture.
 
 Fixtures live in ``tests/fixtures/stochastic_gridworld.py`` and are
-consumed by the pre-registered A/B harness under
-``tests/benchmarks/``.  This file covers the fixture's own correctness
-contracts before that benchmark runs, per Phase 5.3.
+consumed by the A/B harness under ``tests/benchmarks/``.  This file
+covers the fixture's own correctness contracts.
 
 Reference: ``research/experiments/2026-04-20-mcts-on-stochastic.md``.
 """
