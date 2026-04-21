@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import random
 import time
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -40,6 +41,7 @@ from langgoap.history import (
 )
 from langgoap.planner.astar import plan as astar_plan
 from langgoap.planner.explain import explain_no_plan
+from langgoap.planner.transitions import TransitionModel
 from langgoap.planner.types import Plan
 from langgoap.score import SimpleScore
 from langgoap.sensors import (
@@ -659,19 +661,29 @@ def _apply_result(
     raw_result: Any,
     action: ActionSpec,
     world_state: dict[str, Any],
+    *,
+    transition_model: TransitionModel | None = None,
+    rng: "random.Random | None" = None,
 ) -> None:
     """Merge an action's return value into world_state in place.
 
-    If the callable returned a dict, its contents overwrite matching keys.
-    Otherwise (None or any other type), the action's declared effects are
-    applied — this covers the "no execute callable" path as well as callables
-    that return non-dict sentinels.  Dynamic effects are resolved against
-    ``world_state`` before merging.
+    If the callable returned a dict, its contents overwrite matching keys —
+    real runtime returns (LLM/tool outputs) stay authoritative.  Otherwise
+    the executor falls back to either ``transition_model.sample`` (when
+    provided) or ``action.get_effects`` (the pre-``TransitionModel``
+    default).  Dynamic effects are resolved against ``world_state`` before
+    merging in both paths.
     """
     if isinstance(raw_result, dict):
         world_state.update(raw_result)
-    else:
-        world_state.update(action.get_effects(world_state))
+        return
+    if transition_model is not None:
+        sample_rng = rng if rng is not None else random.Random()
+        world_state.update(
+            transition_model.sample(world_state, action, sample_rng)
+        )
+        return
+    world_state.update(action.get_effects(world_state))
 
 
 def _build_success(
@@ -908,6 +920,15 @@ class GoapExecutor:
             aborts the action and immediately blacklists it (equivalent to
             ``max_retries + 1`` failures), triggering replanning via the
             observer.
+        transition_model: Optional
+            :class:`~langgoap.planner.transitions.TransitionModel` that
+            drives runtime effects when an action's ``execute`` callable
+            returns ``None`` (or is absent).  Dict returns from ``execute``
+            remain authoritative.  Pair with a seeded ``rng`` for
+            reproducible stochastic rollouts.
+        rng: Optional ``random.Random`` forwarded to
+            ``transition_model.sample``.  A fresh ``random.Random()`` is
+            used when omitted.
     """
 
     def __init__(
@@ -915,9 +936,13 @@ class GoapExecutor:
         *,
         tracer: PlanningTracer | None = None,
         guards: list[ActionGuard | AsyncActionGuard] | None = None,
+        transition_model: TransitionModel | None = None,
+        rng: random.Random | None = None,
     ) -> None:
         self._tracer: PlanningTracer = tracer or NullTracer()
         self._guards: list[ActionGuard | AsyncActionGuard] = guards or []
+        self._transition_model: TransitionModel | None = transition_model
+        self._rng: random.Random | None = rng
 
     def __call__(self, state: GoapState) -> dict[str, Any]:
         prep = _prepare_execution(state)
@@ -973,7 +998,13 @@ class GoapExecutor:
                 raw = action.execute(world_state)
             else:
                 raw = None  # no callable — _apply_result will use declared effects
-            _apply_result(raw, action, world_state)
+            _apply_result(
+                raw,
+                action,
+                world_state,
+                transition_model=self._transition_model,
+                rng=self._rng,
+            )
             result = _build_success(action, current_step, state_before, world_state)
         except Exception as e:
             result = _build_failure(action, e, state_before, world_state)
@@ -1021,7 +1052,13 @@ class GoapExecutor:
 
         try:
             raw = await async_execute_action(action, world_state)
-            _apply_result(raw, action, world_state)
+            _apply_result(
+                raw,
+                action,
+                world_state,
+                transition_model=self._transition_model,
+                rng=self._rng,
+            )
             result = _build_success(action, current_step, state_before, world_state)
         except Exception as e:
             result = _build_failure(action, e, state_before, world_state)
@@ -1122,6 +1159,13 @@ class ParallelGoapExecutor:
         guards: Optional list of :class:`~langgoap.guards.ActionGuard` /
             :class:`~langgoap.guards.AsyncActionGuard` evaluated before each
             action.  A ``BLOCK`` failure aborts that action and the whole wave.
+        transition_model: Optional
+            :class:`~langgoap.planner.transitions.TransitionModel` consumed
+            when a wave action's ``execute`` callable returns ``None`` (or
+            is absent).  Mirrors :class:`GoapExecutor` so direct users of
+            this class get identical stochastic runtime semantics.
+        rng: Optional ``random.Random`` forwarded to
+            ``transition_model.sample``.
     """
 
     def __init__(
@@ -1129,9 +1173,13 @@ class ParallelGoapExecutor:
         *,
         tracer: PlanningTracer | None = None,
         guards: list[ActionGuard | AsyncActionGuard] | None = None,
+        transition_model: TransitionModel | None = None,
+        rng: random.Random | None = None,
     ) -> None:
         self._tracer: PlanningTracer = tracer or NullTracer()
         self._guards: list[ActionGuard | AsyncActionGuard] = guards or []
+        self._transition_model: TransitionModel | None = transition_model
+        self._rng: random.Random | None = rng
         # Cache the dependency graph by plan-actions identity so it is
         # computed once per plan rather than once per wave.
         self._dep_cache: tuple[int, dict[int, list[int]]] | None = None
@@ -1191,7 +1239,13 @@ class ParallelGoapExecutor:
                 raw = (
                     action.execute(merged_world) if action.execute is not None else None
                 )
-                _apply_result(raw, action, merged_world)
+                _apply_result(
+                    raw,
+                    action,
+                    merged_world,
+                    transition_model=self._transition_model,
+                    rng=self._rng,
+                )
                 action_result = _build_success(action, idx, state_before, merged_world)
             except Exception as exc:
                 action_result = _build_failure(action, exc, state_before, merged_world)
@@ -1249,7 +1303,13 @@ class ParallelGoapExecutor:
 
             try:
                 raw = await async_execute_action(action, ws_snapshot)
-                _apply_result(raw, action, ws_snapshot)
+                _apply_result(
+                    raw,
+                    action,
+                    ws_snapshot,
+                    transition_model=self._transition_model,
+                    rng=self._rng,
+                )
                 result = _build_success(action, idx, state_before, ws_snapshot)
             except Exception as exc:
                 result = _build_failure(action, exc, state_before, ws_snapshot)

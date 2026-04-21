@@ -115,6 +115,21 @@ optional `max_relative_deviation` bound, and free-form `extra`
 configuration. `assert_expected_matches_declared` enforces the bound
 when present and the non-empty-reason invariant when not.
 
+### Runtime consumption
+
+`GoapGraph` accepts `transition_model=` and `rng=` and threads them
+through to both `GoapExecutor` and `ParallelGoapExecutor`. When an
+action's `execute` callable returns a dict, that dict is
+authoritative — real runtime data (LLM outputs, tool responses,
+sensor readings) always wins. Only when `execute` is absent or
+returns `None` does the executor fall through to
+`transition_model.sample(state, action, rng)`; without a model it
+falls through to `action.get_effects(state)` as before. This keeps
+the declared-effects path bit-identical to the pre-`TransitionModel`
+runtime while letting stochastic domains (slip, jitter, ghost noise,
+retry churn) drive the executor from the same distribution the MCTS
+rollouts sampled from.
+
 ## Strategy routing
 
 `StrategyRouter` dispatches to the right `PlanningStrategy` based on

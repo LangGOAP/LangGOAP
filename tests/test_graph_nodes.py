@@ -1061,6 +1061,46 @@ class TestParallelGoapExecutor:
         assert result2["current_step"] == 2
         assert executor._dep_cache is cache_after_wave1  # same cache object
 
+    def test_transition_model_sample_drives_wave_effects(self) -> None:
+        """Declared-effect actions in a wave go through ``model.sample``."""
+        import random as _random
+
+        from langgoap.planner.transitions import TransitionModel
+
+        calls: list[str] = []
+
+        class _RecordingModel:
+            def expected(
+                self, state: dict[str, Any], action: ActionSpec
+            ) -> dict[str, Any]:
+                return action.get_effects(state)
+
+            def sample(
+                self,
+                state: dict[str, Any],
+                action: ActionSpec,
+                rng: _random.Random,
+            ) -> dict[str, Any]:
+                calls.append(action.name)
+                return {action.name: "sampled"}
+
+        model: TransitionModel = _RecordingModel()
+        a = _action("a", eff={"x": True})
+        b = _action("b", eff={"y": True})
+        plan_obj = _make_plan(a, b)
+        executor = ParallelGoapExecutor(
+            transition_model=model, rng=_random.Random(0)
+        )
+        state: GoapState = {"world_state": {}, "plan": plan_obj, "current_step": 0}
+        result = executor(state)
+
+        assert sorted(calls) == ["a", "b"]
+        assert result["world_state"]["a"] == "sampled"
+        assert result["world_state"]["b"] == "sampled"
+        # Declared keys are NOT applied when sample returns a disjoint dict.
+        assert "x" not in result["world_state"]
+        assert "y" not in result["world_state"]
+
 
 # ---------------------------------------------------------------------------
 # _is_better_plan — feasibility-first comparison

@@ -6,6 +6,7 @@ and observer nodes wired together for the GOAP execution loop.
 
 from __future__ import annotations
 
+import random
 from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.language_models import BaseChatModel
@@ -22,6 +23,7 @@ from langgoap.graph.nodes import GoapExecutor, GoapObserver, GoapPlanner
 from langgoap.graph.state import GoapState
 from langgoap.guards import ActionGuard, AsyncActionGuard
 from langgoap.history import StoreExecutionHistory
+from langgoap.planner.transitions import TransitionModel
 from langgoap.sensors import AsyncSensor, Sensor
 from langgoap.serde import install_langgoap_serde
 from langgoap.tracing import PlanningTracer
@@ -66,6 +68,33 @@ class GoapGraph:
         START → planner → executor → observer ──→ END
                   ↑                     │
                   └─────────────────────┘
+
+    Args:
+        actions: The action library available to the planner and executor.
+        strategy: Optional :class:`~langgoap.planner.strategy.PlanningStrategy`.
+            Defaults to the A\\* strategy wired inside :class:`GoapPlanner`.
+        tracer: Optional :class:`~langgoap.tracing.PlanningTracer` for
+            planning/execution observability.
+        history: Optional :class:`~langgoap.history.StoreExecutionHistory`
+            for persisting execution traces.
+        sensors: Optional list of :class:`~langgoap.sensors.Sensor` /
+            :class:`~langgoap.sensors.AsyncSensor` run before planning.
+        guards: Optional list of :class:`~langgoap.guards.ActionGuard` /
+            :class:`~langgoap.guards.AsyncActionGuard` evaluated before each
+            action executes.
+        resolvers: Optional list of dynamic condition resolvers applied to
+            precondition evaluation.
+        record_expansions: Forwarded to :class:`GoapPlanner`; enables node
+            expansion trace recording for post-hoc analysis.
+        transition_model: Optional
+            :class:`~langgoap.planner.transitions.TransitionModel` threaded
+            into :class:`GoapExecutor`.  When provided, actions with no
+            ``execute`` callable (or those returning ``None``) have their
+            runtime effects drawn from ``transition_model.sample``.  Use
+            the same model you passed to :class:`MCTSStrategy` so plan-time
+            and runtime share one noise distribution.
+        rng: Optional ``random.Random`` forwarded to the executor for
+            reproducible sampling.
     """
 
     def __init__(
@@ -79,6 +108,8 @@ class GoapGraph:
         guards: list[ActionGuard | AsyncActionGuard] | None = None,
         resolvers: list[ConditionResolver | AsyncConditionResolver] | None = None,
         record_expansions: bool = False,
+        transition_model: TransitionModel | None = None,
+        rng: random.Random | None = None,
     ) -> None:
         self.actions = actions
         self._strategy = strategy
@@ -88,6 +119,8 @@ class GoapGraph:
         self._guards = guards
         self._resolvers = resolvers
         self._record_expansions = record_expansions
+        self._transition_model = transition_model
+        self._rng = rng
 
     def compile(
         self,
@@ -142,7 +175,12 @@ class GoapGraph:
             resolvers=self._resolvers,
             record_expansions=self._record_expansions,
         )
-        executor = GoapExecutor(tracer=self._tracer, guards=self._guards)
+        executor = GoapExecutor(
+            tracer=self._tracer,
+            guards=self._guards,
+            transition_model=self._transition_model,
+            rng=self._rng,
+        )
         observer = GoapObserver(
             self.actions, tracer=self._tracer, history=self._history
         )
