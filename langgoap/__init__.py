@@ -94,6 +94,13 @@ from langgoap.planner.explain import (
 )
 from langgoap.planner.pipeline import plan as pipeline_plan
 from langgoap.planner.repair import RepairStrategy
+from langgoap.planner.router import (
+    ProblemFeatures,
+    RuleBasedClassifier,
+    StrategyClassifier,
+    StrategyRouter,
+    extract_features,
+)
 from langgoap.planner.strategy import (
     AnytimePlanningStrategy,
     AStarStrategy,
@@ -101,6 +108,11 @@ from langgoap.planner.strategy import (
     LazyDecompositionStrategy,
     PlanningStrategy,
     TwoPhasePipelineStrategy,
+)
+from langgoap.planner.transitions import (
+    DeterministicTransitionModel,
+    DivergencePolicy,
+    TransitionModel,
 )
 from langgoap.planner.types import Plan, PlanMetadata
 from langgoap.reflexion import Reflection, ReflexionTracer
@@ -202,6 +214,16 @@ __all__ = [
     "LazyDecompositionStrategy",
     "RepairStrategy",
     "TwoPhasePipelineStrategy",
+    # Router
+    "ProblemFeatures",
+    "RuleBasedClassifier",
+    "StrategyClassifier",
+    "StrategyRouter",
+    "extract_features",
+    # Transition models
+    "DeterministicTransitionModel",
+    "DivergencePolicy",
+    "TransitionModel",
     # Guards
     "ActionGuard",
     "AsyncActionGuard",
