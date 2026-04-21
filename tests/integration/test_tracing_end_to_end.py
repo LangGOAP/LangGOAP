@@ -48,6 +48,26 @@ class _RecordingTracer:
     def on_sensor_complete(self, sensor_name: str, updates: Any) -> None:
         self.calls.append("on_sensor_complete")
 
+    def on_search_expand(
+        self,
+        node_id: int,
+        state: Any,
+        g: float,
+        h: float,
+        f: float,
+        parent_id: int | None,
+        action_name: str | None,
+    ) -> None:
+        self.calls.append("on_search_expand")
+
+    def on_search_dead_end(self, reason: str, detail: dict[str, Any]) -> None:
+        self.calls.append("on_search_dead_end")
+
+    def on_search_complete(
+        self, nodes_explored: int, duration_ms: float, found: bool
+    ) -> None:
+        self.calls.append("on_search_complete")
+
     async def aon_plan_start(self, goal: Any, state: Any, strategy_name: str) -> None:
         self.calls.append("aon_plan_start")
 
@@ -71,6 +91,28 @@ class _RecordingTracer:
 
     async def aon_sensor_complete(self, sensor_name: str, updates: Any) -> None:
         self.calls.append("aon_sensor_complete")
+
+    async def aon_search_expand(
+        self,
+        node_id: int,
+        state: Any,
+        g: float,
+        h: float,
+        f: float,
+        parent_id: int | None,
+        action_name: str | None,
+    ) -> None:
+        self.calls.append("aon_search_expand")
+
+    async def aon_search_dead_end(
+        self, reason: str, detail: dict[str, Any]
+    ) -> None:
+        self.calls.append("aon_search_dead_end")
+
+    async def aon_search_complete(
+        self, nodes_explored: int, duration_ms: float, found: bool
+    ) -> None:
+        self.calls.append("aon_search_complete")
 
 
 def _actions() -> list[ActionSpec]:
