@@ -20,8 +20,9 @@ import logging
 import math
 import random
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
@@ -404,11 +405,24 @@ class MCTSStrategy:
     # the per-tick budget; off by default so the infeasible-goal
     # contract (``plan() -> None``) is preserved for classical GOAP.
     anytime_fallback: bool = False
+    # Soemers\u2013Winands CIG 2016 \xa7IV-B tree reuse.  When ``True``, the
+    # subtree rooted at the action played last tick is retained across
+    # consecutive :meth:`plan` calls via :meth:`advance`; stored visit
+    # counts are multiplied by ``tree_reuse_decay`` \u2208 [0, 1] before the
+    # next search.  Off by default so today's cold-start behaviour is
+    # bit-identical.
+    reuse_tree: bool = False
+    tree_reuse_decay: float = 0.6
     # Post-search handle on the root of the last tree expanded by
     # :meth:`plan`.  Exposed so tests and observability hooks can
     # inspect chance-layer structure; ``None`` until ``plan`` has been
     # called with a non-trivial start state.
     _last_root: "MCTSNode | None" = None
+    # Carryover root promoted by :meth:`advance` after the previous
+    # plan's first action was executed; consumed by the next
+    # :meth:`plan` call when ``reuse_tree`` is on and its state matches
+    # the supplied ``start``.
+    _carryover_root: "MCTSNode | None" = None
 
     def plan(
         self,
@@ -435,8 +449,16 @@ class MCTSStrategy:
         rng = random.Random(self.seed)
         policy: RolloutPolicy = self.rollout_policy or self._default_rollout(rng)
 
-        root = MCTSNode(state=start)
-        root.untried_actions = _applicable_actions(start, filtered_actions)
+        if (
+            self.reuse_tree
+            and self._carryover_root is not None
+            and self._carryover_root.state == start
+        ):
+            root = self._carryover_root
+        else:
+            root = MCTSNode(state=start)
+            root.untried_actions = _applicable_actions(start, filtered_actions)
+        self._carryover_root = None
         self._last_root = root
         stochastic = not isinstance(
             self.transition_model, DeterministicTransitionModel
@@ -499,6 +521,57 @@ class MCTSStrategy:
             ),
             score=SimpleScore(scalar=plan.total_cost),
         )
+
+    def advance(
+        self,
+        action: ActionSpec,
+        observed_state: "PlanningState | Mapping[str, Any]",
+    ) -> None:
+        """Promote the subtree matching ``(action, observed_state)`` to
+        the new carryover root with visit counts decayed by
+        ``tree_reuse_decay``.
+
+        Soemers\u2013Winands CIG 2016 \xa7IV-B: retain structure and statistics
+        of the child corresponding to the action just played; multiply
+        every visit count by ``gamma`` so old evidence is down-weighted
+        in proportion to how out-of-date it is.  When the observed
+        successor does not match any expanded child (teleport, maze
+        reset, unseen sample), carryover is cleared and the next
+        :meth:`plan` call cold-starts.
+        """
+        if self._last_root is None:
+            return
+
+        if isinstance(observed_state, PlanningState):
+            target = observed_state
+        else:
+            target = PlanningState.from_dict(dict(observed_state))
+
+        root = self._last_root
+        promoted: MCTSNode | None = None
+        for chance in root.chance_children:
+            if chance.action is action or chance.action.name == action.name:
+                key = _state_key(target)
+                match = chance.children_by_key.get(key)
+                if match is not None:
+                    promoted = match
+                    break
+        if promoted is None:
+            for child in root.children:
+                if child.action is None:
+                    continue
+                if (child.action is action or child.action.name == action.name) \
+                        and child.state == target:
+                    promoted = child
+                    break
+
+        if promoted is None:
+            self._carryover_root = None
+            return
+
+        promoted.parent = None
+        _decay_tree(promoted, self.tree_reuse_decay)
+        self._carryover_root = promoted
 
     def _default_rollout(self, rng: random.Random) -> "RolloutPolicy":
         """Pick the rollout policy appropriate for ``transition_model``.
@@ -569,6 +642,27 @@ def _state_key(state: PlanningState) -> int:
     """Hashable key for a :class:`PlanningState` used to collapse
     repeated sampled successors onto a single chance-node child."""
     return hash(tuple(sorted(state.to_dict().items(), key=lambda kv: kv[0])))
+
+
+def _decay_tree(node: MCTSNode, gamma: float) -> None:
+    """Recursively multiply every stored visit count under ``node`` by
+    ``gamma`` \u2208 [0, 1] (Soemers\u2013Winands CIG 2016 \xa7IV-B).
+
+    ``value`` is stored as the running mean and is preserved: decaying
+    total score and visits by the same factor leaves the mean unchanged
+    while shrinking UCB1's implicit confidence in that mean.  ``gamma``
+    is clamped to ``[0, 1]``.
+    """
+    g = 0.0 if gamma < 0.0 else (1.0 if gamma > 1.0 else gamma)
+    stack: list[MCTSNode | ChanceNode] = [node]
+    while stack:
+        cursor = stack.pop()
+        cursor.visits = int(round(cursor.visits * g))
+        if isinstance(cursor, MCTSNode):
+            stack.extend(cursor.children)
+            stack.extend(cursor.chance_children)
+        else:
+            stack.extend(cursor.children_by_key.values())
 
 
 def _select_stochastic(
