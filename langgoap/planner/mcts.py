@@ -38,35 +38,62 @@ logger = logging.getLogger("langgoap.planner.mcts")
 
 @dataclass(slots=True)
 class MCTSNode:
-    """A node in the MCTS search tree.
+    """A decision node in the MCTS search tree.
 
     Mirrors LATS's ``Node`` with two LangGoap adaptations: ``state`` is
     a :class:`PlanningState` (not a free-text dict) and ``action`` is
     the :class:`~langgoap.actions.ActionSpec` that was applied to the
     parent to reach this state (``None`` at the root).
+
+    Under :class:`DeterministicTransitionModel` the tree is two-layered
+    and ``children`` holds decision grandchildren directly (legacy
+    shape).  Under a non-deterministic model the tree alternates
+    ``Decision \u2192 Chance \u2192 Decision`` and the chance layer lives in
+    ``chance_children`` \u2014 see :class:`ChanceNode`.
     """
 
     state: PlanningState
-    parent: "MCTSNode | None" = None
+    parent: "MCTSNode | ChanceNode | None" = None
     action: ActionSpec | None = None
     children: list["MCTSNode"] = field(default_factory=list)
     visits: int = 0
     value: float = 0.0
     is_terminal: bool = False
     untried_actions: list[ActionSpec] = field(default_factory=list)
+    chance_children: list["ChanceNode"] = field(default_factory=list)
 
     @property
     def depth(self) -> int:
-        """Number of edges from the root to this node."""
+        """Number of decision edges from the root to this node."""
         d = 0
-        cursor: "MCTSNode | None" = self.parent
+        cursor: "MCTSNode | ChanceNode | None" = self.parent
         while cursor is not None:
-            d += 1
+            if isinstance(cursor, MCTSNode):
+                d += 1
             cursor = cursor.parent
         return d
 
 
-def ucb1(node: MCTSNode, *, c: float = math.sqrt(2)) -> float:
+@dataclass(slots=True)
+class ChanceNode:
+    """Aggregation layer between a decision node and its sampled
+    successor states under a non-deterministic ``TransitionModel``.
+
+    Chance nodes do *not* use UCB1 for child selection \u2014 the "arm" is
+    the RNG draw from :meth:`TransitionModel.sample`, not a planner
+    choice.  They maintain a state-keyed child dict so repeated samples
+    of the same successor collapse onto one decision node and its
+    empirical mean converges to the true outcome-averaged value.
+    """
+
+    action: ActionSpec
+    parent: "MCTSNode"
+    children_by_key: dict[int, "MCTSNode"] = field(default_factory=dict)
+    visits: int = 0
+    value: float = 0.0
+
+
+def ucb1(node: "MCTSNode | ChanceNode", *, c: float = math.sqrt(2)) -> float:
     """Upper Confidence Bound applied to Trees (UCT).
 
     Canonical formulation matching LATS's ``Node.uct``:
@@ -85,15 +112,17 @@ def ucb1(node: MCTSNode, *, c: float = math.sqrt(2)) -> float:
     return exploit + explore
 
 
-def backpropagate(node: MCTSNode, *, reward: float) -> None:
+def backpropagate(node: "MCTSNode | ChanceNode", *, reward: float) -> None:
     """Walk from ``node`` to the root updating running-mean statistics.
 
     Matches LATS's ``backpropagate``: each node's ``value`` is the
     cumulative reward divided by ``visits`` after the update, so
     ``value`` always reads as the mean reward across all rollouts
-    passing through that node.
+    passing through that node.  Chance-layer ancestors are walked
+    transparently because :class:`ChanceNode` exposes the same
+    ``visits`` / ``value`` / ``parent`` fields as :class:`MCTSNode`.
     """
-    cursor: MCTSNode | None = node
+    cursor: "MCTSNode | ChanceNode | None" = node
     while cursor is not None:
         cursor.visits += 1
         # Running mean: new_mean = old_mean + (x - old_mean) / n.
@@ -375,6 +404,11 @@ class MCTSStrategy:
     # the per-tick budget; off by default so the infeasible-goal
     # contract (``plan() -> None``) is preserved for classical GOAP.
     anytime_fallback: bool = False
+    # Post-search handle on the root of the last tree expanded by
+    # :meth:`plan`.  Exposed so tests and observability hooks can
+    # inspect chance-layer structure; ``None`` until ``plan`` has been
+    # called with a non-trivial start state.
+    _last_root: "MCTSNode | None" = None
 
     def plan(
         self,
@@ -403,6 +437,10 @@ class MCTSStrategy:
 
         root = MCTSNode(state=start)
         root.untried_actions = _applicable_actions(start, filtered_actions)
+        self._last_root = root
+        stochastic = not isinstance(
+            self.transition_model, DeterministicTransitionModel
+        )
 
         t0 = time.monotonic()
         wall_budget_s = self.wall_clock_ms / 1000.0 if self.wall_clock_ms else 0.0
@@ -410,14 +448,31 @@ class MCTSStrategy:
         for i in range(self.iterations):
             if wall_budget_s and (time.monotonic() - t0) >= wall_budget_s:
                 break
-            leaf = _select(root, c=self.c)
-            leaf = _expand(
-                leaf,
-                goal=goal,
-                actions=filtered_actions,
-                rng=rng,
-                model=self.transition_model,
-            )
+            if stochastic:
+                leaf = _select_stochastic(
+                    root,
+                    c=self.c,
+                    actions=filtered_actions,
+                    rng=rng,
+                    model=self.transition_model,
+                    goal=goal,
+                )
+                leaf = _expand_stochastic(
+                    leaf,
+                    goal=goal,
+                    actions=filtered_actions,
+                    rng=rng,
+                    model=self.transition_model,
+                )
+            else:
+                leaf = _select(root, c=self.c)
+                leaf = _expand(
+                    leaf,
+                    goal=goal,
+                    actions=filtered_actions,
+                    rng=rng,
+                    model=self.transition_model,
+                )
             reward = policy.rollout(
                 state=leaf.state, goal=goal, actions=filtered_actions
             )
@@ -510,6 +565,89 @@ def _expand(
     return child
 
 
+def _state_key(state: PlanningState) -> int:
+    """Hashable key for a :class:`PlanningState` used to collapse
+    repeated sampled successors onto a single chance-node child."""
+    return hash(tuple(sorted(state.to_dict().items(), key=lambda kv: kv[0])))
+
+
+def _select_stochastic(
+    node: MCTSNode,
+    *,
+    c: float,
+    actions: list[ActionSpec],
+    rng: random.Random,
+    model: TransitionModel,
+    goal: GoalSpec,
+) -> MCTSNode:
+    """Alternate ``Decision \u2192 Chance \u2192 Decision`` descent.
+
+    At each decision node with no untried actions, pick the best
+    chance-child by UCB1 (aggregate visit / value stats).  At that
+    chance node, sample one successor via :meth:`TransitionModel.sample`;
+    descend into the matching decision child when the sampled state
+    hashes to a known key, otherwise materialise a fresh decision
+    node under the chance parent and return it as the leaf for
+    expansion + rollout.
+    """
+    cursor = node
+    while True:
+        if cursor.untried_actions or cursor.is_terminal:
+            return cursor
+        if not cursor.chance_children:
+            return cursor
+        chance = max(cursor.chance_children, key=lambda cn: ucb1(cn, c=c))
+        sampled_effects = model.sample(cursor.state.to_dict(), chance.action, rng)
+        next_state = cursor.state.apply(dict(sampled_effects))
+        key = _state_key(next_state)
+        existing = chance.children_by_key.get(key)
+        if existing is not None:
+            cursor = existing
+            continue
+        child = MCTSNode(state=next_state, parent=chance, action=chance.action)
+        child.untried_actions = _applicable_actions(next_state, actions)
+        if next_state.satisfies(goal.conditions):
+            child.is_terminal = True
+        chance.children_by_key[key] = child
+        return child
+
+
+def _expand_stochastic(
+    node: MCTSNode,
+    *,
+    goal: GoalSpec,
+    actions: list[ActionSpec],
+    rng: random.Random,
+    model: TransitionModel,
+) -> MCTSNode:
+    """Expand one untried action into a chance-child and a first
+    sampled decision grandchild.
+
+    Mirrors :func:`_expand` for the deterministic case but inserts a
+    :class:`ChanceNode` between the decision node and its sampled
+    successor.  The sampled effects come from :meth:`TransitionModel.sample`,
+    not ``expected``, so the chance node's running mean converges to
+    the true outcome-averaged value.
+    """
+    if node.state.satisfies(goal.conditions):
+        node.is_terminal = True
+        return node
+    if not node.untried_actions:
+        return node
+    idx = rng.randrange(len(node.untried_actions))
+    action = node.untried_actions.pop(idx)
+    chance = ChanceNode(action=action, parent=node)
+    node.chance_children.append(chance)
+    sampled_effects = model.sample(node.state.to_dict(), action, rng)
+    next_state = node.state.apply(dict(sampled_effects))
+    child = MCTSNode(state=next_state, parent=chance, action=action)
+    child.untried_actions = _applicable_actions(next_state, actions)
+    if next_state.satisfies(goal.conditions):
+        child.is_terminal = True
+    chance.children_by_key[_state_key(next_state)] = child
+    return child
+
+
 def _extract_plan(
     root: MCTSNode,
     *,
@@ -534,17 +672,20 @@ def _extract_plan(
     """
     best_leaf = _find_best_terminal(root)
     if best_leaf is None:
-        if not anytime_fallback or not root.children:
+        if not anytime_fallback or not (root.children or root.chance_children):
             return None
         best_leaf = _robust_descent(root)
     # Walk up from the chosen leaf to reconstruct action / state lists.
+    # Chance-node ancestors are skipped \u2014 they have no ``state`` of
+    # their own, only an action and aggregate statistics.
     rev_actions: list[ActionSpec] = []
     rev_states: list[PlanningState] = []
-    cursor: MCTSNode | None = best_leaf
+    cursor: "MCTSNode | ChanceNode | None" = best_leaf
     while cursor is not None and cursor.parent is not None:
-        assert cursor.action is not None  # non-root nodes carry an action
-        rev_actions.append(cursor.action)
-        rev_states.append(cursor.state)
+        if isinstance(cursor, MCTSNode):
+            assert cursor.action is not None  # non-root decision nodes carry an action
+            rev_actions.append(cursor.action)
+            rev_states.append(cursor.state)
         cursor = cursor.parent
     rev_actions.reverse()
     rev_states.reverse()
@@ -563,8 +704,14 @@ def _extract_plan(
 
 
 def _find_best_terminal(root: MCTSNode) -> MCTSNode | None:
-    """Breadth-first search for the shallowest terminal node with the
-    highest visit count along the winning branch."""
+    """Breadth-first search for the shallowest terminal decision node
+    with the highest visit count along the winning branch.
+
+    Traverses both the deterministic ``children`` edges and the
+    chance-layer ``chance_children`` so stochastic expansion trees are
+    searched end-to-end.  Chance nodes themselves are skipped \u2014 only
+    :class:`MCTSNode` terminals count as plan endpoints.
+    """
     best: MCTSNode | None = None
     stack: list[MCTSNode] = [root]
     while stack:
@@ -572,6 +719,8 @@ def _find_best_terminal(root: MCTSNode) -> MCTSNode | None:
         if node.is_terminal and (best is None or node.visits > best.visits):
             best = node
         stack.extend(node.children)
+        for chance in node.chance_children:
+            stack.extend(chance.children_by_key.values())
     return best
 
 
@@ -579,18 +728,31 @@ def _robust_descent(root: MCTSNode) -> MCTSNode:
     """Greedy descent from ``root`` by visit count (Kocsis\u2013Szepesv\xe1ri
     ``robust'' action-selection rule).
 
-    Terminates at the first node with no expanded children so the
-    returned leaf has at least one full rollout's worth of statistics
-    along every edge above it.  Used as the anytime fallback when no
-    goal-terminal leaf was discovered during search.
+    Terminates at the first decision node with no expanded children so
+    the returned leaf has at least one full rollout's worth of
+    statistics along every edge above it.  Under stochastic expansion
+    the descent alternates decision \u2192 chance \u2192 decision, picking the
+    most-visited chance child and then its most-visited sampled
+    successor.
     """
-    cursor = root
-    while cursor.children:
-        cursor = max(cursor.children, key=lambda n: n.visits)
-    return cursor
+    cursor: MCTSNode = root
+    while True:
+        if cursor.children:
+            cursor = max(cursor.children, key=lambda n: n.visits)
+            continue
+        if cursor.chance_children:
+            chance = max(cursor.chance_children, key=lambda cn: cn.visits)
+            if not chance.children_by_key:
+                return cursor
+            cursor = max(
+                chance.children_by_key.values(), key=lambda n: n.visits
+            )
+            continue
+        return cursor
 
 
 __all__ = [
+    "ChanceNode",
     "HeuristicRollout",
     "MCTSNode",
     "MCTSStrategy",
