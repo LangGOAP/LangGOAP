@@ -170,9 +170,7 @@ class ScalarHeuristic(Protocol):
     the only contract.
     """
 
-    def __call__(
-        self, state: PlanningState, goal: GoalSpec
-    ) -> float: ...
+    def __call__(self, state: PlanningState, goal: GoalSpec) -> float: ...
 
 
 # Strict upper bar for non-satisfied states; reserves ``+1.0`` for true
@@ -431,6 +429,14 @@ class MCTSStrategy:
     # tree while still letting rollouts observe the noise.  Default
     # ``False`` preserves today's chance-layer semantics.
     force_deterministic_tree: bool = False
+    # Optional :class:`~langgoap.tracing.PlanningTracer` that receives
+    # ``on_search_expand`` / ``on_search_complete`` events when
+    # ``record_expansions`` is also ``True``.  Hooks are shared with
+    # A* via a semantic remap: ``g`` = visits, ``h`` = UCB1 score at
+    # selection time, ``f`` = running-mean value.  Zero-overhead
+    # default: no tracer is resolved unless both fields are set.
+    tracer: Any = None
+    record_expansions: bool = False
     # Post-search handle on the root of the last tree expanded by
     # :meth:`plan`.  Exposed so tests and observability hooks can
     # inspect chance-layer structure; ``None`` until ``plan`` has been
@@ -478,12 +484,21 @@ class MCTSStrategy:
             root.untried_actions = _applicable_actions(start, filtered_actions)
         self._carryover_root = None
         self._last_root = root
-        stochastic = (
-            not self.force_deterministic_tree
-            and not isinstance(
-                self.transition_model, DeterministicTransitionModel
-            )
+        stochastic = not self.force_deterministic_tree and not isinstance(
+            self.transition_model, DeterministicTransitionModel
         )
+
+        record = self.tracer is not None and self.record_expansions
+        on_expand = getattr(self.tracer, "on_search_expand", None) if record else None
+        on_complete = (
+            getattr(self.tracer, "on_search_complete", None) if record else None
+        )
+        # Stable integer ids for tracer events; root is untracked so the
+        # first expanded child reports ``parent_id=None``.  ``id(node)``
+        # is safe within a single ``plan`` call because nodes are retained
+        # by the tree for the full duration.
+        node_ids: dict[int, int] = {}
+        id_counter = [0]
 
         t0 = time.monotonic()
         wall_budget_s = self.wall_clock_ms / 1000.0 if self.wall_clock_ms else 0.0
@@ -526,6 +541,8 @@ class MCTSStrategy:
             )
             backpropagate(leaf, reward=reward)
             iters_done = i + 1
+            if on_expand is not None and leaf is not root:
+                _emit_mcts_expand(on_expand, leaf, node_ids, id_counter, self.c)
 
         plan = _extract_plan(
             root,
@@ -534,9 +551,11 @@ class MCTSStrategy:
             model=self.transition_model,
             anytime_fallback=self.anytime_fallback,
         )
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        if on_complete is not None:
+            on_complete(iters_done, elapsed_ms, plan is not None)
         if plan is None:
             return None
-        elapsed_ms = (time.monotonic() - t0) * 1000
         return Plan(
             actions=plan.actions,
             expected_states=plan.expected_states,
@@ -547,6 +566,49 @@ class MCTSStrategy:
             ),
             score=SimpleScore(scalar=plan.total_cost),
         )
+
+    async def aplan(
+        self,
+        start: PlanningState,
+        goal: GoalSpec,
+        actions: list[ActionSpec],
+        *,
+        blacklisted_actions: list[str] | None = None,
+    ) -> Plan | None:
+        """Async variant of :meth:`plan` with parity on tracer hooks.
+
+        The MCTS search loop is CPU-bound and synchronous; this entry
+        point exists to satisfy the dual sync/async pattern enforced
+        across LangGoap.  When a tracer is attached with async hooks
+        (``aon_search_expand`` / ``aon_search_complete``), the sync
+        variants are invoked through :meth:`plan` and then re-fired
+        through the async hooks by temporarily swapping the tracer
+        reference with a capture proxy.
+        """
+        if not (self.tracer is not None and self.record_expansions):
+            return self.plan(
+                start, goal, actions, blacklisted_actions=blacklisted_actions
+            )
+        proxy = _AsyncCaptureTracer()
+        real_tracer = self.tracer
+        self.tracer = proxy
+        try:
+            plan = self.plan(
+                start, goal, actions, blacklisted_actions=blacklisted_actions
+            )
+        finally:
+            self.tracer = real_tracer
+        for event in proxy.events:
+            kind = event[0]
+            if kind == "expand":
+                hook = getattr(real_tracer, "aon_search_expand", None)
+                if hook is not None:
+                    await hook(*event[1:])
+            elif kind == "complete":
+                hook = getattr(real_tracer, "aon_search_complete", None)
+                if hook is not None:
+                    await hook(*event[1:])
+        return plan
 
     def advance(
         self,
@@ -586,8 +648,9 @@ class MCTSStrategy:
             for child in root.children:
                 if child.action is None:
                     continue
-                if (child.action is action or child.action.name == action.name) \
-                        and child.state == target:
+                if (
+                    child.action is action or child.action.name == action.name
+                ) and child.state == target:
                     promoted = child
                     break
 
@@ -623,6 +686,86 @@ class MCTSStrategy:
         )
 
 
+class _AsyncCaptureTracer:
+    """Synchronous tracer shim that records MCTS events for later
+    re-emission through a real tracer's async hooks.  Used by
+    :meth:`MCTSStrategy.aplan` to preserve the ``async`` surface
+    without re-implementing the (CPU-bound, synchronous) search loop.
+    """
+
+    def __init__(self) -> None:
+        self.events: list[tuple[Any, ...]] = []
+
+    def on_search_expand(
+        self,
+        node_id: int,
+        state: Any,
+        g: float,
+        h: float,
+        f: float,
+        parent_id: int | None,
+        action_name: str | None,
+    ) -> None:
+        self.events.append(("expand", node_id, state, g, h, f, parent_id, action_name))
+
+    def on_search_complete(
+        self, nodes_explored: int, duration_ms: float, found: bool
+    ) -> None:
+        self.events.append(("complete", nodes_explored, duration_ms, found))
+
+
+def _emit_mcts_expand(
+    on_expand: Any,
+    leaf: MCTSNode,
+    node_ids: dict[int, int],
+    id_counter: list[int],
+    c: float,
+) -> None:
+    """Fire a single ``on_search_expand`` event for the most-recently
+    expanded decision leaf, applying the GOAP-wide semantic remap:
+    ``g`` = visits, ``h`` = UCB1 score, ``f`` = running-mean value.
+
+    Chance-layer ancestors are transparent: the reported parent is the
+    nearest :class:`MCTSNode` above ``leaf``, so downstream panels render
+    a pure decision-node tree regardless of the stochastic / deterministic
+    expansion regime.
+    """
+    # Mint a stable id for this decision leaf (idempotent on re-visits).
+    key = id(leaf)
+    if key not in node_ids:
+        node_ids[key] = id_counter[0]
+        id_counter[0] += 1
+    leaf_id = node_ids[key]
+
+    parent_id: int | None = None
+    cursor: "MCTSNode | ChanceNode | None" = leaf.parent
+    while cursor is not None:
+        if isinstance(cursor, MCTSNode):
+            # Root has no parent and is untracked; its descendants report
+            # ``parent_id=None`` so consumers anchor the tree at the root.
+            if cursor.parent is None:
+                parent_id = None
+            else:
+                parent_id = node_ids.get(id(cursor))
+            break
+        cursor = cursor.parent
+
+    action_name = leaf.action.name if leaf.action is not None else None
+    try:
+        h_value = ucb1(leaf, c=c)
+    except Exception:
+        h_value = math.inf
+    on_expand(
+        leaf_id,
+        leaf.state,
+        float(leaf.visits),
+        float(h_value) if math.isfinite(h_value) else math.inf,
+        float(leaf.value),
+        parent_id,
+        action_name,
+    )
+
+
 def _path_cost(node: MCTSNode) -> float:
     """Sum ``action.cost`` along the root\u2192``node`` edge chain.
 
@@ -640,9 +783,7 @@ def _path_cost(node: MCTSNode) -> float:
     return total
 
 
-def _over_path_length_budget(
-    node: MCTSNode, budget: int | None
-) -> bool:
+def _over_path_length_budget(node: MCTSNode, budget: int | None) -> bool:
     if budget is None:
         return False
     return _path_cost(node) >= float(budget)
@@ -907,9 +1048,7 @@ def _robust_descent(root: MCTSNode) -> MCTSNode:
             chance = max(cursor.chance_children, key=lambda cn: cn.visits)
             if not chance.children_by_key:
                 return cursor
-            cursor = max(
-                chance.children_by_key.values(), key=lambda n: n.visits
-            )
+            cursor = max(chance.children_by_key.values(), key=lambda n: n.visits)
             continue
         return cursor
 

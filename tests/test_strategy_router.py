@@ -18,7 +18,6 @@ import pytest
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import ConstraintSpec, GoalSpec
-from langgoap.types import ObjectiveDirection
 from langgoap.planner.mcts import MCTSStrategy
 from langgoap.planner.strategy import AStarStrategy, PlanningStrategy
 from langgoap.planner.transitions import (
@@ -28,7 +27,7 @@ from langgoap.planner.transitions import (
 )
 from langgoap.planner.types import Plan
 from langgoap.state import PlanningState
-
+from langgoap.types import ObjectiveDirection
 
 # --- helpers ---------------------------------------------------------------
 
@@ -52,9 +51,7 @@ class _StochasticModel:
     def expected(self, state: PlanningState, action: ActionSpec) -> dict:
         return dict(action.get_effects(state.to_dict()))
 
-    def sample(
-        self, state: PlanningState, action: ActionSpec, rng: Random
-    ) -> dict:
+    def sample(self, state: PlanningState, action: ActionSpec, rng: Random) -> dict:
         return self.expected(state, action)
 
 
@@ -66,7 +63,9 @@ class TestProblemFeatures:
         from langgoap.planner.router import extract_features
 
         f = extract_features(
-            PlanningState.from_dict({}), _goal(x=1), _actions(3),
+            PlanningState.from_dict({}),
+            _goal(x=1),
+            _actions(3),
             transition_model=DeterministicTransitionModel(),
         )
         assert f.is_stochastic is False
@@ -76,7 +75,9 @@ class TestProblemFeatures:
         from langgoap.planner.router import extract_features
 
         f = extract_features(
-            PlanningState.from_dict({}), _goal(), _actions(2),
+            PlanningState.from_dict({}),
+            _goal(),
+            _actions(2),
             transition_model=_StochasticModel(),
         )
         assert f.is_stochastic is True
@@ -90,7 +91,9 @@ class TestProblemFeatures:
             reason="CVaR planner", kind="risk-averse", extra={"cvar_alpha": 0.9}
         )
         f = extract_features(
-            PlanningState.from_dict({}), _goal(), _actions(1),
+            PlanningState.from_dict({}),
+            _goal(),
+            _actions(1),
             transition_model=m,
         )
         assert f.risk_profile == "risk-averse"
@@ -104,7 +107,9 @@ class TestProblemFeatures:
             constraints=(ConstraintSpec(key="cost", max=10.0),),
         )
         f = extract_features(
-            PlanningState.from_dict({"a": 1}), goal, _actions(5),
+            PlanningState.from_dict({"a": 1}),
+            goal,
+            _actions(5),
             transition_model=None,
         )
         assert f.action_count == 5
@@ -117,7 +122,9 @@ class TestProblemFeatures:
         from langgoap.planner.router import extract_features
 
         f = extract_features(
-            PlanningState.from_dict({}), _goal(), _actions(1),
+            PlanningState.from_dict({}),
+            _goal(),
+            _actions(1),
         )
         assert f.is_stochastic is False
         assert f.risk_profile == "strict"
@@ -185,9 +192,7 @@ class TestRuleBasedClassifier:
         from langgoap.planner.router import RuleBasedClassifier
 
         c = RuleBasedClassifier()
-        assert (
-            c(self._features(action_count=40, horizon_estimate=30)) == "mcts"
-        )
+        assert c(self._features(action_count=40, horizon_estimate=30)) == "mcts"
 
     def test_default_routes_to_astar(self) -> None:
         from langgoap.planner.router import RuleBasedClassifier
@@ -220,7 +225,9 @@ class _RecordingStrategy:
         *,
         blacklisted_actions: list[str] | None = None,
     ) -> Plan | None:
-        self.calls.append((start, goal, tuple(actions), tuple(blacklisted_actions or ())))
+        self.calls.append(
+            (start, goal, tuple(actions), tuple(blacklisted_actions or ()))
+        )
         return AStarStrategy().plan(
             start, goal, actions, blacklisted_actions=blacklisted_actions
         )
@@ -263,7 +270,6 @@ class TestStrategyRouter:
         router.plan(PlanningState.from_dict({}), _goal(x=1), _actions(1))
         assert len(fallback.calls) == 1
 
-
     def test_satisfies_planning_strategy_protocol(self) -> None:
         from langgoap.planner.router import StrategyRouter
 
@@ -273,13 +279,47 @@ class TestStrategyRouter:
         )
         assert isinstance(router, PlanningStrategy)
 
+    def test_exposes_last_chosen_strategy_name(self) -> None:
+        """After each plan dispatch, the chosen strategy name is observable."""
+        from langgoap.planner.router import StrategyRouter
+
+        astar_rec = _RecordingStrategy(name="astar")
+        mcts_rec = _RecordingStrategy(name="mcts")
+        choices = iter(["astar", "mcts", "astar"])
+        router = StrategyRouter(
+            strategies={"astar": astar_rec, "mcts": mcts_rec},
+            classifier=lambda f: next(choices),
+        )
+        assert router.last_chosen is None
+        router.plan(PlanningState.from_dict({}), _goal(x=1), _actions(1))
+        assert router.last_chosen == "astar"
+        router.plan(PlanningState.from_dict({}), _goal(x=1), _actions(1))
+        assert router.last_chosen == "mcts"
+        router.plan(PlanningState.from_dict({}), _goal(x=1), _actions(1))
+        assert router.last_chosen == "astar"
+
+    def test_on_strategy_chosen_callback_fires_with_resolved_name(self) -> None:
+        """The callback is invoked with the name actually dispatched to,
+        including when ``on_unknown='default'`` rerouted an unknown pick."""
+        from langgoap.planner.router import StrategyRouter
+
+        seen: list[str] = []
+        router = StrategyRouter(
+            strategies={"astar": _RecordingStrategy(name="astar")},
+            classifier=lambda f: "nonexistent",
+            default="astar",
+            on_unknown="default",
+            on_strategy_chosen=seen.append,
+        )
+        router.plan(PlanningState.from_dict({}), _goal(x=1), _actions(1))
+        assert seen == ["astar"]
+        assert router.last_chosen == "astar"
+
     def test_blacklisted_actions_threaded_through(self) -> None:
         from langgoap.planner.router import StrategyRouter
 
         rec = _RecordingStrategy(name="astar")
-        router = StrategyRouter(
-            strategies={"astar": rec}, classifier=lambda f: "astar"
-        )
+        router = StrategyRouter(strategies={"astar": rec}, classifier=lambda f: "astar")
         router.plan(
             PlanningState.from_dict({}),
             _goal(x=1),

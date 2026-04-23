@@ -17,8 +17,8 @@ See ``research/plans/strategy-router.md``.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from typing import Literal, Protocol, runtime_checkable
 
 from langgoap.actions import ActionSpec
@@ -31,9 +31,7 @@ from langgoap.planner.transitions import (
 from langgoap.planner.types import Plan
 from langgoap.state import PlanningState
 
-RiskProfile = Literal[
-    "strict", "risk-averse", "learned", "hierarchical", "other"
-]
+RiskProfile = Literal["strict", "risk-averse", "learned", "hierarchical", "other"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,9 +64,7 @@ def extract_features(
     risk_profile: RiskProfile = "strict" if policy is None else policy.kind
 
     start_dict = start.to_dict()
-    admissible_h = sum(
-        1 for k, v in goal.conditions.items() if start_dict.get(k) != v
-    )
+    admissible_h = sum(1 for k, v in goal.conditions.items() if start_dict.get(k) != v)
 
     # Coarse horizon proxy: unsatisfied conditions times action-space size.
     # Used only as a tiebreaker in the default classifier; the conservative
@@ -117,11 +113,7 @@ class RuleBasedClassifier:
     prefer_mcts_for_stochastic: bool = False
 
     def __call__(self, f: ProblemFeatures) -> str:
-        if (
-            f.has_hard_constraints
-            or f.has_soft_objectives
-            or f.has_trajectory_metrics
-        ):
+        if f.has_hard_constraints or f.has_soft_objectives or f.has_trajectory_metrics:
             return "csp-pipeline"
         if f.risk_profile == "risk-averse":
             return "mcts"
@@ -159,6 +151,12 @@ class StrategyRouter:
             outputs into :class:`KeyError` \u2014 strict mode catches
             misconfigured routers loudly.  ``"default"`` silently
             falls back to ``strategies[default]``.
+        on_strategy_chosen: Optional callback invoked with the name of
+            the strategy actually dispatched to (after ``on_unknown``
+            fallback resolution).  Useful for observers that need to
+            know which concrete strategy ran \u2014 e.g. a dashboard
+            recorder that renders an A* tree for one turn and an MCTS
+            tree for the next.
     """
 
     strategies: Mapping[str, PlanningStrategy]
@@ -166,6 +164,8 @@ class StrategyRouter:
     transition_model: TransitionModel | None = None
     default: str = "astar"
     on_unknown: Literal["raise", "default"] = "raise"
+    on_strategy_chosen: Callable[[str], None] | None = None
+    last_chosen: str | None = field(default=None, init=False, repr=False)
 
     def plan(
         self,
@@ -187,6 +187,10 @@ class StrategyRouter:
                     f"registered strategies {sorted(self.strategies)}"
                 )
             chosen = self.strategies[self.default]
+            chosen_name = self.default
+        self.last_chosen = chosen_name
+        if self.on_strategy_chosen is not None:
+            self.on_strategy_chosen(chosen_name)
         return chosen.plan(
             start, goal, actions, blacklisted_actions=blacklisted_actions
         )
