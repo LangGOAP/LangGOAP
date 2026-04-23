@@ -420,6 +420,17 @@ class MCTSStrategy:
     # semantics: the tree grows freely until ``rollout_depth`` and the
     # iteration / wall-clock caps bound the search.
     path_length_budget: int | None = None
+    # Kocsis\u2013Szepesv\xe1ri 2006 Determinized UCT / Kearns\u2013Mansour\u2013Ng 2002
+    # Sparse Sampling.  When ``True``, the tree expands through the
+    # deterministic ``_expand`` path even when a stochastic
+    # :class:`TransitionModel` is supplied \u2014 callers pair this with
+    # :class:`StochasticRollout` to surface transition noise via leaf
+    # sampling rather than chance-node branching.  On effectively
+    # deterministic problems (e.g. per-tick replanning with rare-event
+    # risks) this preserves the sample efficiency of the deterministic
+    # tree while still letting rollouts observe the noise.  Default
+    # ``False`` preserves today's chance-layer semantics.
+    force_deterministic_tree: bool = False
     # Post-search handle on the root of the last tree expanded by
     # :meth:`plan`.  Exposed so tests and observability hooks can
     # inspect chance-layer structure; ``None`` until ``plan`` has been
@@ -467,8 +478,11 @@ class MCTSStrategy:
             root.untried_actions = _applicable_actions(start, filtered_actions)
         self._carryover_root = None
         self._last_root = root
-        stochastic = not isinstance(
-            self.transition_model, DeterministicTransitionModel
+        stochastic = (
+            not self.force_deterministic_tree
+            and not isinstance(
+                self.transition_model, DeterministicTransitionModel
+            )
         )
 
         t0 = time.monotonic()
