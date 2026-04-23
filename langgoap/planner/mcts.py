@@ -413,6 +413,13 @@ class MCTSStrategy:
     # bit-identical.
     reuse_tree: bool = False
     tree_reuse_decay: float = 0.6
+    # Pepels BSc \xa74.1 variable-depth selection.  When set to an integer,
+    # selection stops descending and expansion short-circuits once the
+    # cumulative action cost along the root\u2192leaf path reaches this
+    # budget.  ``None`` (default) preserves today's edge-count-only
+    # semantics: the tree grows freely until ``rollout_depth`` and the
+    # iteration / wall-clock caps bound the search.
+    path_length_budget: int | None = None
     # Post-search handle on the root of the last tree expanded by
     # :meth:`plan`.  Exposed so tests and observability hooks can
     # inspect chance-layer structure; ``None`` until ``plan`` has been
@@ -478,6 +485,7 @@ class MCTSStrategy:
                     rng=rng,
                     model=self.transition_model,
                     goal=goal,
+                    path_length_budget=self.path_length_budget,
                 )
                 leaf = _expand_stochastic(
                     leaf,
@@ -485,15 +493,19 @@ class MCTSStrategy:
                     actions=filtered_actions,
                     rng=rng,
                     model=self.transition_model,
+                    path_length_budget=self.path_length_budget,
                 )
             else:
-                leaf = _select(root, c=self.c)
+                leaf = _select(
+                    root, c=self.c, path_length_budget=self.path_length_budget
+                )
                 leaf = _expand(
                     leaf,
                     goal=goal,
                     actions=filtered_actions,
                     rng=rng,
                     model=self.transition_model,
+                    path_length_budget=self.path_length_budget,
                 )
             reward = policy.rollout(
                 state=leaf.state, goal=goal, actions=filtered_actions
@@ -597,10 +609,44 @@ class MCTSStrategy:
         )
 
 
-def _select(node: MCTSNode, *, c: float) -> MCTSNode:
+def _path_cost(node: MCTSNode) -> float:
+    """Sum ``action.cost`` along the root\u2192``node`` edge chain.
+
+    Used to enforce Pepels BSc \xa74.1 variable-depth selection.  Nodes
+    with no parent contribute zero; chance-node parents are skipped
+    because they carry the same action as the decision parent just
+    above them in the alternating tree layout.
+    """
+    total = 0.0
+    cur: "MCTSNode | ChanceNode | None" = node
+    while cur is not None:
+        if isinstance(cur, MCTSNode) and cur.action is not None:
+            total += float(cur.action.cost) if not callable(cur.action.cost) else 0.0
+        cur = cur.parent
+    return total
+
+
+def _over_path_length_budget(
+    node: MCTSNode, budget: int | None
+) -> bool:
+    if budget is None:
+        return False
+    return _path_cost(node) >= float(budget)
+
+
+def _select(
+    node: MCTSNode,
+    *,
+    c: float,
+    path_length_budget: int | None = None,
+) -> MCTSNode:
     """Descend via UCB1 until a node with untried actions or no children."""
     cursor = node
-    while cursor.untried_actions == [] and cursor.children:
+    while (
+        cursor.untried_actions == []
+        and cursor.children
+        and not _over_path_length_budget(cursor, path_length_budget)
+    ):
         cursor = max(cursor.children, key=lambda n: ucb1(n, c=c))
     return cursor
 
@@ -612,6 +658,7 @@ def _expand(
     actions: list[ActionSpec],
     rng: random.Random,
     model: TransitionModel,
+    path_length_budget: int | None = None,
 ) -> MCTSNode:
     """Expand one untried action into a new child, or return ``node``.
 
@@ -624,6 +671,8 @@ def _expand(
         node.is_terminal = True
         return node
     if not node.untried_actions:
+        return node
+    if _over_path_length_budget(node, path_length_budget):
         return node
     # Pop a random untried action for diversity under the fixed seed.
     idx = rng.randrange(len(node.untried_actions))
@@ -673,6 +722,7 @@ def _select_stochastic(
     rng: random.Random,
     model: TransitionModel,
     goal: GoalSpec,
+    path_length_budget: int | None = None,
 ) -> MCTSNode:
     """Alternate ``Decision \u2192 Chance \u2192 Decision`` descent.
 
@@ -687,6 +737,8 @@ def _select_stochastic(
     cursor = node
     while True:
         if cursor.untried_actions or cursor.is_terminal:
+            return cursor
+        if _over_path_length_budget(cursor, path_length_budget):
             return cursor
         if not cursor.chance_children:
             return cursor
@@ -713,6 +765,7 @@ def _expand_stochastic(
     actions: list[ActionSpec],
     rng: random.Random,
     model: TransitionModel,
+    path_length_budget: int | None = None,
 ) -> MCTSNode:
     """Expand one untried action into a chance-child and a first
     sampled decision grandchild.
@@ -727,6 +780,8 @@ def _expand_stochastic(
         node.is_terminal = True
         return node
     if not node.untried_actions:
+        return node
+    if _over_path_length_budget(node, path_length_budget):
         return node
     idx = rng.randrange(len(node.untried_actions))
     action = node.untried_actions.pop(idx)
