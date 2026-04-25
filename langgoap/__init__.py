@@ -76,6 +76,9 @@ from langgoap.integrations import (
     GoapSubgraph,
     add_goap_subgraph,
     create_goap_agent,
+    create_goap_subagent,
+    create_goap_tool,
+    format_goap_result,
     goapify_tool,
 )
 from langgoap.interpreter import (
@@ -196,6 +199,9 @@ __all__ = [
     "ConstraintChain",
     # Integrations (low-code LangGraph on-ramp)
     "create_goap_agent",
+    "create_goap_tool",
+    "create_goap_subagent",
+    "format_goap_result",
     "goapify_tool",
     "GoapSubgraph",
     "add_goap_subgraph",

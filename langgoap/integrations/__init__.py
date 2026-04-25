@@ -20,12 +20,20 @@ is duplicated.
 
 from __future__ import annotations
 
+from langgoap.integrations.deepagents import (
+    create_goap_subagent,
+    create_goap_tool,
+    format_goap_result,
+)
 from langgoap.integrations.prebuilt import create_goap_agent
 from langgoap.integrations.subgraph import GoapSubgraph, add_goap_subgraph
 from langgoap.integrations.tools import goapify_tool
 
 __all__ = [
     "create_goap_agent",
+    "create_goap_tool",
+    "create_goap_subagent",
+    "format_goap_result",
     "goapify_tool",
     "GoapSubgraph",
     "add_goap_subgraph",
