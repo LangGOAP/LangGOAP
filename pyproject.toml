@@ -39,6 +39,8 @@ dependencies = [
 [project.optional-dependencies]
 checkpoint-postgres = ["langgraph-checkpoint-postgres>=3.0.0,<4.0.0"]
 checkpoint-redis = ["langgraph-checkpoint-redis>=0.4.0,<1.0.0"]
+cli = ["click>=8.1.7"]
+deepagents = ["deepagents>=0.5.0; python_version>='3.11'"]
 
 [project.urls]
 Homepage = "https://github.com/integrallis/langgoap"
@@ -46,6 +48,9 @@ Documentation = "https://integrallis.github.io/langgoap"
 Repository = "https://github.com/integrallis/langgoap"
 Issues = "https://github.com/integrallis/langgoap/issues"
 Changelog = "https://github.com/integrallis/langgoap/blob/main/CHANGELOG.md"
+
+[project.scripts]
+langgoap = "langgoap.cli.main:cli"
 
 [build-system]
 requires = ["hatchling"]
@@ -71,6 +76,7 @@ dev-dependencies = [
     "ipykernel>=7.2.0",
     "langchain-anthropic>=1.4.0",
     "pytest-benchmark>=5.1",
+    "click>=8.1.7",
     "langgraph-checkpoint-postgres>=3.0.0,<4.0.0",
     "langgraph-checkpoint-redis>=0.4.0,<1.0.0",
     "mfcqi>=0.0.4",
