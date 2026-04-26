@@ -69,6 +69,7 @@ similar ground more thoroughly.
 | [`hierarchical_agent_teams_goapified.ipynb`](hierarchical_agent_teams_goapified.ipynb) | `tests/integration/test_hierarchical_teams.py` | GOAPified version of LangGraph's Hierarchical Agent Teams tutorial. |
 | [`plan_and_execute_goapified.ipynb`](plan_and_execute_goapified.ipynb) | `tests/integration/test_plan_and_execute.py` | GOAPified version of LangGraph's Plan-and-Execute tutorial. |
 | [`nl_goal_tutorial.ipynb`](nl_goal_tutorial.ipynb) | `tests/integration/test_nl_goal_interpreter_api.py` | Earlier walkthrough of `GoalInterpreter`. Superseded by `examples/basics/nl_goal_interpreter.ipynb` and `hungry_agent.ipynb`. |
+| [`deepagents_integration.ipynb`](deepagents_integration.ipynb) | `tests/integration/test_deepagents_integration.py` | Embedding GOAP as a LangChain tool or DeepAgents subagent with LLM-powered content analysis. |
 
 ### Upstream LangGraph reference notebooks
 

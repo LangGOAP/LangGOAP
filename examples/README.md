@@ -21,6 +21,10 @@ truth.
   Mermaid / DOT / ASCII rendering of plans and CSP schedules.
 - [`basics/nl_goal_interpreter.ipynb`](basics/nl_goal_interpreter.ipynb) —
   turning plain-English requests into `GoalSpec`s via `GoalInterpreter`.
+- [`basics/tracing.ipynb`](basics/tracing.ipynb) —
+  observability hooks with `LoggingTracer`, `LangSmithTracer`, and `MultiTracer`.
+- [`basics/cli.ipynb`](basics/cli.ipynb) —
+  the `langgoap` command-line interface for quick planning from the terminal.
 
 ## Tutorials
 
