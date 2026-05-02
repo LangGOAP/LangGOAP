@@ -742,3 +742,236 @@ class TestSingleCompletionPerPlanCall:
         assert any(
             detail.get("attempt") == 1 for _, detail in rec.dead_ends
         ), f"expected attempt=1 in one of {rec.dead_ends!r}"
+
+
+# ---------------------------------------------------------------------------
+# Irrelevant-action regression armor — ported verbatim from Embabel.
+#
+# Source: research/repos/embabel-agent/embabel-agent-api/src/test/kotlin/
+#         com/embabel/plan/goap/IrrelevantActionsTest.kt
+#
+# Each Kotlin nested class becomes a Python test class below, and each
+# `fun ...()` becomes a test method whose body is a 1:1 translation of the
+# Kotlin scenario (action shapes, world state, assertions). World states use
+# explicit True/False values to mirror Embabel's `ConditionDetermination`.
+# ---------------------------------------------------------------------------
+
+
+class TestPlannerConfusionAndDistraction:
+    """Ports from `Planner confusion and distraction tests` (Embabel)."""
+
+    def test_planner_not_distracted_by_irrelevant_chain(self) -> None:
+        """Real chain of length 5 + irrelevant chain of length 10. Plan must
+        contain only the real chain in order."""
+        chain_length = 5
+        real_chain = [
+            _action(
+                f"realAction{i}",
+                pre={("start" if i == 1 else f"step{i - 1}"): True},
+                eff={f"step{i}": True},
+            )
+            for i in range(1, chain_length + 1)
+        ]
+        irrelevant_chain = [
+            _action(
+                f"irrelevantChain{i}",
+                pre={f"noise{i - 1}": True},
+                eff={f"noise{i}": True},
+            )
+            for i in range(1, 11)
+        ]
+        world_state: dict[str, Any] = {"start": True}
+        for i in range(1, chain_length + 1):
+            world_state[f"step{i}"] = False
+        for i in range(0, 11):
+            world_state[f"noise{i}"] = True
+        start = PlanningState.from_dict(world_state)
+        goal = GoalSpec(conditions={f"step{chain_length}": True})
+
+        result = plan(start, goal, real_chain + irrelevant_chain)
+
+        assert result is not None, "Should find a plan despite irrelevant chain"
+        assert len(result) == chain_length, "Should only use the real chain actions"
+        assert result.action_names == [
+            f"realAction{i}" for i in range(1, chain_length + 1)
+        ]
+
+    def test_planner_does_not_undo_progress(self) -> None:
+        """Given setA / unsetA / reachGoal — plan must not include unsetA."""
+        actions = [
+            _action("setA", pre={"start": True}, eff={"A": True}),
+            _action("unsetA", pre={"A": True}, eff={"A": False}),
+            _action("reachGoal", pre={"A": True}, eff={"goal": True}),
+        ]
+        start = PlanningState.from_dict({"start": True, "A": False, "goal": False})
+        goal = GoalSpec(conditions={"goal": True})
+
+        result = plan(start, goal, actions)
+
+        assert result is not None
+        assert (
+            "unsetA" not in result.action_names
+        ), "Plan should not include actions that undo required conditions"
+
+    def test_planner_avoids_misleading_detour(self) -> None:
+        """setA and misleadA both produce A; plan must pick a 2-step minimal
+        path and not include both."""
+        actions = [
+            _action("setA", pre={"start": True}, eff={"A": True}),
+            _action(
+                "misleadA",
+                pre={"start": True},
+                eff={"A": True, "foo": True},
+            ),
+            _action("reachGoal", pre={"A": True}, eff={"goal": True}),
+        ]
+        start = PlanningState.from_dict(
+            {"start": True, "A": False, "goal": False, "foo": False}
+        )
+        goal = GoalSpec(conditions={"goal": True})
+
+        result = plan(start, goal, actions)
+
+        assert result is not None
+        names = result.action_names
+        assert names == ["setA", "reachGoal"] or names == [
+            "misleadA",
+            "reachGoal",
+        ], f"Plan must be one of the two minimal 2-step paths, got {names!r}"
+
+
+class TestAdditionalConfusionBreaking:
+    """Ports from `Additional confusion-breaking tests` (Embabel)."""
+
+    def test_planner_ignores_irrelevant_side_effects(self) -> None:
+        """An action with a relevant effect plus a side-effect that enables
+        a noise action — plan must not include the noise action."""
+        actions = [
+            _action(
+                "setA",
+                pre={"start": True},
+                eff={"A": True, "sideNoise": True},
+            ),
+            _action("reachGoal", pre={"A": True}, eff={"goal": True}),
+            _action(
+                "irrelevantNoise",
+                pre={"sideNoise": True},
+                eff={"moreNoise": True},
+            ),
+        ]
+        start = PlanningState.from_dict(
+            {
+                "start": True,
+                "A": False,
+                "goal": False,
+                "sideNoise": False,
+                "moreNoise": False,
+            }
+        )
+        goal = GoalSpec(conditions={"goal": True})
+
+        result = plan(start, goal, actions)
+
+        assert result is not None
+        assert (
+            "irrelevantNoise" not in result.action_names
+        ), "Plan should not include irrelevant side-effect actions"
+
+    def test_planner_not_confused_by_multiple_irrelevant_chains(self) -> None:
+        """Real chain of 3 + 3 noise chains of 5 each. Plan must contain
+        only the real chain actions in order."""
+        chain_length = 3
+        real_chain = [
+            _action(
+                f"realAction{i}",
+                pre={("start" if i == 1 else f"step{i - 1}"): True},
+                eff={f"step{i}": True},
+            )
+            for i in range(1, chain_length + 1)
+        ]
+        irrelevant_chains = []
+        for chain_num in range(1, 4):
+            for i in range(1, 6):
+                irrelevant_chains.append(
+                    _action(
+                        f"irrelevantChain{chain_num}_{i}",
+                        pre={f"noise{chain_num}_{i - 1}": True},
+                        eff={f"noise{chain_num}_{i}": True},
+                    )
+                )
+        world_state: dict[str, Any] = {"start": True}
+        for i in range(1, chain_length + 1):
+            world_state[f"step{i}"] = False
+        for chain_num in range(1, 4):
+            for i in range(0, 6):
+                world_state[f"noise{chain_num}_{i}"] = True
+        start = PlanningState.from_dict(world_state)
+        goal = GoalSpec(conditions={f"step{chain_length}": True})
+
+        result = plan(start, goal, real_chain + irrelevant_chains)
+
+        assert (
+            result is not None
+        ), "Should find a plan despite multiple irrelevant chains"
+        assert len(result) == chain_length, "Should only use the real chain actions"
+        assert result.action_names == [
+            f"realAction{i}" for i in range(1, chain_length + 1)
+        ]
+
+
+class TestMoreDeviousPlannerBreaking:
+    """Ports from `More devious planner-breaking tests` (Embabel)."""
+
+    def test_planner_does_not_loop_between_undo_and_redo(self) -> None:
+        """setA / unsetA / setAagain / reachGoal — plan must not bounce
+        through the undo/redo pair."""
+        actions = [
+            _action("setA", pre={"start": True}, eff={"A": True}),
+            _action("unsetA", pre={"A": True}, eff={"A": False}),
+            _action("setAagain", pre={"A": False}, eff={"A": True}),
+            _action("reachGoal", pre={"A": True}, eff={"goal": True}),
+        ]
+        start = PlanningState.from_dict({"start": True, "A": False, "goal": False})
+        goal = GoalSpec(conditions={"goal": True})
+
+        result = plan(start, goal, actions)
+
+        assert result is not None
+        names = result.action_names
+        # No window of (setA, unsetA) or (unsetA, setAagain) — the planner
+        # must not bounce between undo and redo actions.
+        assert not any(
+            (names[i], names[i + 1]) in {("setA", "unsetA"), ("unsetA", "setAagain")}
+            for i in range(len(names) - 1)
+        ), f"Plan should not bounce between undo and redo, got {names!r}"
+        assert names == ["setA", "reachGoal"] or names == [
+            "setAagain",
+            "reachGoal",
+        ], f"Plan should be minimal and direct, got {names!r}"
+
+    def test_planner_not_distracted_by_net_zero_action_pair(self) -> None:
+        """A 'distract' action plus a paired 'undoNoise' action have a net
+        zero effect on the world. Plan must include neither."""
+        actions = [
+            _action("setA", pre={"start": True}, eff={"A": True}),
+            _action("distract", pre={"start": True}, eff={"noise": True}),
+            _action("undoNoise", pre={"noise": True}, eff={"noise": False}),
+            _action("reachGoal", pre={"A": True}, eff={"goal": True}),
+        ]
+        start = PlanningState.from_dict(
+            {"start": True, "A": False, "goal": False, "noise": False}
+        )
+        goal = GoalSpec(conditions={"goal": True})
+
+        result = plan(start, goal, actions)
+
+        assert result is not None
+        names = result.action_names
+        assert (
+            "distract" not in names
+        ), "Plan should not include irrelevant distract action"
+        assert "undoNoise" not in names, "Plan should not include undoNoise action"
+        assert names == [
+            "setA",
+            "reachGoal",
+        ], f"Plan should be minimal and direct, got {names!r}"
