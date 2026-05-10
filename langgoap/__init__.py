@@ -26,6 +26,7 @@ def set_log_level(level: str | int) -> None:
 
 
 from langgoap.actions import ActionSpec, EffectFunction, GoapAction, goap_action
+from langgoap.callbacks import DEFAULT_COST_PER_1K_TOKENS, CostAccumulator
 from langgoap.conditions import (
     AsyncConditionResolver,
     ConditionResolver,
@@ -80,6 +81,7 @@ from langgoap.integrations import (
     create_goap_tool,
     format_goap_result,
     goapify_tool,
+    scaffold_deployment,
 )
 from langgoap.interpreter import (
     GoalInterpreter,
@@ -131,6 +133,13 @@ from langgoap.planner.transitions import (
     TransitionModel,
 )
 from langgoap.planner.types import Plan, PlanMetadata
+from langgoap.planner.utility import (
+    NIRVANA_NAME,
+    NirvanaGoal,
+    UtilityStrategy,
+    is_nirvana,
+)
+from langgoap.qos import DEFAULT_RETRY_POLICY, FIRE_ONCE, ActionQos
 from langgoap.reflexion import Reflection, ReflexionTracer
 from langgoap.score import BendableScore, HardSoftScore, Score, SimpleScore
 from langgoap.sensors import (
@@ -146,6 +155,25 @@ from langgoap.serde import (
     install_langgoap_serde,
 )
 from langgoap.state import PlanningState, infer_start_state
+from langgoap.stuck import (
+    FunctionalStuckHandler,
+    MulticastStuckHandler,
+    StuckHandler,
+    StuckHandlerResult,
+    StuckHandlingResultCode,
+)
+from langgoap.termination import (
+    AllOfPolicy,
+    EarlyTermination,
+    FirstOfPolicy,
+    MaxActionsPolicy,
+    MaxCostPolicy,
+    MaxLLMCallsPolicy,
+    MaxTokensPolicy,
+    MaxWallClockPolicy,
+    OnStuckPolicy,
+    TerminationPolicy,
+)
 from langgoap.tracing import (
     LangSmithTracer,
     LoggingTracer,
@@ -205,6 +233,7 @@ __all__ = [
     "goapify_tool",
     "GoapSubgraph",
     "add_goap_subgraph",
+    "scaffold_deployment",
     # Interpreter
     "GoalInterpreter",
     "InterpretedConstraint",
@@ -238,6 +267,11 @@ __all__ = [
     "MCTSTracingConfig",
     "RepairStrategy",
     "TwoPhasePipelineStrategy",
+    # Utility (greedy) planner
+    "NIRVANA_NAME",
+    "NirvanaGoal",
+    "UtilityStrategy",
+    "is_nirvana",
     # Router
     "ProblemFeatures",
     "RuleBasedClassifier",
@@ -257,6 +291,30 @@ __all__ = [
     "has_blocking_failure",
     "run_guards_async",
     "run_guards_sync",
+    # LLM cost / token accounting
+    "CostAccumulator",
+    "DEFAULT_COST_PER_1K_TOKENS",
+    # Action QoS / retry policy
+    "ActionQos",
+    "DEFAULT_RETRY_POLICY",
+    "FIRE_ONCE",
+    # Stuck-handler protocol
+    "FunctionalStuckHandler",
+    "MulticastStuckHandler",
+    "StuckHandler",
+    "StuckHandlerResult",
+    "StuckHandlingResultCode",
+    # Early-termination policies
+    "AllOfPolicy",
+    "EarlyTermination",
+    "FirstOfPolicy",
+    "MaxActionsPolicy",
+    "MaxCostPolicy",
+    "MaxLLMCallsPolicy",
+    "MaxTokensPolicy",
+    "MaxWallClockPolicy",
+    "OnStuckPolicy",
+    "TerminationPolicy",
     # Scores
     "Score",
     "SimpleScore",
