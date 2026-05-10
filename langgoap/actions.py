@@ -10,6 +10,7 @@ from datetime import timedelta
 from types import MappingProxyType
 from typing import Any, Callable
 
+from langgoap.qos import ActionQos
 from langgoap.types import CostFunction
 
 EffectFunction = Callable[[Mapping[str, Any]], Mapping[str, Any]]
@@ -97,7 +98,12 @@ class ActionSpec:
     aexecute: Callable[..., Any] | None = None
     effect_validator: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
     max_retries: int = 0
-    require_human_approval: bool = False
+    qos: ActionQos | None = None
+    can_rerun: bool = True
+    read_only: bool = False
+    utility: float | CostFunction | None = None
+    require_human_approval: bool | type = False
+    human_input_key: str | None = None
     # CSP optimizer inputs (ignored by the A* planner)
     resources: Mapping[str, float] | None = None
     duration: timedelta | None = None
@@ -265,7 +271,12 @@ def goap_action(
     cost: float | CostFunction = 1.0,
     name: str | None = None,
     max_retries: int = 0,
-    require_human_approval: bool = False,
+    qos: ActionQos | None = None,
+    can_rerun: bool = True,
+    read_only: bool = False,
+    utility: float | CostFunction | None = None,
+    require_human_approval: bool | type = False,
+    human_input_key: str | None = None,
     resources: dict[str, float] | None = None,
     duration: timedelta | None = None,
     metadata: dict[str, Any] | None = None,
@@ -316,7 +327,12 @@ def goap_action(
             execute=None if is_async else func,
             aexecute=func if is_async else None,
             max_retries=max_retries,
+            qos=qos,
+            can_rerun=can_rerun,
+            read_only=read_only,
+            utility=utility,
             require_human_approval=require_human_approval,
+            human_input_key=human_input_key,
             resources=resources,
             duration=duration,
             metadata=metadata,
@@ -351,7 +367,12 @@ class GoapAction:
     preconditions: dict[str, Any] = {}
     effects: dict[str, Any] = {}
     max_retries: int = 0
-    require_human_approval: bool = False
+    qos: ActionQos | None = None
+    can_rerun: bool = True
+    read_only: bool = False
+    utility: float | CostFunction | None = None
+    require_human_approval: bool | type = False
+    human_input_key: str | None = None
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -420,5 +441,10 @@ class GoapAction:
             aexecute=custom_aexecute,
             effect_validator=custom_validator,
             max_retries=self.max_retries,
+            qos=self.qos,
+            can_rerun=self.can_rerun,
+            read_only=self.read_only,
+            utility=self.utility,
             require_human_approval=self.require_human_approval,
+            human_input_key=self.human_input_key,
         )
