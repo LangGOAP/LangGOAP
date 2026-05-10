@@ -39,6 +39,18 @@ class _RecordingTracer:
     def on_action_complete(self, result: Any) -> None:
         self.calls.append("on_action_complete")
 
+    def on_action_retry(
+        self,
+        action: Any,
+        attempt: int,
+        exception: BaseException,
+        backoff_ms: float,
+    ) -> None:
+        self.calls.append("on_action_retry")
+
+    def on_strategy_chosen(self, strategy_name: str) -> None:
+        self.calls.append("on_strategy_chosen")
+
     def on_replan(self, reason: str, new_plan: Any) -> None:
         self.calls.append("on_replan")
 
@@ -82,6 +94,18 @@ class _RecordingTracer:
 
     async def aon_action_complete(self, result: Any) -> None:
         self.calls.append("aon_action_complete")
+
+    async def aon_action_retry(
+        self,
+        action: Any,
+        attempt: int,
+        exception: BaseException,
+        backoff_ms: float,
+    ) -> None:
+        self.calls.append("aon_action_retry")
+
+    async def aon_strategy_chosen(self, strategy_name: str) -> None:
+        self.calls.append("aon_strategy_chosen")
 
     async def aon_replan(self, reason: str, new_plan: Any) -> None:
         self.calls.append("aon_replan")

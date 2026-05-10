@@ -26,6 +26,18 @@ class NullTracer:
     def on_action_complete(self, result: Any) -> None:
         pass
 
+    def on_action_retry(
+        self,
+        action: Any,
+        attempt: int,
+        exception: BaseException,
+        backoff_ms: float,
+    ) -> None:
+        pass
+
+    def on_strategy_chosen(self, strategy_name: str) -> None:
+        pass
+
     def on_replan(self, reason: str, new_plan: Any) -> None:
         pass
 
@@ -48,6 +60,18 @@ class NullTracer:
         pass
 
     async def aon_action_complete(self, result: Any) -> None:
+        pass
+
+    async def aon_action_retry(
+        self,
+        action: Any,
+        attempt: int,
+        exception: BaseException,
+        backoff_ms: float,
+    ) -> None:
+        pass
+
+    async def aon_strategy_chosen(self, strategy_name: str) -> None:
         pass
 
     async def aon_replan(self, reason: str, new_plan: Any) -> None:

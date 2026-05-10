@@ -335,6 +335,47 @@ class LangSmithTracer:
             end_time=utc_now(),
         )
 
+    def on_action_retry(
+        self,
+        action: Any,
+        attempt: int,
+        exception: BaseException,
+        backoff_ms: float,
+    ) -> None:
+        """Record an in-executor retry as metadata on the action's run."""
+        if self._disabled or self._client is None:
+            return
+        action_name = str(getattr(action, "name", "") or "")
+        with self._lock:
+            entry = self._action_runs.get(action_name)
+            if entry is None:
+                return
+            run_id, _start = entry
+        retry_event = {
+            f"retry_attempt_{attempt}": {
+                "exc_type": type(exception).__name__,
+                "exc_message": str(exception),
+                "backoff_ms": backoff_ms,
+            }
+        }
+        self._safe(
+            "update_run",
+            self._client.update_run,
+            run_id,
+            extra={"metadata": retry_event},
+        )
+
+    def on_strategy_chosen(self, strategy_name: str) -> None:
+        """Record the routed strategy as metadata on the active root run."""
+        if self._disabled or self._client is None or self._root_run_id is None:
+            return
+        self._safe(
+            "update_run",
+            self._client.update_run,
+            self._root_run_id,
+            extra={"metadata": {"strategy_chosen": strategy_name}},
+        )
+
     def on_replan(self, reason: str, new_plan: Any) -> None:
         # The planner has fired on_plan_start already (which opened a
         # new root); this hook only updates that root's metadata with
@@ -476,6 +517,18 @@ class LangSmithTracer:
 
     async def aon_action_complete(self, result: Any) -> None:
         self.on_action_complete(result)
+
+    async def aon_action_retry(
+        self,
+        action: Any,
+        attempt: int,
+        exception: BaseException,
+        backoff_ms: float,
+    ) -> None:
+        self.on_action_retry(action, attempt, exception, backoff_ms)
+
+    async def aon_strategy_chosen(self, strategy_name: str) -> None:
+        self.on_strategy_chosen(strategy_name)
 
     async def aon_replan(self, reason: str, new_plan: Any) -> None:
         self.on_replan(reason, new_plan)

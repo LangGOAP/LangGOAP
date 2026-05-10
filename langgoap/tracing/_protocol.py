@@ -50,6 +50,31 @@ class PlanningTracer(Protocol):
         """
         ...
 
+    def on_action_retry(
+        self,
+        action: Any,
+        attempt: int,
+        exception: BaseException,
+        backoff_ms: float,
+    ) -> None:
+        """Called between retry attempts inside the executor.
+
+        Fires when an action's ``execute`` / ``aexecute`` raised, the
+        action's :class:`~langgoap.qos.ActionQos` policy approved a
+        retry, and the executor is about to sleep ``backoff_ms``
+        before re-invoking.  ``attempt`` is 1-indexed and refers to
+        the attempt that just failed.  Implementations must **never**
+        raise.
+        """
+        ...
+
+    def on_strategy_chosen(self, strategy_name: str) -> None:
+        """Called when :class:`~langgoap.planner.router.StrategyRouter`
+        picks a planning strategy.  ``strategy_name`` is the simple
+        class name.
+        """
+        ...
+
     def on_replan(self, reason: str, new_plan: Any) -> None: ...
 
     def on_goal_achieved(self, final_state: Any) -> None: ...
@@ -95,6 +120,16 @@ class PlanningTracer(Protocol):
     async def aon_action_start(self, action: Any, state: Any) -> None: ...
 
     async def aon_action_complete(self, result: Any) -> None: ...
+
+    async def aon_action_retry(
+        self,
+        action: Any,
+        attempt: int,
+        exception: BaseException,
+        backoff_ms: float,
+    ) -> None: ...
+
+    async def aon_strategy_chosen(self, strategy_name: str) -> None: ...
 
     async def aon_replan(self, reason: str, new_plan: Any) -> None: ...
 

@@ -75,6 +75,20 @@ class MultiTracer:
     def on_action_complete(self, result: Any) -> None:
         self._fan_sync("on_action_complete", result)
 
+    def on_action_retry(
+        self,
+        action: Any,
+        attempt: int,
+        exception: BaseException,
+        backoff_ms: float,
+    ) -> None:
+        self._fan_sync(
+            "on_action_retry", action, attempt, exception, backoff_ms
+        )
+
+    def on_strategy_chosen(self, strategy_name: str) -> None:
+        self._fan_sync("on_strategy_chosen", strategy_name)
+
     def on_replan(self, reason: str, new_plan: Any) -> None:
         self._fan_sync("on_replan", reason, new_plan)
 
@@ -120,6 +134,20 @@ class MultiTracer:
 
     async def aon_action_complete(self, result: Any) -> None:
         await self._fan_async("aon_action_complete", result)
+
+    async def aon_action_retry(
+        self,
+        action: Any,
+        attempt: int,
+        exception: BaseException,
+        backoff_ms: float,
+    ) -> None:
+        await self._fan_async(
+            "aon_action_retry", action, attempt, exception, backoff_ms
+        )
+
+    async def aon_strategy_chosen(self, strategy_name: str) -> None:
+        await self._fan_async("aon_strategy_chosen", strategy_name)
 
     async def aon_replan(self, reason: str, new_plan: Any) -> None:
         await self._fan_async("aon_replan", reason, new_plan)
