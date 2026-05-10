@@ -9,7 +9,10 @@ After each action execution the observer decides whether to:
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from langgoap.termination import TerminationPolicy
 
 from langgraph.graph import END
 from langgraph.types import Command
@@ -74,7 +77,16 @@ def _is_goal_satisfied(goal: GoalSpec, world_state: dict[str, Any]) -> bool:
     ``k in world_state`` must be checked first because ``dict.get(k)`` returns
     ``None`` for missing keys, which would incorrectly satisfy a ``None``-valued
     goal condition when the key is simply absent.
+
+    :class:`~langgoap.planner.utility.NirvanaGoal` instances are
+    explicitly never satisfied — utility-AI agents drive themselves
+    forward without a completion criterion and the loop ends only when
+    the planner runs out of applicable actions.
     """
+    from langgoap.planner.utility import is_nirvana
+
+    if is_nirvana(goal):
+        return False
     return all(
         k in world_state and world_state[k] == v for k, v in goal.conditions.items()
     )
@@ -165,11 +177,51 @@ class GoapObserver:
         *,
         tracer: PlanningTracer | None = None,
         history: StoreExecutionHistory | None = None,
+        termination_policies: "list[TerminationPolicy] | None" = None,
     ) -> None:
         self._actions = actions or []
         # See ``GoapExecutor.__init__`` for the SafeTracerProxy rationale.
         self._tracer: PlanningTracer = SafeTracerProxy(tracer or NullTracer())
         self._history = history
+        self._termination_policies: list[TerminationPolicy] = (
+            list(termination_policies) if termination_policies else []
+        )
+
+    def _consult_termination(
+        self, state: GoapState
+    ) -> Command[str] | None:
+        """Return a terminal Command if any policy fires, else ``None``.
+
+        Each policy call is wrapped in try/except so a misbehaving
+        user policy never crashes the observer — termination is a
+        routing decision, not a place to leak exceptions.
+        """
+        for policy in self._termination_policies:
+            try:
+                decision = policy.should_terminate(state)
+            except Exception as exc:
+                logger.warning(
+                    "Termination policy %r raised: %s — treating as no-op",
+                    getattr(policy, "name", type(policy).__name__),
+                    exc,
+                )
+                continue
+            if decision is not None:
+                logger.info(
+                    "Early termination by %s: %s",
+                    decision.policy_name,
+                    decision.reason,
+                )
+                return Command(
+                    goto=END,
+                    update={
+                        "status": "terminated",
+                        "replan_reason": (
+                            f"{decision.policy_name}: {decision.reason}"
+                        ),
+                    },
+                )
+        return None
 
     def __call__(self, state: GoapState) -> Command[str]:
         cmd = self._route(state)
@@ -190,7 +242,7 @@ class GoapObserver:
             status = update.get("status")
             if status == "goal_achieved":
                 self._tracer.on_goal_achieved(state.get("world_state", {}))
-            elif status in {"failed", "no_plan", "error"}:
+            elif status in {"failed", "no_plan", "error", "terminated"}:
                 reason = update.get("replan_reason") or status
                 self._tracer.on_plan_failed(reason, 0.0)
 
@@ -200,7 +252,7 @@ class GoapObserver:
             status = update.get("status")
             if status == "goal_achieved":
                 await self._tracer.aon_goal_achieved(state.get("world_state", {}))
-            elif status in {"failed", "no_plan", "error"}:
+            elif status in {"failed", "no_plan", "error", "terminated"}:
                 reason = update.get("replan_reason") or status
                 await self._tracer.aon_plan_failed(reason, 0.0)
 
@@ -263,6 +315,14 @@ class GoapObserver:
         plan_obj: Plan | None = state.get("plan")
         current_step: int = state.get("current_step", 0)
         status: str = state.get("status", "")
+
+        # Termination policies short-circuit everything else: a hit
+        # cost ceiling or wall-clock budget must beat the goal-satisfied
+        # check below so a run that overshoots its budget while
+        # incidentally finishing still surfaces the termination reason.
+        terminate_cmd = self._consult_termination(state)
+        if terminate_cmd is not None:
+            return terminate_cmd
 
         if raw_goal is None:
             return Command(

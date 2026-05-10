@@ -84,6 +84,7 @@ from langgoap.planner.types import Plan, PlanMetadata
 from langgoap.reflexion import Reflection
 from langgoap.score import BendableScore, HardSoftScore, Score, SimpleScore
 from langgoap.state import PlanningState
+from langgoap.types import ObjectiveDirection, ReplanStrategy
 
 __all__ = [
     "LANGGOAP_ALLOWED_MSGPACK_TYPES",
@@ -127,11 +128,13 @@ LANGGOAP_ALLOWED_MSGPACK_TYPES: tuple[type, ...] = (
     InfeasibilityExplanation,
     MultiGoal,
     NoPlanExplanation,
+    ObjectiveDirection,
     Plan,
     PlanMetadata,
     PlanningState,
     Reflection,
     RepairResult,
+    ReplanStrategy,
     ResourceShortfall,
     ResourceUsage,
     ScheduleEntry,
@@ -178,6 +181,20 @@ def _langgoap_msgpack_default(obj: Any) -> Any:
     """
     if isinstance(obj, MappingProxyType):
         return dict(obj)
+    if isinstance(obj, type):
+        # Class objects (e.g. Pydantic BaseModel subclasses stored on
+        # ActionSpec.require_human_approval as typed-form schemas) are
+        # serialized by qualified name and re-imported on decode.  The
+        # ``__import_class__`` marker tells the reconstructor to route
+        # to importlib rather than treating the entry as a constructor.
+        return ormsgpack.Ext(
+            EXT_CONSTRUCTOR_KW_ARGS,
+            _pack_ext_payload(
+                obj.__module__,
+                obj.__qualname__,
+                {"__import_class__": True},
+            ),
+        )
     if isinstance(obj, tuple):
         # Preserve tuple identity across the wire.  ormsgpack natively
         # encodes tuples as msgpack arrays, which decode as lists — so
@@ -278,6 +295,40 @@ def _merge_langgoap_allowlist(
 _SERDE_SENTINEL: Any = object()
 
 
+def _langgoap_unpack_ext_hook(
+    code: int, data: bytes, fallback: Any
+) -> Any:
+    """Custom Ext hook that intercepts the ``__import_class__`` marker.
+
+    When :func:`_langgoap_msgpack_default` encounters a class type it
+    emits an ``EXT_CONSTRUCTOR_KW_ARGS`` payload whose kwargs are
+    ``{"__import_class__": True}``.  The stock JsonPlusSerializer hook
+    would call ``cls(**kwargs)`` — wrong; the user wants the class
+    itself, not an instance.  This hook routes those payloads to
+    ``importlib`` instead, and falls back to the supplied parent hook
+    for every other Ext code or non-marker payload.
+    """
+    if code == EXT_CONSTRUCTOR_KW_ARGS:
+        try:
+            payload = ormsgpack.unpackb(data)
+        except Exception:
+            return fallback(code, data)
+        if (
+            isinstance(payload, list)
+            and len(payload) == 3
+            and isinstance(payload[2], dict)
+            and payload[2].get("__import_class__") is True
+        ):
+            import importlib
+
+            module = importlib.import_module(payload[0])
+            obj: Any = module
+            for part in payload[1].split("."):
+                obj = getattr(obj, part)
+            return obj
+    return fallback(code, data)
+
+
 class LangGoapSerializer(JsonPlusSerializer):
     """``JsonPlusSerializer`` subclass that supports LangGOAP state.
 
@@ -311,6 +362,16 @@ class LangGoapSerializer(JsonPlusSerializer):
             allowed_msgpack_modules=_merge_langgoap_allowlist(allowed_msgpack_modules),
             __unpack_ext_hook__=__unpack_ext_hook__,
         )
+        # Compose the parent's ext hook with our class-type interceptor
+        # so EXT_CONSTRUCTOR_KW_ARGS payloads carrying the
+        # ``__import_class__`` marker resolve via importlib instead of
+        # ``cls(**kwargs)``.
+        parent_hook = self._unpack_ext_hook
+
+        def composed_hook(code: int, data: bytes) -> Any:
+            return _langgoap_unpack_ext_hook(code, data, parent_hook)
+
+        self._unpack_ext_hook = composed_hook
 
     def dumps_typed(self, obj: Any) -> tuple[str, bytes]:
         if obj is None:
@@ -584,6 +645,8 @@ def _is_redis_serde(serde: Any) -> bool:
 
 def install_langgoap_serde(
     checkpointer: BaseCheckpointSaver,
+    *,
+    extra_allowed_types: tuple[type, ...] = (),
 ) -> BaseCheckpointSaver:
     """Replace the checkpointer's serde with a LangGOAP-aware variant.
 
@@ -616,6 +679,7 @@ def install_langgoap_serde(
     # the library-wide default and represents "user didn't specify an
     # allowlist", so we let LangGoapSerializer apply its strict default.
     init_kwargs: dict[str, Any] = {}
+    user_allowlist: Any = None
     if current is not None:
         if getattr(current, "pickle_fallback", False):
             init_kwargs["pickle_fallback"] = True
@@ -624,7 +688,22 @@ def install_langgoap_serde(
             init_kwargs["allowed_json_modules"] = allowed_json
         allowed_msgpack = getattr(current, "_allowed_msgpack_modules", None)
         if allowed_msgpack is not None and allowed_msgpack is not True:
-            init_kwargs["allowed_msgpack_modules"] = allowed_msgpack
+            user_allowlist = allowed_msgpack
+
+    # Caller-supplied extras (typically Pydantic form-binding classes
+    # referenced via ActionSpec.require_human_approval, harvested in
+    # GoapGraph.compile) merge with any user-supplied allowlist so the
+    # deserializer can reconstruct user-defined classes that the custom
+    # msgpack encoder emits as Ext payloads.
+    if extra_allowed_types:
+        if user_allowlist is None:
+            user_allowlist = tuple(extra_allowed_types)
+        elif user_allowlist is True:
+            pass
+        else:
+            user_allowlist = (*user_allowlist, *extra_allowed_types)
+    if user_allowlist is not None:
+        init_kwargs["allowed_msgpack_modules"] = user_allowlist
 
     if _is_redis_serde(current):
         cls = _get_langgoap_redis_serializer_cls()

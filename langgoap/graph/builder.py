@@ -30,6 +30,8 @@ from langgoap.tracing import PlanningTracer
 
 if TYPE_CHECKING:
     from langgoap.planner.strategy import PlanningStrategy
+    from langgoap.stuck import StuckHandler
+    from langgoap.termination import TerminationPolicy
 
 
 class GoapGraph:
@@ -110,6 +112,9 @@ class GoapGraph:
         record_expansions: bool = False,
         transition_model: TransitionModel | None = None,
         rng: random.Random | None = None,
+        stuck_handlers: "list[StuckHandler] | None" = None,
+        max_stuck_iterations: int = 3,
+        termination_policies: "list[TerminationPolicy] | None" = None,
     ) -> None:
         self.actions = actions
         self._strategy = strategy
@@ -121,6 +126,9 @@ class GoapGraph:
         self._record_expansions = record_expansions
         self._transition_model = transition_model
         self._rng = rng
+        self._stuck_handlers = stuck_handlers
+        self._max_stuck_iterations = max_stuck_iterations
+        self._termination_policies = termination_policies
 
     def compile(
         self,
@@ -158,7 +166,20 @@ class GoapGraph:
         # Literal[False]) to BaseCheckpointSaver, satisfying install_langgoap_serde's
         # parameter type without a cast or type: ignore.
         if isinstance(checkpointer, BaseCheckpointSaver):
-            install_langgoap_serde(checkpointer)
+            # Harvest user-defined Pydantic form classes referenced from
+            # ActionSpec.require_human_approval so the LangGOAP serde's
+            # allowlist permits them through msgpack round-trip.  Without
+            # this, the checkpointer would block deserialization and the
+            # form-binding gate would silently disappear after a resume.
+            extras: list[type] = []
+            for action in self.actions:
+                req = getattr(action, "require_human_approval", None)
+                if isinstance(req, type):
+                    extras.append(req)
+            install_langgoap_serde(
+                checkpointer,
+                extra_allowed_types=tuple(extras),
+            )
 
         builder = StateGraph(GoapState)
 
@@ -174,15 +195,21 @@ class GoapGraph:
             sensors=self._sensors,
             resolvers=self._resolvers,
             record_expansions=self._record_expansions,
+            stuck_handlers=self._stuck_handlers,
+            max_stuck_iterations=self._max_stuck_iterations,
         )
         executor = GoapExecutor(
             tracer=self._tracer,
             guards=self._guards,
             transition_model=self._transition_model,
             rng=self._rng,
+            actions=self.actions,
         )
         observer = GoapObserver(
-            self.actions, tracer=self._tracer, history=self._history
+            self.actions,
+            tracer=self._tracer,
+            history=self._history,
+            termination_policies=self._termination_policies,
         )
         builder.add_node(
             "planner",
