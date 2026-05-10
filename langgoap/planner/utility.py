@@ -57,10 +57,16 @@ class NirvanaGoal(GoalSpec):
     """
 
     def __init__(self, **kwargs: Any) -> None:
-        # Carry through any GoalSpec kwargs the user provides
-        # (replan_strategy, max_replans, etc.) but ensure conditions
-        # is empty — Nirvana never has concrete satisfaction criteria.
+        # Carry through any GoalSpec kwargs the user provides but
+        # ensure conditions is empty — Nirvana never has concrete
+        # satisfaction criteria.  Flat policy kwargs
+        # (``replan_strategy=`` / ``priority=`` / ``max_replans=``)
+        # are bundled into ``policy=GoalPolicy(...)`` so callers do
+        # not need to construct the policy themselves.
+        from langgoap.goals import _bundle_policy_kwargs
+
         kwargs.setdefault("conditions", {})
+        kwargs = _bundle_policy_kwargs(kwargs)
         super().__init__(**kwargs)
 
 
@@ -121,7 +127,15 @@ class UtilityStrategy:
         actions: list[ActionSpec],
         *,
         blacklisted_actions: list[str] | None = None,
+        prior_plan: Plan | None = None,
+        current_step: int = 0,
     ) -> Plan | None:
+        # ``prior_plan`` / ``current_step`` are accepted for protocol
+        # compatibility with the wider PlanningStrategy contract used by
+        # repair-style strategies.  Utility planning is greedy 1-step
+        # so prior plans are always discarded — there is nothing to
+        # patch.
+        del prior_plan, current_step
         t0 = time.perf_counter()
         blacklist = set(blacklisted_actions or ())
         applicable = [
