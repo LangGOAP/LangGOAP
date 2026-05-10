@@ -98,9 +98,7 @@ class TestSlipperyTransitionModel:
             cliff_walking_4x12,
         )
 
-        model = SlipperyTransitionModel(
-            topology=cliff_walking_4x12(), slip_prob=0.2
-        )
+        model = SlipperyTransitionModel(topology=cliff_walking_4x12(), slip_prob=0.2)
         assert isinstance(model, TransitionModel)
 
     def test_expected_equals_declared_effects(self) -> None:
@@ -112,13 +110,9 @@ class TestSlipperyTransitionModel:
 
         topo = cliff_walking_4x12()
         model = SlipperyTransitionModel(topology=topo, slip_prob=0.2)
-        action = next(
-            a for a in make_gridworld_actions(topo) if a.name == "north"
-        )
+        action = next(a for a in make_gridworld_actions(topo) if a.name == "north")
         state = {"row": 2, "col": 3}
-        assert dict(model.expected(state, action)) == dict(
-            action.get_effects(state)
-        )
+        assert dict(model.expected(state, action)) == dict(action.get_effects(state))
 
     def test_sample_slip_frequency_matches_p(self) -> None:
         """Over many samples of a non-border move, the slip rate should
@@ -156,12 +150,8 @@ class TestSlipperyTransitionModel:
         north = next(a for a in make_gridworld_actions(topo) if a.name == "north")
         state = {"row": 2, "col": 5}
 
-        draws_a = [
-            dict(model.sample(state, north, random.Random(7))) for _ in range(5)
-        ]
-        draws_b = [
-            dict(model.sample(state, north, random.Random(7))) for _ in range(5)
-        ]
+        draws_a = [dict(model.sample(state, north, random.Random(7))) for _ in range(5)]
+        draws_b = [dict(model.sample(state, north, random.Random(7))) for _ in range(5)]
         assert draws_a == draws_b
 
 
@@ -239,6 +229,6 @@ class TestEpisodeRunner:
             max_steps=20,
             rng=random.Random(1),
         )
-        assert any(r == topo.cliff_reward for r in episode.rewards), (
-            f"expected at least one cliff-fall under p=1.0; rewards={episode.rewards}"
-        )
+        assert any(
+            r == topo.cliff_reward for r in episode.rewards
+        ), f"expected at least one cliff-fall under p=1.0; rewards={episode.rewards}"

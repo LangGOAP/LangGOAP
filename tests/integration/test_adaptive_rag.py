@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from langgoap import ActionSpec, GoalSpec, GoapGraph, ReplanStrategy
+from langgoap import ActionSpec, GoalPolicy, GoalSpec, GoapGraph, ReplanStrategy
 
 # ---------------------------------------------------------------------------
 # Deterministic stubs for GOAP mechanics tests.
@@ -193,7 +193,7 @@ class TestAdaptiveRagGoapified:
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(
                 conditions={"answer_ready": True},
-                replan_strategy=ReplanStrategy.ON_DEVIATION,
+                policy=GoalPolicy(replan_strategy=ReplanStrategy.ON_DEVIATION),
             ),
             world_state={"has_question": True, "question": "obscure topic"},
         )

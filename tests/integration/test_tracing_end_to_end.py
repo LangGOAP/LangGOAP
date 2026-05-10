@@ -104,9 +104,7 @@ class _RecordingTracer:
     ) -> None:
         self.calls.append("aon_search_expand")
 
-    async def aon_search_dead_end(
-        self, reason: str, detail: dict[str, Any]
-    ) -> None:
+    async def aon_search_dead_end(self, reason: str, detail: dict[str, Any]) -> None:
         self.calls.append("aon_search_dead_end")
 
     async def aon_search_complete(

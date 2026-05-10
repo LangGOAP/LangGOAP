@@ -357,6 +357,93 @@ class StochasticRollout:
         return _shape_reward(cursor, goal, heuristic=self.scalar_heuristic)
 
 
+@dataclass(frozen=True, slots=True)
+class MCTSExploration:
+    """Search budget and exploration knobs for :class:`MCTSStrategy`.
+
+    Budgets:
+        iterations: Hard cap on tree iterations per ``plan()`` call.
+        wall_clock_ms: Hard cap on wall-clock per call.  Zero
+            disables the check.  Whichever budget trips first ends
+            the search; at least one must be > 0.
+
+    Knobs:
+        c: UCB1 exploration constant.  LATS default \u221a2.
+        rollout_depth: Max simulation horizon per rollout.
+        seed: Base seed for the RNG driving random tie-breaks and
+            the default :class:`RandomRollout` fallback.
+    """
+
+    iterations: int = 200
+    wall_clock_ms: float = 200.0
+    c: float = math.sqrt(2)
+    rollout_depth: int = 4
+    seed: int = 0
+
+    def __post_init__(self) -> None:
+        if self.iterations < 0:
+            raise ValueError("iterations must be >= 0")
+        if self.wall_clock_ms < 0:
+            raise ValueError("wall_clock_ms must be >= 0")
+        if self.iterations == 0 and self.wall_clock_ms == 0:
+            raise ValueError("at least one of iterations / wall_clock_ms must be > 0")
+        if self.c <= 0:
+            raise ValueError("UCB1 exploration constant c must be > 0")
+        if self.rollout_depth < 0:
+            raise ValueError("rollout_depth must be >= 0")
+
+
+@dataclass(frozen=True, slots=True)
+class MCTSReuseConfig:
+    """Tree-reuse and variable-depth selection config.
+
+    Attributes:
+        reuse_tree: Soemers\u2013Winands CIG 2016 \xa7IV-B tree reuse.  When
+            ``True``, the subtree rooted at the action played last
+            tick is retained across consecutive :meth:`MCTSStrategy.plan`
+            calls via :meth:`MCTSStrategy.advance`; stored visit
+            counts are multiplied by ``tree_reuse_decay`` before the
+            next search.
+        tree_reuse_decay: Decay factor in ``[0, 1]`` applied to
+            carry-over visits.  Ignored when ``reuse_tree`` is False.
+        anytime_fallback: Kocsis\u2013Szepesv\xe1ri "robust" anytime
+            fallback: when ``True`` and no goal-terminal leaf was
+            discovered, return a partial plan whose first action is
+            the most-visited root child.
+        path_length_budget: Pepels BSc \xa74.1 variable-depth selection
+            budget.  When set, selection stops once the cumulative
+            action cost along the root\u2192leaf path reaches this value.
+        force_deterministic_tree: Kocsis\u2013Szepesv\xe1ri 2006
+            Determinized UCT.  When ``True``, the tree expands through
+            the deterministic path even when a stochastic
+            :class:`TransitionModel` is supplied.
+    """
+
+    reuse_tree: bool = False
+    tree_reuse_decay: float = 0.6
+    anytime_fallback: bool = False
+    path_length_budget: int | None = None
+    force_deterministic_tree: bool = False
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.tree_reuse_decay <= 1.0:
+            raise ValueError("tree_reuse_decay must be in [0, 1]")
+        if self.path_length_budget is not None and self.path_length_budget < 0:
+            raise ValueError("path_length_budget must be >= 0 or None")
+
+
+@dataclass(slots=True)
+class MCTSTracingConfig:
+    """Observability config for :class:`MCTSStrategy`.
+
+    ``record_expansions`` is a no-op when ``tracer`` is ``None``;
+    both must be set for ``on_search_expand`` events to fire.
+    """
+
+    tracer: Any = None
+    record_expansions: bool = False
+
+
 @dataclass(slots=True)
 class MCTSStrategy:
     """Monte Carlo Tree Search planning strategy.
@@ -366,27 +453,21 @@ class MCTSStrategy:
     Adapted from LATS's ``select_node`` / ``expand_node`` /
     ``rollout`` / ``backpropagate`` quartet.
 
-    Budgets:
-        - ``iterations``: hard cap on tree iterations per ``plan()`` call.
-        - ``wall_clock_ms``: hard cap on wall-clock per call.  Zero
-          disables the check.  Whichever budget trips first ends the
-          search.
+    Configuration is grouped into three small dataclasses so callers
+    only construct what they need to override:
 
-    Knobs:
-        - ``c``: UCB1 exploration constant.  LATS default √2.
-        - ``rollout_depth``: max simulation horizon per rollout.
-        - ``rollout_policy``: injectable :class:`RolloutPolicy`.  If
-          ``None``, :class:`HeuristicRollout` is used.
-        - ``seed``: base seed for the RNG driving random tie-breaks
-          and the default :class:`RandomRollout` fallback.
+    * :class:`MCTSExploration` \u2014 search budget and UCB1 knobs.
+    * :class:`MCTSReuseConfig` \u2014 tree-reuse, variable-depth, anytime.
+    * :class:`MCTSTracingConfig` \u2014 observability.
+
+    Standalone fields are pluggable strategy components (rollout
+    policy, transition model, scalar heuristic) rather than flags.
     """
 
-    iterations: int = 200
-    wall_clock_ms: float = 200.0
-    c: float = math.sqrt(2)
-    rollout_depth: int = 4
+    exploration: MCTSExploration = field(default_factory=MCTSExploration)
+    reuse: MCTSReuseConfig = field(default_factory=MCTSReuseConfig)
+    tracing: MCTSTracingConfig = field(default_factory=MCTSTracingConfig)
     rollout_policy: RolloutPolicy | None = None
-    seed: int = 0
     transition_model: TransitionModel = field(
         default_factory=DeterministicTransitionModel
     )
@@ -396,47 +477,6 @@ class MCTSStrategy:
     # default rollout policy threads it through so UCB1 statistics
     # gain a continuous gradient on sparse-goal problems.
     scalar_heuristic: ScalarHeuristic | None = None
-    # Kocsis\u2013Szepesv\xe1ri ``robust'' anytime fallback: when ``True`` and
-    # no goal-terminal leaf was discovered, return a partial plan whose
-    # first action is the most-visited root child.  Required for deep
-    # MDP replanning loops where the tree cannot reach the goal within
-    # the per-tick budget; off by default so the infeasible-goal
-    # contract (``plan() -> None``) is preserved for classical GOAP.
-    anytime_fallback: bool = False
-    # Soemers\u2013Winands CIG 2016 \xa7IV-B tree reuse.  When ``True``, the
-    # subtree rooted at the action played last tick is retained across
-    # consecutive :meth:`plan` calls via :meth:`advance`; stored visit
-    # counts are multiplied by ``tree_reuse_decay`` \u2208 [0, 1] before the
-    # next search.  Off by default so today's cold-start behaviour is
-    # bit-identical.
-    reuse_tree: bool = False
-    tree_reuse_decay: float = 0.6
-    # Pepels BSc \xa74.1 variable-depth selection.  When set to an integer,
-    # selection stops descending and expansion short-circuits once the
-    # cumulative action cost along the root\u2192leaf path reaches this
-    # budget.  ``None`` (default) preserves today's edge-count-only
-    # semantics: the tree grows freely until ``rollout_depth`` and the
-    # iteration / wall-clock caps bound the search.
-    path_length_budget: int | None = None
-    # Kocsis\u2013Szepesv\xe1ri 2006 Determinized UCT / Kearns\u2013Mansour\u2013Ng 2002
-    # Sparse Sampling.  When ``True``, the tree expands through the
-    # deterministic ``_expand`` path even when a stochastic
-    # :class:`TransitionModel` is supplied \u2014 callers pair this with
-    # :class:`StochasticRollout` to surface transition noise via leaf
-    # sampling rather than chance-node branching.  On effectively
-    # deterministic problems (e.g. per-tick replanning with rare-event
-    # risks) this preserves the sample efficiency of the deterministic
-    # tree while still letting rollouts observe the noise.  Default
-    # ``False`` preserves today's chance-layer semantics.
-    force_deterministic_tree: bool = False
-    # Optional :class:`~langgoap.tracing.PlanningTracer` that receives
-    # ``on_search_expand`` / ``on_search_complete`` events when
-    # ``record_expansions`` is also ``True``.  Hooks are shared with
-    # A* via a semantic remap: ``g`` = visits, ``h`` = UCB1 score at
-    # selection time, ``f`` = running-mean value.  Zero-overhead
-    # default: no tracer is resolved unless both fields are set.
-    tracer: Any = None
-    record_expansions: bool = False
     # Post-search handle on the root of the last tree expanded by
     # :meth:`plan`.  Exposed so tests and observability hooks can
     # inspect chance-layer structure; ``None`` until ``plan`` has been
@@ -455,6 +495,26 @@ class MCTSStrategy:
         actions: list[ActionSpec],
         *,
         blacklisted_actions: list[str] | None = None,
+        prior_plan: Plan | None = None,
+        current_step: int = 0,
+    ) -> Plan | None:
+        del prior_plan, current_step  # MCTS rebuilds the search tree
+        return self._plan_with_tracer(
+            start,
+            goal,
+            actions,
+            blacklisted_actions=blacklisted_actions,
+            tracer=self.tracing.tracer,
+        )
+
+    def _plan_with_tracer(
+        self,
+        start: PlanningState,
+        goal: GoalSpec,
+        actions: list[ActionSpec],
+        *,
+        blacklisted_actions: list[str] | None,
+        tracer: Any,
     ) -> Plan | None:
         if start.satisfies(goal.conditions):
             return Plan(
@@ -470,11 +530,11 @@ class MCTSStrategy:
             for a in actions
             if not blacklisted_actions or a.name not in blacklisted_actions
         ]
-        rng = random.Random(self.seed)
+        rng = random.Random(self.exploration.seed)
         policy: RolloutPolicy = self.rollout_policy or self._default_rollout(rng)
 
         if (
-            self.reuse_tree
+            self.reuse.reuse_tree
             and self._carryover_root is not None
             and self._carryover_root.state == start
         ):
@@ -484,15 +544,13 @@ class MCTSStrategy:
             root.untried_actions = _applicable_actions(start, filtered_actions)
         self._carryover_root = None
         self._last_root = root
-        stochastic = not self.force_deterministic_tree and not isinstance(
+        stochastic = not self.reuse.force_deterministic_tree and not isinstance(
             self.transition_model, DeterministicTransitionModel
         )
 
-        record = self.tracer is not None and self.record_expansions
-        on_expand = getattr(self.tracer, "on_search_expand", None) if record else None
-        on_complete = (
-            getattr(self.tracer, "on_search_complete", None) if record else None
-        )
+        record = tracer is not None and self.tracing.record_expansions
+        on_expand = getattr(tracer, "on_search_expand", None) if record else None
+        on_complete = getattr(tracer, "on_search_complete", None) if record else None
         # Stable integer ids for tracer events; root is untracked so the
         # first expanded child reports ``parent_id=None``.  ``id(node)``
         # is safe within a single ``plan`` call because nodes are retained
@@ -501,20 +559,24 @@ class MCTSStrategy:
         id_counter = [0]
 
         t0 = time.monotonic()
-        wall_budget_s = self.wall_clock_ms / 1000.0 if self.wall_clock_ms else 0.0
+        wall_budget_s = (
+            self.exploration.wall_clock_ms / 1000.0
+            if self.exploration.wall_clock_ms
+            else 0.0
+        )
         iters_done = 0
-        for i in range(self.iterations):
+        for i in range(self.exploration.iterations):
             if wall_budget_s and (time.monotonic() - t0) >= wall_budget_s:
                 break
             if stochastic:
                 leaf = _select_stochastic(
                     root,
-                    c=self.c,
+                    c=self.exploration.c,
                     actions=filtered_actions,
                     rng=rng,
                     model=self.transition_model,
                     goal=goal,
-                    path_length_budget=self.path_length_budget,
+                    path_length_budget=self.reuse.path_length_budget,
                 )
                 leaf = _expand_stochastic(
                     leaf,
@@ -522,11 +584,13 @@ class MCTSStrategy:
                     actions=filtered_actions,
                     rng=rng,
                     model=self.transition_model,
-                    path_length_budget=self.path_length_budget,
+                    path_length_budget=self.reuse.path_length_budget,
                 )
             else:
                 leaf = _select(
-                    root, c=self.c, path_length_budget=self.path_length_budget
+                    root,
+                    c=self.exploration.c,
+                    path_length_budget=self.reuse.path_length_budget,
                 )
                 leaf = _expand(
                     leaf,
@@ -534,7 +598,7 @@ class MCTSStrategy:
                     actions=filtered_actions,
                     rng=rng,
                     model=self.transition_model,
-                    path_length_budget=self.path_length_budget,
+                    path_length_budget=self.reuse.path_length_budget,
                 )
             reward = policy.rollout(
                 state=leaf.state, goal=goal, actions=filtered_actions
@@ -542,14 +606,16 @@ class MCTSStrategy:
             backpropagate(leaf, reward=reward)
             iters_done = i + 1
             if on_expand is not None and leaf is not root:
-                _emit_mcts_expand(on_expand, leaf, node_ids, id_counter, self.c)
+                _emit_mcts_expand(
+                    on_expand, leaf, node_ids, id_counter, self.exploration.c
+                )
 
         plan = _extract_plan(
             root,
             goal=goal,
             start=start,
             model=self.transition_model,
-            anytime_fallback=self.anytime_fallback,
+            anytime_fallback=self.reuse.anytime_fallback,
         )
         elapsed_ms = (time.monotonic() - t0) * 1000
         if on_complete is not None:
@@ -574,6 +640,8 @@ class MCTSStrategy:
         actions: list[ActionSpec],
         *,
         blacklisted_actions: list[str] | None = None,
+        prior_plan: Plan | None = None,
+        current_step: int = 0,
     ) -> Plan | None:
         """Async variant of :meth:`plan` with parity on tracer hooks.
 
@@ -581,23 +649,25 @@ class MCTSStrategy:
         point exists to satisfy the dual sync/async pattern enforced
         across LangGoap.  When a tracer is attached with async hooks
         (``aon_search_expand`` / ``aon_search_complete``), the sync
-        variants are invoked through :meth:`plan` and then re-fired
-        through the async hooks by temporarily swapping the tracer
-        reference with a capture proxy.
+        search runs through a local capture proxy and the recorded
+        events are re-fired through the real tracer's async hooks.
+        ``self.tracing.tracer`` is never mutated, so concurrent callers on the
+        same strategy instance do not clobber each other.
         """
-        if not (self.tracer is not None and self.record_expansions):
+        del prior_plan, current_step  # MCTS rebuilds the search tree
+        real_tracer = self.tracing.tracer
+        if not (real_tracer is not None and self.tracing.record_expansions):
             return self.plan(
                 start, goal, actions, blacklisted_actions=blacklisted_actions
             )
         proxy = _AsyncCaptureTracer()
-        real_tracer = self.tracer
-        self.tracer = proxy
-        try:
-            plan = self.plan(
-                start, goal, actions, blacklisted_actions=blacklisted_actions
-            )
-        finally:
-            self.tracer = real_tracer
+        plan = self._plan_with_tracer(
+            start,
+            goal,
+            actions,
+            blacklisted_actions=blacklisted_actions,
+            tracer=proxy,
+        )
         for event in proxy.events:
             kind = event[0]
             if kind == "expand":
@@ -659,7 +729,7 @@ class MCTSStrategy:
             return
 
         promoted.parent = None
-        _decay_tree(promoted, self.tree_reuse_decay)
+        _decay_tree(promoted, self.reuse.tree_reuse_decay)
         self._carryover_root = promoted
 
     def _default_rollout(self, rng: random.Random) -> "RolloutPolicy":
@@ -675,11 +745,11 @@ class MCTSStrategy:
         """
         if isinstance(self.transition_model, DeterministicTransitionModel):
             return HeuristicRollout(
-                max_depth=self.rollout_depth,
+                max_depth=self.exploration.rollout_depth,
                 scalar_heuristic=self.scalar_heuristic,
             )
         return StochasticRollout(
-            max_depth=self.rollout_depth,
+            max_depth=self.exploration.rollout_depth,
             model=self.transition_model,
             rng=rng,
             scalar_heuristic=self.scalar_heuristic,
@@ -772,13 +842,20 @@ def _path_cost(node: MCTSNode) -> float:
     Used to enforce Pepels BSc \xa74.1 variable-depth selection.  Nodes
     with no parent contribute zero; chance-node parents are skipped
     because they carry the same action as the decision parent just
-    above them in the alternating tree layout.
+    above them in the alternating tree layout.  Callable costs are
+    evaluated against the action's pre-state \u2014 the closest decision
+    ancestor's ``state`` \u2014 matching :meth:`ActionSpec.get_cost`
+    semantics elsewhere in the planner.
     """
     total = 0.0
     cur: "MCTSNode | ChanceNode | None" = node
     while cur is not None:
         if isinstance(cur, MCTSNode) and cur.action is not None:
-            total += float(cur.action.cost) if not callable(cur.action.cost) else 0.0
+            pre = cur.parent
+            while pre is not None and not isinstance(pre, MCTSNode):
+                pre = pre.parent
+            world = pre.state.to_dict() if pre is not None else {}
+            total += float(cur.action.get_cost(world))
         cur = cur.parent
     return total
 

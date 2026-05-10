@@ -16,7 +16,7 @@ import pytest
 from langgraph.graph import END
 
 from langgoap.actions import ActionSpec, GoapAction, goap_action
-from langgoap.goals import GoalSpec
+from langgoap.goals import GoalPolicy, GoalSpec
 from langgoap.graph.nodes import (
     GoapObserver,
     GoapPlanner,
@@ -242,7 +242,7 @@ class TestObserverBlacklisting:
             "world_state": {},
             "goal": GoalSpec(
                 conditions={"x": True},
-                replan_strategy=ReplanStrategy.NEVER,
+                policy=GoalPolicy(replan_strategy=ReplanStrategy.NEVER),
             ),
             "plan": _make_plan(actions[0]),
             "current_step": 0,

@@ -477,3 +477,63 @@ class TestRepairStrategy:
         result = strategy.plan(start, goal, [a])
 
         assert result is None
+
+    def test_repair_strategy_satisfies_planning_strategy_protocol(self) -> None:
+        """LSP: ``RepairStrategy`` must be substitutable for the
+        :class:`PlanningStrategy` Protocol; the protocol itself was
+        widened to accept the optional ``prior_plan`` / ``current_step``
+        kwargs that repair-style strategies need.
+        """
+        from langgoap.planner.strategy import PlanningStrategy
+
+        assert isinstance(RepairStrategy(), PlanningStrategy)
+
+    def test_planner_node_forwards_prior_plan_on_replan(self) -> None:
+        """The planner node must thread ``prior_plan`` / ``current_step``
+        into the strategy on replans, otherwise ``RepairStrategy`` can
+        never actually repair a plan via the standard graph entry point.
+        """
+        from langgoap.graph.nodes import GoapPlanner
+        from langgoap.graph.state import GoapState
+
+        captured: list[dict[str, Any]] = []
+
+        class _CapturingStrategy:
+            def plan(
+                self,
+                start: PlanningState,
+                goal: GoalSpec,
+                actions: list[ActionSpec],
+                *,
+                blacklisted_actions: list[str] | None = None,
+                prior_plan: Plan | None = None,
+                current_step: int = 0,
+            ) -> Plan | None:
+                captured.append(
+                    {"prior_plan": prior_plan, "current_step": current_step}
+                )
+                from langgoap.planner.astar import plan as ap
+
+                return ap(start, goal, actions, blacklisted_actions=blacklisted_actions)
+
+        a = make_action("a", pre={}, eff={"done": True})
+        goal = GoalSpec(conditions={"done": True})
+        prior = make_plan_from_start(PlanningState.from_dict({}), a)
+        planner = GoapPlanner([a], strategy=_CapturingStrategy())
+
+        # Initial plan: no prior_plan forwarded.
+        s0: GoapState = {"world_state": {}, "goal": goal}
+        planner(s0)
+        # Replan: state already carries a plan + current_step.
+        s1: GoapState = {
+            "world_state": {},
+            "goal": goal,
+            "plan": prior,
+            "current_step": 1,
+        }
+        planner(s1)
+
+        assert captured[0]["prior_plan"] is None
+        assert captured[0]["current_step"] == 0
+        assert captured[1]["prior_plan"] is prior
+        assert captured[1]["current_step"] == 1

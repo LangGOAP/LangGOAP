@@ -99,6 +99,23 @@ async def _run_sensor_async(
     return await loop.run_in_executor(None, sensor.sense, world_state)
 
 
+def _record_sensor_result(
+    results: list[tuple[str, dict[str, Any]]],
+    world_state: dict[str, Any],
+    name: str,
+    updates: dict[str, Any],
+) -> None:
+    """Append ``(name, updates)`` and merge into ``world_state`` in place.
+
+    Shared between the sync and async loop drivers so the post-call
+    bookkeeping cannot diverge.  Sequential execution (each sensor sees
+    the cumulative state from prior sensors) is enforced here by the
+    in-place ``world_state.update`` rather than by the loop drivers.
+    """
+    results.append((name, updates))
+    world_state.update(updates)
+
+
 def run_sensors_sync(
     sensors: list[Sensor | AsyncSensor],
     world_state: dict[str, Any],
@@ -111,9 +128,7 @@ def run_sensors_sync(
     results: list[tuple[str, dict[str, Any]]] = []
     for sensor in sensors:
         try:
-            if hasattr(sensor, "sense"):
-                updates = sensor.sense(world_state)
-            else:
+            if not hasattr(sensor, "sense"):
                 # AsyncSensor-only — skip in sync path with a warning.
                 logger.warning(
                     "Sensor %r is async-only; skipping in sync path. "
@@ -121,8 +136,9 @@ def run_sensors_sync(
                     sensor.name,
                 )
                 continue
-            results.append((sensor.name, updates))
-            world_state.update(updates)
+            _record_sensor_result(
+                results, world_state, sensor.name, sensor.sense(world_state)
+            )
         except Exception as exc:
             logger.warning("Sensor %r raised: %s", sensor.name, exc)
     return results
@@ -140,7 +156,7 @@ async def run_sensors_async(
     rest.
 
     **Execution order**: sensors are awaited *sequentially* (one at a time).
-    This is intentional — each sensor receives the cumulative ``world_state``
+    This is intentional \u2014 each sensor receives the cumulative ``world_state``
     that includes all updates from sensors that ran before it, enabling
     dependent sensor chains (e.g. sensor B reads the value written by sensor
     A).  If your sensors are fully independent and latency is critical, run
@@ -150,9 +166,12 @@ async def run_sensors_async(
     results: list[tuple[str, dict[str, Any]]] = []
     for sensor in sensors:
         try:
-            updates = await _run_sensor_async(sensor, world_state)
-            results.append((sensor.name, updates))
-            world_state.update(updates)
+            _record_sensor_result(
+                results,
+                world_state,
+                sensor.name,
+                await _run_sensor_async(sensor, world_state),
+            )
         except Exception as exc:
             logger.warning("Sensor %r raised: %s", sensor.name, exc)
     return results

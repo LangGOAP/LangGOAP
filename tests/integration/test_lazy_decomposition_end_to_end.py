@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from langgoap.actions import ActionSpec
-from langgoap.goals import GoalSpec
+from langgoap.goals import GoalPolicy, GoalSpec
 from langgoap.graph.builder import GoapGraph
 from langgoap.planner.strategy import LazyDecompositionStrategy
 from langgoap.types import ReplanStrategy
@@ -35,8 +35,7 @@ def test_lazy_e2e_5_actions_lookahead_1_full_loop() -> None:
     actions = _make_chain_actions(5)
     goal = GoalSpec(
         conditions={"step_5": True},
-        replan_strategy=ReplanStrategy.EVERY_ACTION,
-        max_replans=20,
+        policy=GoalPolicy(replan_strategy=ReplanStrategy.EVERY_ACTION, max_replans=20),
     )
 
     strategy = LazyDecompositionStrategy(lookahead=1)
@@ -56,8 +55,7 @@ def test_lazy_e2e_lookahead_2_fewer_replans() -> None:
     actions = _make_chain_actions(5)
     goal = GoalSpec(
         conditions={"step_5": True},
-        replan_strategy=ReplanStrategy.EVERY_ACTION,
-        max_replans=20,
+        policy=GoalPolicy(replan_strategy=ReplanStrategy.EVERY_ACTION, max_replans=20),
     )
 
     strategy = LazyDecompositionStrategy(lookahead=2)
@@ -74,8 +72,7 @@ def test_lazy_e2e_on_deviation_replan() -> None:
     actions = _make_chain_actions(4)
     goal = GoalSpec(
         conditions={"step_4": True},
-        replan_strategy=ReplanStrategy.ON_DEVIATION,
-        max_replans=20,
+        policy=GoalPolicy(replan_strategy=ReplanStrategy.ON_DEVIATION, max_replans=20),
     )
 
     strategy = LazyDecompositionStrategy(lookahead=1)
@@ -92,8 +89,7 @@ async def test_lazy_e2e_async_path() -> None:
     actions = _make_chain_actions(3)
     goal = GoalSpec(
         conditions={"step_3": True},
-        replan_strategy=ReplanStrategy.EVERY_ACTION,
-        max_replans=20,
+        policy=GoalPolicy(replan_strategy=ReplanStrategy.EVERY_ACTION, max_replans=20),
     )
 
     strategy = LazyDecompositionStrategy(lookahead=1)

@@ -113,9 +113,7 @@ def _clamp_cell(row: int, col: int, topo: GridworldTopology) -> tuple[int, int]:
     )
 
 
-def _compute_effect(
-    row: int, col: int, topo: GridworldTopology
-) -> dict[str, Any]:
+def _compute_effect(row: int, col: int, topo: GridworldTopology) -> dict[str, Any]:
     """Declared-effect resolver for a single move.
 
     Teleports back to ``start`` on cliff entry, flags terminal on hole
@@ -231,9 +229,7 @@ class SlipperyTransitionModel:
         return left if (draw / max(self.slip_prob, 1e-12)) < 0.5 else right
 
 
-def _reward_for_cell(
-    row: int, col: int, topo: GridworldTopology
-) -> float:
+def _reward_for_cell(row: int, col: int, topo: GridworldTopology) -> float:
     """Reward for stepping onto ``(row, col)`` (before teleport)."""
     if (row, col) in topo.cliffs:
         return topo.cliff_reward

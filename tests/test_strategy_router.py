@@ -18,7 +18,12 @@ import pytest
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import ConstraintSpec, GoalSpec
-from langgoap.planner.mcts import MCTSStrategy
+from langgoap.planner.mcts import (
+    MCTSExploration,
+    MCTSReuseConfig,
+    MCTSStrategy,
+    MCTSTracingConfig,
+)
 from langgoap.planner.strategy import AStarStrategy, PlanningStrategy
 from langgoap.planner.transitions import (
     DeterministicTransitionModel,
@@ -442,7 +447,12 @@ class TestStrategyRouterEndToEnd:
         against ``frozen_lake_4x4`` \u2014 i.e. the full stack composes
         without the notebook having to patch anything.
         """
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
         from langgoap.planner.router import (
             RuleBasedClassifier,
             StrategyRouter,
@@ -470,12 +480,11 @@ class TestStrategyRouterEndToEnd:
             strategies={
                 "astar": AStarStrategy(),
                 "mcts": MCTSStrategy(
-                    iterations=256,
-                    rollout_depth=12,
-                    wall_clock_ms=500.0,
+                    exploration=MCTSExploration(
+                        iterations=256, rollout_depth=12, wall_clock_ms=500.0, seed=7
+                    ),
+                    reuse=MCTSReuseConfig(anytime_fallback=True),
                     transition_model=model,
-                    anytime_fallback=True,
-                    seed=7,
                 ),
             },
             classifier=RuleBasedClassifier(),

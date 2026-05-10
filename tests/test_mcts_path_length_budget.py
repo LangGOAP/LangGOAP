@@ -1,4 +1,4 @@
-"""Unit tests for ``MCTSStrategy.path_length_budget`` (Pepels BSc §4.1).
+"""Unit tests for ``MCTSStrategy.reuse.path_length_budget`` (Pepels BSc §4.1).
 
 When actions carry variable ``cost`` (e.g. junction-graph corridor
 traversals whose cost is the number of primitive steps), depth-in-
@@ -15,7 +15,12 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from langgoap import ActionSpec, GoalSpec
-from langgoap.planner.mcts import MCTSStrategy
+from langgoap.planner.mcts import (
+    MCTSExploration,
+    MCTSReuseConfig,
+    MCTSStrategy,
+    MCTSTracingConfig,
+)
 from langgoap.state import PlanningState
 
 
@@ -56,7 +61,9 @@ def _goal() -> GoalSpec:
 class TestPathLengthBudgetDefaultPreservesBehaviour:
     def test_default_none_reaches_goal_on_chain(self) -> None:
         actions = _ChainActions().build()
-        strategy = MCTSStrategy(iterations=400, wall_clock_ms=0.0, seed=0)
+        strategy = MCTSStrategy(
+            exploration=MCTSExploration(iterations=400, wall_clock_ms=0.0, seed=0)
+        )
         plan = strategy.plan(_start(), _goal(), actions)
         assert plan is not None
         assert [a.name for a in plan.actions] == [
@@ -73,10 +80,8 @@ class TestPathLengthBudgetStopsDescent:
     def test_budget_below_goal_cost_yields_no_plan(self) -> None:
         actions = _ChainActions().build()
         strategy = MCTSStrategy(
-            iterations=400,
-            wall_clock_ms=0.0,
-            seed=0,
-            path_length_budget=6,
+            exploration=MCTSExploration(iterations=400, wall_clock_ms=0.0, seed=0),
+            reuse=MCTSReuseConfig(path_length_budget=6),
         )
         plan = strategy.plan(_start(), _goal(), actions)
         assert plan is None
@@ -84,10 +89,8 @@ class TestPathLengthBudgetStopsDescent:
     def test_budget_exactly_at_goal_cost_still_reaches_goal(self) -> None:
         actions = _ChainActions().build()
         strategy = MCTSStrategy(
-            iterations=1000,
-            wall_clock_ms=0.0,
-            seed=0,
-            path_length_budget=15,
+            exploration=MCTSExploration(iterations=1000, wall_clock_ms=0.0, seed=0),
+            reuse=MCTSReuseConfig(path_length_budget=15),
         )
         plan = strategy.plan(_start(), _goal(), actions)
         assert plan is not None
@@ -96,11 +99,8 @@ class TestPathLengthBudgetStopsDescent:
     def test_last_root_has_no_descendants_past_budget(self) -> None:
         actions = _ChainActions().build()
         strategy = MCTSStrategy(
-            iterations=400,
-            wall_clock_ms=0.0,
-            seed=0,
-            path_length_budget=6,
-            anytime_fallback=True,
+            exploration=MCTSExploration(iterations=400, wall_clock_ms=0.0, seed=0),
+            reuse=MCTSReuseConfig(path_length_budget=6, anytime_fallback=True),
         )
         strategy.plan(_start(), _goal(), actions)
         root = strategy._last_root
@@ -148,11 +148,54 @@ class TestPathLengthBudgetStochastic:
     def test_budget_respected_under_nondeterministic_model(self) -> None:
         actions = _ChainActions().build()
         strategy = MCTSStrategy(
-            iterations=400,
-            wall_clock_ms=0.0,
-            seed=0,
-            path_length_budget=6,
+            exploration=MCTSExploration(iterations=400, wall_clock_ms=0.0, seed=0),
+            reuse=MCTSReuseConfig(path_length_budget=6),
             transition_model=_StochasticIdentityModel(),
         )
         plan = strategy.plan(_start(), _goal(), actions)
         assert plan is None
+
+
+class _CallableCostChain:
+    """Same five-hop chain, but each action's cost is a callable that
+    returns ``3.0`` regardless of state.  Exercises the dynamic-cost
+    branch of :func:`_path_cost`.
+    """
+
+    @staticmethod
+    def _cost(_world: Mapping[str, object]) -> float:
+        return 3.0
+
+    def build(self) -> list[ActionSpec]:
+        actions: list[ActionSpec] = []
+        for i in range(5):
+            actions.append(
+                ActionSpec(
+                    name=f"advance_{i}",
+                    preconditions={"pos": i},
+                    effects={"pos": i + 1},
+                    cost=self._cost,
+                )
+            )
+        return actions
+
+
+class TestPathLengthBudgetCallableCost:
+    def test_callable_cost_below_budget_yields_no_plan(self) -> None:
+        actions = _CallableCostChain().build()
+        strategy = MCTSStrategy(
+            exploration=MCTSExploration(iterations=400, wall_clock_ms=0.0, seed=0),
+            reuse=MCTSReuseConfig(path_length_budget=6),
+        )
+        plan = strategy.plan(_start(), _goal(), actions)
+        assert plan is None
+
+    def test_callable_cost_at_exact_budget_reaches_goal(self) -> None:
+        actions = _CallableCostChain().build()
+        strategy = MCTSStrategy(
+            exploration=MCTSExploration(iterations=1000, wall_clock_ms=0.0, seed=0),
+            reuse=MCTSReuseConfig(path_length_budget=15),
+        )
+        plan = strategy.plan(_start(), _goal(), actions)
+        assert plan is not None
+        assert plan.total_cost == 15.0

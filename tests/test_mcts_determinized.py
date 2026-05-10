@@ -1,4 +1,4 @@
-"""Failing tests for :attr:`MCTSStrategy.force_deterministic_tree`.
+"""Failing tests for :attr:`MCTSStrategy.reuse.force_deterministic_tree`.
 
 The chance-node layer added by ``test_mcts_chance_nodes`` branches the
 tree whenever ``TransitionModel.sample`` is consulted.  On planning
@@ -28,11 +28,17 @@ import pytest
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
-from langgoap.planner.mcts import MCTSStrategy, StochasticRollout
+from langgoap.planner.mcts import (
+    MCTSExploration,
+    MCTSReuseConfig,
+    MCTSStrategy,
+    MCTSTracingConfig,
+    StochasticRollout,
+)
 from langgoap.state import PlanningState
 
-
 # --- Fixtures --------------------------------------------------------
+
 
 @dataclass
 class _RiskyMDPModel:
@@ -90,16 +96,18 @@ def _pos_progress_heuristic(state: PlanningState, goal: GoalSpec) -> float:
 
 # --- API surface -----------------------------------------------------
 
+
 class TestForceDeterministicTreeAPI:
     def test_flag_defaults_false(self) -> None:
-        assert MCTSStrategy().force_deterministic_tree is False
+        assert MCTSStrategy().reuse.force_deterministic_tree is False
 
     def test_flag_is_settable(self) -> None:
-        strategy = MCTSStrategy(force_deterministic_tree=True)
-        assert strategy.force_deterministic_tree is True
+        strategy = MCTSStrategy(reuse=MCTSReuseConfig(force_deterministic_tree=True))
+        assert strategy.reuse.force_deterministic_tree is True
 
 
 # --- Dispatch behaviour ---------------------------------------------
+
 
 class TestDispatchBypassesChanceLayer:
     """With the flag on, the tree under a stochastic model has no
@@ -110,12 +118,10 @@ class TestDispatchBypassesChanceLayer:
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"pos": 0, "done": False})
         strategy = MCTSStrategy(
-            iterations=64,
-            rollout_depth=4,
-            seed=7,
+            exploration=MCTSExploration(iterations=64, rollout_depth=4, seed=7),
+            reuse=MCTSReuseConfig(force_deterministic_tree=True),
             transition_model=model,
             scalar_heuristic=_pos_progress_heuristic,
-            force_deterministic_tree=True,
         )
         strategy.plan(start, goal, _risky_vs_safe_actions())
         root = strategy._last_root
@@ -124,9 +130,9 @@ class TestDispatchBypassesChanceLayer:
             "force_deterministic_tree=True must suppress chance-node "
             f"expansion; got {[c.action.name for c in root.chance_children]}"
         )
-        assert len(root.children) >= 1, (
-            "tree must still expand via the deterministic path"
-        )
+        assert (
+            len(root.children) >= 1
+        ), "tree must still expand via the deterministic path"
 
     def test_default_false_preserves_chance_children(self) -> None:
         """Regression guard: the existing chance-node dispatch must be
@@ -135,9 +141,7 @@ class TestDispatchBypassesChanceLayer:
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"pos": 0, "done": False})
         strategy = MCTSStrategy(
-            iterations=64,
-            rollout_depth=4,
-            seed=7,
+            exploration=MCTSExploration(iterations=64, rollout_depth=4, seed=7),
             transition_model=model,
             scalar_heuristic=_pos_progress_heuristic,
         )
@@ -151,6 +155,7 @@ class TestDispatchBypassesChanceLayer:
 
 
 # --- End-to-end Determinized MCTS -----------------------------------
+
 
 class TestDeterminizedMCTSWithStochasticRollout:
     """Determinized UCT: deterministic tree, stochastic rollouts.
@@ -173,18 +178,16 @@ class TestDeterminizedMCTSWithStochasticRollout:
             scalar_heuristic=_pos_progress_heuristic,
         )
         strategy = MCTSStrategy(
-            iterations=256,
-            rollout_depth=8,
-            seed=7,
+            exploration=MCTSExploration(iterations=256, rollout_depth=8, seed=7),
+            reuse=MCTSReuseConfig(force_deterministic_tree=True),
             transition_model=model,
             rollout_policy=rollout,
             scalar_heuristic=_pos_progress_heuristic,
-            force_deterministic_tree=True,
         )
         plan = strategy.plan(start, goal, _risky_vs_safe_actions())
-        assert plan is not None, (
-            "Determinized MCTS with stochastic rollouts must return a plan"
-        )
+        assert (
+            plan is not None
+        ), "Determinized MCTS with stochastic rollouts must return a plan"
         assert plan, "plan must be non-empty"
 
 
@@ -213,13 +216,11 @@ class TestDeterminizedUCTMatchesChanceNodeAtEqualBudget:
             scalar_heuristic=_pos_progress_heuristic,
         )
         strategy = MCTSStrategy(
-            iterations=256,
-            rollout_depth=8,
-            seed=seed,
+            exploration=MCTSExploration(iterations=256, rollout_depth=8, seed=seed),
+            reuse=MCTSReuseConfig(force_deterministic_tree=force_deterministic),
             transition_model=model,
             rollout_policy=rollout,
             scalar_heuristic=_pos_progress_heuristic,
-            force_deterministic_tree=force_deterministic,
         )
         plan = strategy.plan(start, goal, _risky_vs_safe_actions())
         assert plan is not None and plan.actions
@@ -232,17 +233,15 @@ class TestDeterminizedUCTMatchesChanceNodeAtEqualBudget:
         4 steps).  Both dispatch modes must reliably return a plan
         across a fan of seeds."""
         for seed in (0, 1, 2, 3, 7):
-            det_first, det_val = self._plan_outcome(
-                force_deterministic=True, seed=seed
-            )
+            det_first, det_val = self._plan_outcome(force_deterministic=True, seed=seed)
             chance_first, chance_val = self._plan_outcome(
                 force_deterministic=False, seed=seed
             )
             assert det_first in (0, 1)
             assert chance_first in (0, 1)
-            assert -1.0 <= det_val <= 1.0, (
-                f"determinized root value out of range: {det_val}"
-            )
-            assert -1.0 <= chance_val <= 1.0, (
-                f"chance-node root value out of range: {chance_val}"
-            )
+            assert (
+                -1.0 <= det_val <= 1.0
+            ), f"determinized root value out of range: {det_val}"
+            assert (
+                -1.0 <= chance_val <= 1.0
+            ), f"chance-node root value out of range: {chance_val}"

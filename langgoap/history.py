@@ -257,20 +257,26 @@ class StoreExecutionHistory:
             return []
         return list(value.get("execution_ids", []))
 
-    def _push_id(self, namespace: tuple[str, ...], key: str, execution_id: str) -> None:
-        ids = self._read_ids(namespace, key)
+    def _bounded_id_list(self, ids: list[str], execution_id: str) -> list[str]:
+        """Prepend ``execution_id`` and truncate to the index-limit window.
+
+        Shared between sync and async push paths so the bounding logic
+        (most-recent-first ordering, ``index_limit`` cap) cannot diverge
+        across the two surfaces.
+        """
         ids.insert(0, execution_id)
         if len(ids) > self._index_limit:
             ids = ids[: self._index_limit]
+        return ids
+
+    def _push_id(self, namespace: tuple[str, ...], key: str, execution_id: str) -> None:
+        ids = self._bounded_id_list(self._read_ids(namespace, key), execution_id)
         self._store.put(namespace, key, {"execution_ids": ids})
 
     async def _apush_id(
         self, namespace: tuple[str, ...], key: str, execution_id: str
     ) -> None:
-        ids = await self._aread_ids(namespace, key)
-        ids.insert(0, execution_id)
-        if len(ids) > self._index_limit:
-            ids = ids[: self._index_limit]
+        ids = self._bounded_id_list(await self._aread_ids(namespace, key), execution_id)
         await self._store.aput(namespace, key, {"execution_ids": ids})
 
     def _fetch_records(self, ids: list[str], limit: int) -> list[ExecutionRecord]:

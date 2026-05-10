@@ -19,8 +19,14 @@ from __future__ import annotations
 
 from langgoap.viz.ascii import render_ascii, render_ascii_gantt
 from langgoap.viz.dot import render_dot
-from langgoap.viz.jupyter import visualize
-from langgoap.viz.mermaid import render_mermaid, render_mermaid_gantt
+from langgoap.viz.jupyter import repr_mimebundle, visualize
+from langgoap.viz.mermaid import (
+    draw_gantt_png,
+    draw_mermaid_png,
+    render_mermaid,
+    render_mermaid_gantt,
+)
+from langgoap.viz.save import save_plan
 
 __all__ = [
     "render_mermaid",
@@ -29,4 +35,8 @@ __all__ = [
     "render_ascii",
     "render_ascii_gantt",
     "visualize",
+    "draw_mermaid_png",
+    "draw_gantt_png",
+    "repr_mimebundle",
+    "save_plan",
 ]

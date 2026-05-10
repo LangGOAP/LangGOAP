@@ -137,3 +137,54 @@ class TestScoreBaseClass:
     def test_abstract_is_feasible_raises(self) -> None:
         with pytest.raises(NotImplementedError):
             Score().is_feasible()  # type: ignore[call-arg]
+
+
+class TestComparisonContract:
+    """``functools.total_ordering`` derives the four ordering operators
+    from a single ``_compare_payload`` hook.  These tests pin the
+    contract so a fourth score subclass needs only one method (no
+    copy-paste of four type-check + compare blocks).
+    """
+
+    def test_subclass_only_needs_compare_payload(self) -> None:
+        from dataclasses import dataclass
+
+        @dataclass(frozen=True, order=False, slots=True)
+        class _TaggedScore(Score):
+            tag: int = 0
+
+            @property
+            def value(self) -> float:
+                return float(self.tag)
+
+            def is_feasible(self) -> bool:
+                return True
+
+            def _compare_payload(self) -> int:
+                return self.tag
+
+        a = _TaggedScore(tag=1)
+        b = _TaggedScore(tag=2)
+        # All four operators work without per-subclass overrides.
+        assert a < b
+        assert a <= b
+        assert b > a
+        assert b >= a
+        assert a != b
+        assert _TaggedScore(tag=1) == _TaggedScore(tag=1)
+        # Cross-subclass still raises.
+        with pytest.raises(TypeError, match="Cannot compare _TaggedScore"):
+            _ = a < SimpleScore(scalar=0.0)
+
+    def test_total_ordering_derives_le_gt_ge_from_lt(self) -> None:
+        """Spot-check that ``__le__``/``__gt__``/``__ge__`` come from
+        the base/total_ordering plumbing, not per-subclass overrides.
+        """
+        # The four operators must NOT be defined directly on the
+        # concrete subclasses any more — they are inherited from the
+        # @total_ordering-decorated Score base.
+        for cls in (SimpleScore, HardSoftScore, BendableScore):
+            assert "__lt__" not in cls.__dict__
+            assert "__le__" not in cls.__dict__
+            assert "__gt__" not in cls.__dict__
+            assert "__ge__" not in cls.__dict__

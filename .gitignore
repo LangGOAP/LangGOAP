@@ -99,9 +99,6 @@ pyrightconfig.json
 .idea/
 .vscode/
 
-# uv
-uv.lock
-
 # Research repos (large, cloned separately)
 research/repos/
 

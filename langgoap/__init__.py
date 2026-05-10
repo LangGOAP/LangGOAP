@@ -41,7 +41,14 @@ from langgoap.constraints import (
     ConstraintBuilder,
     ConstraintChain,
 )
-from langgoap.goals import ConstraintSpec, Goal, GoalSpec, MultiGoal, SoftGoal
+from langgoap.goals import (
+    ConstraintSpec,
+    Goal,
+    GoalPolicy,
+    GoalSpec,
+    MultiGoal,
+    SoftGoal,
+)
 from langgoap.graph.builder import GoapGraph
 from langgoap.graph.nodes import (
     GoapExecutor,
@@ -91,6 +98,12 @@ from langgoap.planner.explain import (
     ResourceShortfall,
     explain_infeasibility,
     explain_no_plan,
+)
+from langgoap.planner.mcts import (
+    MCTSExploration,
+    MCTSReuseConfig,
+    MCTSStrategy,
+    MCTSTracingConfig,
 )
 from langgoap.planner.pipeline import plan as pipeline_plan
 from langgoap.planner.repair import RepairStrategy
@@ -173,6 +186,7 @@ __all__ = [
     "ConstraintSpec",
     "Goal",
     "GoalSpec",
+    "GoalPolicy",
     "MultiGoal",
     "SoftGoal",
     # Constraint builder
@@ -212,6 +226,10 @@ __all__ = [
     "AnytimePlanningStrategy",
     "CSPRefinementStrategy",
     "LazyDecompositionStrategy",
+    "MCTSStrategy",
+    "MCTSExploration",
+    "MCTSReuseConfig",
+    "MCTSTracingConfig",
     "RepairStrategy",
     "TwoPhasePipelineStrategy",
     # Router

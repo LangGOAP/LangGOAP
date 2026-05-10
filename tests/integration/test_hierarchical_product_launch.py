@@ -29,6 +29,7 @@ import pytest
 
 from langgoap import (
     ActionSpec,
+    GoalPolicy,
     GoalSpec,
     GoapGraph,
     MultiGoal,
@@ -424,9 +425,15 @@ class TestPerSubgoalReplanBudget:
         # stage 3 does not — but stage 3 must still *have* it.
         mg = MultiGoal(
             goals=(
-                GoalSpec(conditions={"prd_approved": True}, max_replans=1),
-                GoalSpec(conditions={"qa_passed": True}, max_replans=1),
-                GoalSpec(conditions={"launched": True}, max_replans=1),
+                GoalSpec(
+                    conditions={"prd_approved": True}, policy=GoalPolicy(max_replans=1)
+                ),
+                GoalSpec(
+                    conditions={"qa_passed": True}, policy=GoalPolicy(max_replans=1)
+                ),
+                GoalSpec(
+                    conditions={"launched": True}, policy=GoalPolicy(max_replans=1)
+                ),
             ),
             mode="sequential",
         )

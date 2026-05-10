@@ -86,8 +86,8 @@ class TestPerEntityGoalKwargs:
             max_replans=3,
         )
         for child in mg.goals:
-            assert child.priority == 7
-            assert child.max_replans == 3
+            assert child.policy.priority == 7
+            assert child.policy.max_replans == 3
 
     def test_forwards_replan_strategy_to_every_child(self) -> None:
         mg = GoalSpec.per_entity(
@@ -95,7 +95,7 @@ class TestPerEntityGoalKwargs:
             conditions={"safe_from_{entity}": True},
             replan_strategy=ReplanStrategy.EVERY_ACTION,
         )
-        assert mg.goals[0].replan_strategy is ReplanStrategy.EVERY_ACTION
+        assert mg.goals[0].policy.replan_strategy is ReplanStrategy.EVERY_ACTION
 
 
 class TestPerEntityValidation:

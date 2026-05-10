@@ -155,10 +155,13 @@ class ReflexionTracer:
         self._max_reflections = max_reflections
         self._reflections: list[Reflection] = []
         self._current_world_state: dict[str, Any] = {}
-        # Load any previously-persisted reflections from the store so this
-        # tracer instance picks up where a prior one left off.
-        if self._history is not None:
-            self._load_reflections()
+        # Construction must never perform I/O: a user wiring this tracer
+        # inside an async ``GoapGraph.ainvoke`` call (or with an
+        # async-only store) would otherwise either block the event loop
+        # on ``store.get`` or crash because the store has no sync API.
+        # Persisted reflections are loaded lazily on the first lifecycle
+        # hook (or eagerly via :meth:`load` / :meth:`aload`).
+        self._loaded = self._history is None
 
     @property
     def reflections(self) -> list[Reflection]:
@@ -205,21 +208,51 @@ class ReflexionTracer:
     # Persistence helpers
     # ------------------------------------------------------------------
 
-    def _load_reflections(self) -> None:
-        """Populate ``self._reflections`` from the backing store (sync)."""
-        if self._history is None:
+    def _apply_loaded_value(self, value: Any) -> None:
+        """Hydrate ``self._reflections`` from a raw store payload."""
+        if not value:
             return
+        loaded = [_reflection_from_dict(d) for d in value.get("reflections", [])]
+        self._reflections = loaded[-self._max_reflections :]
+
+    def load(self) -> None:
+        """Eagerly load persisted reflections from the backing store (sync).
+
+        Idempotent.  Safe to call from sync code paths.  Async callers
+        should prefer :meth:`aload` so async-only stores are awaited
+        rather than blocking the event loop.
+        """
+        if self._loaded or self._history is None:
+            return
+        self._loaded = True
         try:
             store = self._history._store
             item = store.get(_REFLECTIONS_NS, _REFLECTIONS_KEY)
-            value = getattr(item, "value", item)
-            if value:
-                loaded = [
-                    _reflection_from_dict(d) for d in value.get("reflections", [])
-                ]
-                self._reflections = loaded[-self._max_reflections :]
+            self._apply_loaded_value(getattr(item, "value", item))
         except Exception as exc:
             logger.warning("ReflexionTracer: failed to load reflections: %s", exc)
+
+    async def aload(self) -> None:
+        """Eagerly load persisted reflections from the backing store (async).
+
+        Idempotent.  Uses ``store.aget`` when available so async-only
+        stores (e.g. ``AsyncPostgresStore``) are awaited correctly.
+        """
+        if self._loaded or self._history is None:
+            return
+        self._loaded = True
+        try:
+            store = self._history._store
+            aget = getattr(store, "aget", None)
+            if aget is not None:
+                item = await aget(_REFLECTIONS_NS, _REFLECTIONS_KEY)
+            else:
+                item = store.get(_REFLECTIONS_NS, _REFLECTIONS_KEY)
+            self._apply_loaded_value(getattr(item, "value", item))
+        except Exception as exc:
+            logger.warning(
+                "ReflexionTracer: failed to load reflections (async): %s", exc
+            )
 
     def _persist_reflections(self) -> None:
         """Write ``self._reflections`` to the backing store (sync)."""
@@ -261,6 +294,10 @@ class ReflexionTracer:
     # ------------------------------------------------------------------
 
     def on_plan_start(self, goal: Any, state: Any, strategy_name: str) -> None:
+        # Lazy-load persisted reflections on first sync entry into the
+        # planner; construction never performs I/O so this is the
+        # earliest safe load point on the sync path.
+        self.load()
         if isinstance(state, dict):
             self._current_world_state = state
         if self._reflections:
@@ -319,6 +356,11 @@ class ReflexionTracer:
     # ------------------------------------------------------------------
 
     async def aon_plan_start(self, goal: Any, state: Any, strategy_name: str) -> None:
+        # Lazy-load persisted reflections via the async path so async-only
+        # stores (those without a sync ``get``) are awaited correctly;
+        # the subsequent sync ``load()`` inside ``on_plan_start`` no-ops
+        # because ``aload()`` flips ``_loaded``.
+        await self.aload()
         self.on_plan_start(goal, state, strategy_name)
 
     async def aon_plan_complete(self, plan: Any, duration_ms: float) -> None:

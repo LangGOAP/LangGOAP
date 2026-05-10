@@ -93,6 +93,60 @@ class SoftGoal:
         return self.name or str(dict(self.conditions))
 
 
+_POLICY_KWARG_NAMES = ("replan_strategy", "priority", "max_replans")
+
+
+def _bundle_policy_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Bundle legacy flat policy kwargs into a ``policy=GoalPolicy(...)`` kwarg.
+
+    Used by :meth:`GoalSpec.from_builder` and
+    :meth:`GoalSpec.per_entity` so callers that historically passed
+    ``replan_strategy=`` / ``priority=`` / ``max_replans=`` directly
+    keep working unchanged.  When ``policy=`` is also explicitly
+    provided, the explicit value wins and the flat kwargs are ignored
+    (tests covering this contract live in
+    :mod:`tests.test_per_entity_goals` and
+    :mod:`tests.test_constraint_builder`).
+    """
+    flat = {k: kwargs.pop(k) for k in _POLICY_KWARG_NAMES if k in kwargs}
+    if "policy" in kwargs or not flat:
+        return kwargs
+    kwargs["policy"] = GoalPolicy(**flat)
+    return kwargs
+
+
+@dataclass(frozen=True, slots=True)
+class GoalPolicy:
+    """Replanning + multi-goal-priority policy for a :class:`GoalSpec`.
+
+    Grouping these three orthogonal-to-the-conditions knobs into a
+    sub-dataclass keeps the :class:`GoalSpec` constructor focused on
+    *what* the goal is, not *how* the planner should chase it.  The
+    defaults match the historical flat-field defaults, so a bare
+    ``GoalPolicy()`` is behaviourally identical to the pre-Phase-7
+    implicit policy.
+
+    Attributes:
+        replan_strategy: When the observer should trigger replanning
+            during execution.
+        priority: Multi-goal scenarios use this to break ties when
+            :class:`MultiGoal` chooses the next sub-goal.  Higher = more
+            important.
+        max_replans: Maximum number of replanning cycles before the
+            observer gives up.  Guards against infinite replan loops
+            when an action keeps failing or the world state never
+            converges.  Set to ``0`` to disable the limit.
+    """
+
+    replan_strategy: ReplanStrategy = ReplanStrategy.ON_DEVIATION
+    priority: int = 0
+    max_replans: int = 10
+
+    def __post_init__(self) -> None:
+        if self.max_replans < 0:
+            raise ValueError("max_replans must be >= 0 (0 disables the limit)")
+
+
 @dataclass(frozen=True, slots=True)
 class GoalSpec:
     """Specification of a GOAP goal.
@@ -100,29 +154,25 @@ class GoalSpec:
     Attributes:
         conditions: Required world state for the goal to be satisfied.
             Stored as an immutable MappingProxyType.
-        replan_strategy: When to trigger replanning during execution.
+        policy: :class:`GoalPolicy` bundling the replanning strategy,
+            multi-goal priority, and replan budget.  Defaults to
+            ``GoalPolicy()`` (ON_DEVIATION, priority 0, max_replans 10).
         objectives: Optional optimization objectives for the CSP phase.
             Maps resource/metric name to an :class:`~langgoap.types.ObjectiveDirection`.
             Example: ``{"cost_usd": Minimize, "quality": Maximize}``.
         constraints: Optional hard resource/budget constraints for the CSP phase.
-        priority: Goal priority for multi-goal scenarios (higher = more important).
+        soft_goals: Optional soft (penalty-weighted) goal predicates.
+        metrics: Optional plan-quality metrics consumed by the CSP phase.
     """
 
     conditions: MappingProxyType[str, Any] = field(
         default_factory=lambda: MappingProxyType({})
     )
-    replan_strategy: ReplanStrategy = ReplanStrategy.ON_DEVIATION
+    policy: GoalPolicy = field(default_factory=GoalPolicy)
     objectives: MappingProxyType[str, ObjectiveDirection] | None = None
     constraints: tuple[ConstraintSpec, ...] = field(default_factory=tuple)
     soft_goals: tuple[SoftGoal, ...] = field(default_factory=tuple)
     metrics: tuple["PlanQualityMetric", ...] = field(default_factory=tuple)
-    priority: int = 0
-    max_replans: int = 10
-    """Maximum number of replanning cycles before the observer gives up.
-
-    Guards against infinite replan loops when an action keeps failing or
-    the world state never converges.  Set to 0 to disable the limit.
-    """
 
     def __post_init__(self) -> None:
         # Accept plain dicts from callers and silently wrap conditions.
@@ -152,18 +202,14 @@ class GoalSpec:
 
     def __repr__(self) -> str:
         parts = [f"conditions={dict(self.conditions)!r}"]
-        if self.replan_strategy != ReplanStrategy.ON_DEVIATION:
-            parts.append(f"replan_strategy={self.replan_strategy!r}")
+        if self.policy != GoalPolicy():
+            parts.append(f"policy={self.policy!r}")
         if self.objectives:
             parts.append(f"objectives={dict(self.objectives)!r}")
         if self.constraints:
             parts.append(f"constraints={self.constraints!r}")
         if self.soft_goals:
             parts.append(f"soft_goals={self.soft_goals!r}")
-        if self.priority:
-            parts.append(f"priority={self.priority!r}")
-        if self.max_replans != 10:
-            parts.append(f"max_replans={self.max_replans!r}")
         return f"GoalSpec({', '.join(parts)})"
 
     @classmethod
@@ -182,8 +228,10 @@ class GoalSpec:
                 :meth:`~langgoap.constraints.ConstraintBuilder.build`.
                 ``None`` produces a GoalSpec with no constraints or
                 objectives, equivalent to ``GoalSpec(conditions=...)``.
-            **kwargs: Any other ``GoalSpec`` fields (``replan_strategy``,
-                ``priority``, ``max_replans``).
+            **kwargs: Any other ``GoalSpec`` fields, plus the legacy
+                flat policy kwargs (``replan_strategy``, ``priority``,
+                ``max_replans``) which are bundled into a
+                :class:`GoalPolicy` for the caller's convenience.
 
         Returns:
             A new ``GoalSpec`` with the builder's constraints and
@@ -195,6 +243,7 @@ class GoalSpec:
             constraints = builder_output.constraints
             if builder_output.objectives:
                 objectives = builder_output.objectives
+        kwargs = _bundle_policy_kwargs(kwargs)
         return cls(
             conditions=MappingProxyType(dict(conditions or {})),
             constraints=constraints,
@@ -261,6 +310,11 @@ class GoalSpec:
                 "goal would be identical.  Got conditions="
                 f"{dict(conditions)!r}."
             )
+        # Bundle the legacy flat policy kwargs into a GoalPolicy so
+        # callers passing ``replan_strategy`` / ``priority`` /
+        # ``max_replans`` directly into per_entity (the documented API
+        # before Phase 7) keep working.
+        goal_kwargs = _bundle_policy_kwargs(goal_kwargs)
         children: list[GoalSpec] = []
         for eid in ids:
             formatted: dict[str, Any] = {}

@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from langgoap.actions import ActionSpec, GoapAction, goap_action
-from langgoap.goals import GoalSpec
+from langgoap.goals import GoalPolicy, GoalSpec
 from langgoap.graph.builder import GoapGraph
 from langgoap.graph.nodes import GoapExecutor, async_execute_action
 from langgoap.graph.state import GoapState
@@ -102,7 +102,7 @@ class TestAsyncGoapActionDecorator:
 
         graph = GoapGraph(actions=[async_act])
         result = graph.invoke(
-            goal=GoalSpec(conditions={"done": True}, max_replans=1),
+            goal=GoalSpec(conditions={"done": True}, policy=GoalPolicy(max_replans=1)),
             world_state={},
         )
 

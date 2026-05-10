@@ -79,6 +79,3 @@ def test_mcts_chance_nodes_beats_astar_on_frozen_lake() -> None:
         f"mcts={mcts_goal:.2%} astar={astar_goal:.2%}"
     )
     assert p < 0.05, f"one-sided Welch p={p:.4f} should be < 0.05"
-
-
-

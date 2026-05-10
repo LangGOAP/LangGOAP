@@ -22,8 +22,8 @@ from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
 from langgoap.state import PlanningState
 
-
 # --- Fixtures --------------------------------------------------------
+
 
 @dataclass
 class _SlipCounterModel:
@@ -32,10 +32,14 @@ class _SlipCounterModel:
     slip_p: float = 0.3
     divergence_policy: Any = None
 
-    def expected(self, state: Mapping[str, Any], action: ActionSpec) -> Mapping[str, Any]:
+    def expected(
+        self, state: Mapping[str, Any], action: ActionSpec
+    ) -> Mapping[str, Any]:
         return action.get_effects(dict(state))
 
-    def sample(self, state: Mapping[str, Any], action: ActionSpec, rng: random.Random) -> Mapping[str, Any]:
+    def sample(
+        self, state: Mapping[str, Any], action: ActionSpec, rng: random.Random
+    ) -> Mapping[str, Any]:
         if rng.random() < self.slip_p:
             rem = int(state.get("remaining", 0))
             return {"remaining": rem, "done": False}
@@ -58,6 +62,7 @@ def _counter_action() -> ActionSpec:
 
 # --- API surface -----------------------------------------------------
 
+
 class TestChanceNodeAPI:
     def test_chance_node_is_importable(self) -> None:
         from langgoap.planner.mcts import ChanceNode  # noqa: F401
@@ -77,19 +82,24 @@ class TestChanceNodeAPI:
 
 # --- Structural tests ------------------------------------------------
 
+
 class TestStochasticExpansionInsertsChanceLayer:
     def test_stochastic_model_inserts_chance_node_between_decisions(self) -> None:
         """After one strategy run with a stochastic model the root's
         children must be ChanceNodes, not direct decision grandchildren."""
-        from langgoap.planner.mcts import ChanceNode, MCTSStrategy
+        from langgoap.planner.mcts import (
+            ChanceNode,
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
 
         model = _SlipCounterModel(slip_p=0.3)
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"remaining": 3, "done": False})
         strategy = MCTSStrategy(
-            iterations=16,
-            rollout_depth=4,
-            seed=7,
+            exploration=MCTSExploration(iterations=16, rollout_depth=4, seed=7),
             transition_model=model,
         )
         plan = strategy.plan(start, goal, [_counter_action()])
@@ -98,13 +108,15 @@ class TestStochasticExpansionInsertsChanceLayer:
         root = strategy._last_root  # type: ignore[attr-defined]
         assert root is not None
         assert root.chance_children, "stochastic model must populate chance_children"
-        assert root.children == [], (
-            "stochastic model must not populate the legacy children list"
-        )
+        assert (
+            root.children == []
+        ), "stochastic model must not populate the legacy children list"
         # Every chance child must have at least one decision grandchild.
         for ch in root.chance_children:
             assert isinstance(ch, ChanceNode)
-            assert ch.children_by_key, "chance node must have at least one sampled successor"
+            assert (
+                ch.children_by_key
+            ), "chance node must have at least one sampled successor"
             assert ch.visits > 0, "chance node must receive backup visits"
 
 
@@ -113,11 +125,18 @@ class TestDeterministicFastPath:
         """With ``DeterministicTransitionModel`` the tree must remain
         two-layered \u2014 ``root.chance_children`` stays empty and
         ``root.children`` is populated as today."""
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
 
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"remaining": 3, "done": False})
-        strategy = MCTSStrategy(iterations=16, rollout_depth=4, seed=7)
+        strategy = MCTSStrategy(
+            exploration=MCTSExploration(iterations=16, rollout_depth=4, seed=7)
+        )
         strategy.plan(start, goal, [_counter_action()])
         root = strategy._last_root  # type: ignore[attr-defined]
         assert root is not None
@@ -126,6 +145,7 @@ class TestDeterministicFastPath:
 
 
 # --- Backup correctness ---------------------------------------------
+
 
 class TestChanceNodeBackup:
     def test_backup_updates_chance_and_decision_ancestors(self) -> None:
@@ -148,6 +168,7 @@ class TestChanceNodeBackup:
 
 # --- Convergence: risky-vs-safe MDP ---------------------------------
 
+
 @dataclass
 class _RiskyMDPModel:
     """``risky`` advances +2 on success, regresses to 0 on slip."""
@@ -155,10 +176,14 @@ class _RiskyMDPModel:
     slip_p: float
     divergence_policy: Any = None
 
-    def expected(self, state: Mapping[str, Any], action: ActionSpec) -> Mapping[str, Any]:
+    def expected(
+        self, state: Mapping[str, Any], action: ActionSpec
+    ) -> Mapping[str, Any]:
         return action.get_effects(dict(state))
 
-    def sample(self, state: Mapping[str, Any], action: ActionSpec, rng: random.Random) -> Mapping[str, Any]:
+    def sample(
+        self, state: Mapping[str, Any], action: ActionSpec, rng: random.Random
+    ) -> Mapping[str, Any]:
         if action.name == "risky" and rng.random() < self.slip_p:
             return {"pos": 0, "done": False}
         return action.get_effects(dict(state))
@@ -202,15 +227,18 @@ class TestChanceNodeConvergence:
         """Under ``slip_p = 0.7`` the risky chance-child must collect
         both possible successor states (``pos=2`` from success,
         ``pos=0`` from slip) across repeated visits."""
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
 
         model = _RiskyMDPModel(slip_p=0.7)
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"pos": 0, "done": False})
         strategy = MCTSStrategy(
-            iterations=64,
-            rollout_depth=4,
-            seed=7,
+            exploration=MCTSExploration(iterations=64, rollout_depth=4, seed=7),
             transition_model=model,
             scalar_heuristic=_pos_progress_heuristic,
         )
@@ -238,15 +266,18 @@ class TestChanceNodeConvergence:
         """The chance-node's running mean converges toward the
         visit-weighted mean of its decision-children's values \u2014 this
         is the core mathematical guarantee the layer delivers."""
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
 
         model = _RiskyMDPModel(slip_p=0.7)
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"pos": 0, "done": False})
         strategy = MCTSStrategy(
-            iterations=512,
-            rollout_depth=6,
-            seed=7,
+            exploration=MCTSExploration(iterations=512, rollout_depth=6, seed=7),
             transition_model=model,
             scalar_heuristic=_pos_progress_heuristic,
         )
@@ -265,15 +296,18 @@ class TestChanceNodeConvergence:
     def test_deterministic_regression_single_chance_child(self) -> None:
         """With ``slip_p = 0.0`` both arms are deterministic; each
         chance child must have exactly one sampled successor."""
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
 
         model = _RiskyMDPModel(slip_p=0.0)
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"pos": 0, "done": False})
         strategy = MCTSStrategy(
-            iterations=128,
-            rollout_depth=6,
-            seed=7,
+            exploration=MCTSExploration(iterations=128, rollout_depth=6, seed=7),
             transition_model=model,
         )
         strategy.plan(start, goal, _risky_vs_safe_actions())

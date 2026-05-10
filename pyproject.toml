@@ -90,6 +90,8 @@ markers = [
 filterwarnings = [
     "ignore::DeprecationWarning:testcontainers.core.waiting_utils",
     "ignore:'asyncio.iscoroutinefunction' is deprecated:DeprecationWarning:langchain_core",
+    "ignore:The default value of .allowed_objects. will change:langchain_core._api.deprecation.LangChainPendingDeprecationWarning",
+    "ignore:get_async_redis_connection will become async:DeprecationWarning:redisvl.redis.connection",
 ]
 
 [tool.black]

@@ -35,16 +35,28 @@ def two_step_actions() -> list[ActionSpec]:
 
 class TestMCTSStrategyProtocol:
     def test_satisfies_planning_strategy_protocol(self) -> None:
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
 
         assert isinstance(MCTSStrategy(), PlanningStrategy)
 
 
 class TestMCTSStrategyPlanning:
     def test_finds_two_step_plan(self, two_step_actions: list[ActionSpec]) -> None:
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
 
-        strategy = MCTSStrategy(iterations=64, rollout_depth=3, seed=7)
+        strategy = MCTSStrategy(
+            exploration=MCTSExploration(iterations=64, rollout_depth=3, seed=7)
+        )
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({})
         plan = strategy.plan(start, goal, two_step_actions)
@@ -58,9 +70,16 @@ class TestMCTSStrategyPlanning:
     def test_goal_already_satisfied_returns_empty_plan(
         self, two_step_actions: list[ActionSpec]
     ) -> None:
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
 
-        strategy = MCTSStrategy(iterations=16, rollout_depth=3, seed=7)
+        strategy = MCTSStrategy(
+            exploration=MCTSExploration(iterations=16, rollout_depth=3, seed=7)
+        )
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"done": True})
         plan = strategy.plan(start, goal, two_step_actions)
@@ -68,13 +87,20 @@ class TestMCTSStrategyPlanning:
         assert len(plan.actions) == 0
 
     def test_infeasible_goal_returns_none(self) -> None:
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
 
         actions = [
             ActionSpec(name="a", preconditions={}, effects={"x": 1}, cost=1.0),
         ]
         goal = GoalSpec(conditions={"done": True})
-        strategy = MCTSStrategy(iterations=32, rollout_depth=3, seed=7)
+        strategy = MCTSStrategy(
+            exploration=MCTSExploration(iterations=32, rollout_depth=3, seed=7)
+        )
         plan = strategy.plan(PlanningState.from_dict({}), goal, actions)
         assert plan is None
 
@@ -83,14 +109,20 @@ class TestMCTSStrategyPlanning:
         root child as a 1-step plan even when no goal-terminal leaf was
         discovered \u2014 required for MDP-style replanning on domains too
         deep for the tree to reach the goal within budget."""
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
 
         actions = [
             ActionSpec(name="a", preconditions={}, effects={"x": 1}, cost=1.0),
         ]
         goal = GoalSpec(conditions={"done": True})
         strategy = MCTSStrategy(
-            iterations=32, rollout_depth=3, seed=7, anytime_fallback=True
+            exploration=MCTSExploration(iterations=32, rollout_depth=3, seed=7),
+            reuse=MCTSReuseConfig(anytime_fallback=True),
         )
         plan = strategy.plan(PlanningState.from_dict({}), goal, actions)
         assert plan is not None
@@ -100,13 +132,17 @@ class TestMCTSStrategyPlanning:
     def test_wall_clock_budget_is_respected(
         self, two_step_actions: list[ActionSpec]
     ) -> None:
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
 
         strategy = MCTSStrategy(
-            iterations=10_000_000,
-            wall_clock_ms=50,
-            rollout_depth=3,
-            seed=7,
+            exploration=MCTSExploration(
+                iterations=10_000_000, wall_clock_ms=50, rollout_depth=3, seed=7
+            )
         )
         start = time.monotonic()
         plan = strategy.plan(
@@ -126,12 +162,19 @@ class TestMCTSPlanCompilesInLangGraph:
         self, two_step_actions: list[ActionSpec]
     ) -> None:
         """End-to-end: plan an MCTS plan and execute it via GoapGraph."""
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
 
         graph = GoapGraph(two_step_actions).compile()
         goal = GoalSpec(conditions={"done": True})
 
-        strategy = MCTSStrategy(iterations=64, rollout_depth=3, seed=7)
+        strategy = MCTSStrategy(
+            exploration=MCTSExploration(iterations=64, rollout_depth=3, seed=7)
+        )
         plan = strategy.plan(PlanningState.from_dict({}), goal, two_step_actions)
         assert plan is not None
         # The compiled graph executes the plan's actions and lands on
@@ -140,3 +183,42 @@ class TestMCTSPlanCompilesInLangGraph:
         # compiler's existing Plan-execution tests.
         result = graph.invoke({"world_state": {}, "goal": goal})
         assert result["status"] == "goal_achieved"
+
+
+class TestMCTSConfigValidation:
+    """The grouped config dataclasses validate their inputs in
+    ``__post_init__``.  Pinning the contract here so future refactors
+    do not drop the validation that the flat-field design lacked.
+    """
+
+    def test_exploration_rejects_zero_budgets(self) -> None:
+        from langgoap.planner.mcts import MCTSExploration
+
+        with pytest.raises(ValueError, match="iterations / wall_clock_ms"):
+            MCTSExploration(iterations=0, wall_clock_ms=0)
+
+    def test_exploration_rejects_negative_iterations(self) -> None:
+        from langgoap.planner.mcts import MCTSExploration
+
+        with pytest.raises(ValueError, match="iterations must be >= 0"):
+            MCTSExploration(iterations=-1)
+
+    def test_exploration_rejects_non_positive_c(self) -> None:
+        from langgoap.planner.mcts import MCTSExploration
+
+        with pytest.raises(ValueError, match="c must be > 0"):
+            MCTSExploration(c=0.0)
+
+    def test_reuse_rejects_decay_outside_unit_interval(self) -> None:
+        from langgoap.planner.mcts import MCTSReuseConfig
+
+        with pytest.raises(ValueError, match="tree_reuse_decay"):
+            MCTSReuseConfig(tree_reuse_decay=1.5)
+        with pytest.raises(ValueError, match="tree_reuse_decay"):
+            MCTSReuseConfig(tree_reuse_decay=-0.1)
+
+    def test_reuse_rejects_negative_path_length_budget(self) -> None:
+        from langgoap.planner.mcts import MCTSReuseConfig
+
+        with pytest.raises(ValueError, match="path_length_budget"):
+            MCTSReuseConfig(path_length_budget=-1)

@@ -182,40 +182,28 @@ class Plan:
     def draw_gantt_png(self, **kwargs: Any) -> bytes:
         """Render this plan's schedule as a PNG Gantt chart via Mermaid.
 
-        Delegates to ``langchain_core``'s ``draw_mermaid_png()`` which uses
-        the mermaid.ink API by default.  All keyword arguments are forwarded
-        (e.g. ``background_color``, ``draw_method``).
-
-        Returns:
-            PNG image bytes — pass to ``IPython.display.Image()`` to display.
-
-        Raises:
-            ValueError: If the plan has no schedule attached.
+        Thin shim over :func:`langgoap.viz.mermaid.draw_gantt_png`.
         """
-        from langchain_core.runnables.graph_mermaid import draw_mermaid_png as _draw
+        from langgoap.viz.mermaid import draw_gantt_png
 
-        return _draw(self.to_gantt(), **kwargs)
+        return draw_gantt_png(self, **kwargs)
 
     def draw_mermaid_png(self, **kwargs: Any) -> bytes:
         """Render this plan as a PNG image via Mermaid.
 
-        Delegates to ``langchain_core``'s ``draw_mermaid_png()`` which uses
-        the mermaid.ink API by default.  All keyword arguments are forwarded
-        (e.g. ``background_color``, ``draw_method``).
-
-        Returns:
-            PNG image bytes — pass to ``IPython.display.Image()`` to display.
+        Thin shim over :func:`langgoap.viz.mermaid.draw_mermaid_png`.
         """
-        from langchain_core.runnables.graph_mermaid import draw_mermaid_png as _draw
+        from langgoap.viz.mermaid import draw_mermaid_png
 
-        return _draw(self.to_mermaid(), **kwargs)
+        return draw_mermaid_png(self, **kwargs)
 
     def _repr_mimebundle_(self, **kwargs: Any) -> dict[str, Any]:
-        """Jupyter rich display — renders the plan as an inline PNG."""
-        return {
-            "text/plain": repr(self),
-            "image/png": self.draw_mermaid_png(),
-        }
+        """Jupyter rich display \u2014 thin shim over
+        :func:`langgoap.viz.jupyter.repr_mimebundle`.
+        """
+        from langgoap.viz.jupyter import repr_mimebundle
+
+        return repr_mimebundle(self, **kwargs)
 
     def save(
         self,
@@ -227,41 +215,15 @@ class Plan:
     ) -> Path:
         """Write a rendered representation of this plan to ``path``.
 
-        The format is inferred from the path suffix when ``format`` is
-        ``None``: ``.mmd``/``.mermaid`` → Mermaid, ``.dot``/``.gv`` →
-        DOT, ``.txt``/``.ascii`` or anything else → ASCII.
-
-        Args:
-            path: Destination file path.
-            format: Explicit format override.
-            show_resources: Forwarded to the renderer.
-            show_schedule: Forwarded to the renderer.
-
-        Returns:
-            The ``Path`` that was written.
+        Thin shim over :func:`langgoap.viz.save.save_plan` \u2014 see that
+        function for the format-inference rules.
         """
-        dest = Path(path)
-        if format is None:
-            suffix = dest.suffix.lower().lstrip(".")
-            if suffix in {"mmd", "mermaid"}:
-                format = "mermaid"
-            elif suffix in {"dot", "gv"}:
-                format = "dot"
-            else:
-                format = "ascii"
+        from langgoap.viz.save import save_plan
 
-        if format == "mermaid":
-            source = self.to_mermaid(
-                show_resources=show_resources, show_schedule=show_schedule
-            )
-        elif format == "dot":
-            source = self.to_dot(
-                show_resources=show_resources, show_schedule=show_schedule
-            )
-        else:
-            source = self.to_ascii(
-                show_resources=show_resources, show_schedule=show_schedule
-            )
-
-        dest.write_text(source, encoding="utf-8")
-        return dest
+        return save_plan(
+            self,
+            path,
+            format=format,
+            show_resources=show_resources,
+            show_schedule=show_schedule,
+        )

@@ -34,7 +34,12 @@ from typing import Any, Callable
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
-from langgoap.planner.mcts import MCTSStrategy
+from langgoap.planner.mcts import (
+    MCTSExploration,
+    MCTSReuseConfig,
+    MCTSStrategy,
+    MCTSTracingConfig,
+)
 from langgoap.planner.strategy import AStarStrategy, PlanningStrategy
 from langgoap.state import PlanningState
 from tests.fixtures.stochastic_gridworld import (
@@ -46,7 +51,6 @@ from tests.fixtures.stochastic_gridworld import (
     make_gridworld_actions,
     run_episode,
 )
-
 
 # --- Pre-registered configuration -------------------------------------------
 
@@ -105,7 +109,9 @@ class GridworldMDPRollout:
             if cursor.get("done") or cursor.get("terminated"):
                 break
             applicable = [
-                a for a in actions if PlanningState.from_dict(cursor).satisfies(a.preconditions)
+                a
+                for a in actions
+                if PlanningState.from_dict(cursor).satisfies(a.preconditions)
             ]
             if not applicable:
                 break
@@ -139,7 +145,9 @@ def _heuristic(state: PlanningState, goal: GoalSpec) -> int:
 # --- Strategy factories -----------------------------------------------------
 
 
-StrategyFactory = Callable[[int, GridworldTopology, SlipperyTransitionModel], PlanningStrategy]
+StrategyFactory = Callable[
+    [int, GridworldTopology, SlipperyTransitionModel], PlanningStrategy
+]
 
 
 def astar_factory(
@@ -153,15 +161,18 @@ def mcts_factory(
 ) -> PlanningStrategy:
     rng = random.Random(seed)
     return MCTSStrategy(
-        iterations=MCTS_ITERATIONS,
-        wall_clock_ms=MCTS_WALL_CLOCK_MS,
-        rollout_depth=MCTS_ROLLOUT_DEPTH,
+        exploration=MCTSExploration(
+            iterations=MCTS_ITERATIONS,
+            wall_clock_ms=MCTS_WALL_CLOCK_MS,
+            rollout_depth=MCTS_ROLLOUT_DEPTH,
+            seed=seed,
+        ),
+        # MDP replanning loop \u2014 always need a first action.
+        reuse=MCTSReuseConfig(anytime_fallback=True),
         rollout_policy=GridworldMDPRollout(
             topology=topology, model=model, max_depth=MCTS_ROLLOUT_DEPTH, rng=rng
         ),
         transition_model=model,
-        seed=seed,
-        anytime_fallback=True,  # MDP replanning loop \u2014 always need a first action
     )
 
 
@@ -171,15 +182,17 @@ def mcts_random_factory(
     from langgoap.planner.mcts import RandomRollout
 
     return MCTSStrategy(
-        iterations=MCTS_ITERATIONS,
-        wall_clock_ms=MCTS_WALL_CLOCK_MS,
-        rollout_depth=MCTS_ROLLOUT_DEPTH,
+        exploration=MCTSExploration(
+            iterations=MCTS_ITERATIONS,
+            wall_clock_ms=MCTS_WALL_CLOCK_MS,
+            rollout_depth=MCTS_ROLLOUT_DEPTH,
+            seed=seed,
+        ),
+        reuse=MCTSReuseConfig(anytime_fallback=True),
         rollout_policy=RandomRollout(
             max_depth=MCTS_ROLLOUT_DEPTH, rng=random.Random(seed)
         ),
         transition_model=model,
-        seed=seed,
-        anytime_fallback=True,
     )
 
 
@@ -257,7 +270,9 @@ def summarise(
         )
         / len(episodes),
         hole_rate=sum(
-            1 for e in episodes if e.terminated and not e.reached_goal and topology.holes
+            1
+            for e in episodes
+            if e.terminated and not e.reached_goal and topology.holes
         )
         / len(episodes),
         mean_episode_length=statistics.mean(len(e.actions_taken) for e in episodes),
@@ -316,8 +331,8 @@ def bootstrap_ci(
 
 
 _EFFECT_THRESHOLDS = {
-    "cliff_walking_4x12": 5.0,   # +5 mean-return units \u2248 1 cliff-fall saved
-    "frozen_lake_4x4": 0.10,     # +10% goal-reach probability
+    "cliff_walking_4x12": 5.0,  # +5 mean-return units \u2248 1 cliff-fall saved
+    "frozen_lake_4x4": 0.10,  # +10% goal-reach probability
 }
 
 
@@ -330,7 +345,9 @@ def cell_verdict(
 ) -> dict[str, Any]:
     treatment_returns = [e.total_return for e in treatment_eps]
     baseline_returns = [e.total_return for e in baseline_eps]
-    treatment_goal = sum(1 for e in treatment_eps if e.reached_goal) / len(treatment_eps)
+    treatment_goal = sum(1 for e in treatment_eps if e.reached_goal) / len(
+        treatment_eps
+    )
     baseline_goal = sum(1 for e in baseline_eps if e.reached_goal) / len(baseline_eps)
     delta = statistics.mean(treatment_returns) - statistics.mean(baseline_returns)
     t_test = welch_t_test(treatment_returns, baseline_returns)
@@ -394,9 +411,7 @@ def run_benchmark(
         per_strategy_eps: dict[str, list[Episode]] = {}
         arms = ["astar", "mcts"] + (["mcts-random"] if include_ablation else [])
         for strategy in arms:
-            eps = run_cell(
-                topology=topology, strategy_name=strategy, seeds=seeds
-            )
+            eps = run_cell(topology=topology, strategy_name=strategy, seeds=seeds)
             per_strategy_eps[strategy] = eps
             summary = summarise(
                 cell=cell_name, strategy=strategy, topology=topology, episodes=eps
@@ -419,8 +434,12 @@ def _format_markdown(results: dict[str, Any]) -> str:
     lines.append(f"Wall clock: {results['wall_clock_s']:.1f}s\n")
     for cell_name, cell_block in results["cells"].items():
         lines.append(f"## {cell_name}\n")
-        lines.append("| Strategy | mean\u00b1std return | goal% | cliff% | hole% | mean len |")
-        lines.append("|----------|-----------------|-------|--------|-------|----------|")
+        lines.append(
+            "| Strategy | mean\u00b1std return | goal% | cliff% | hole% | mean len |"
+        )
+        lines.append(
+            "|----------|-----------------|-------|--------|-------|----------|"
+        )
         for name, s in cell_block["summaries"].items():
             lines.append(
                 f"| {name} | {s['mean_return']:.2f}\u00b1{s['std_return']:.2f} "
@@ -444,13 +463,12 @@ def main() -> None:
     results = run_benchmark(SEEDS_STAGE_1, include_ablation=False)
     # Check for inconclusive cells \u2014 trigger pre-declared extension.
     inconclusive = [
-        c for c, block in results["cells"].items()
+        c
+        for c, block in results["cells"].items()
         if block["verdict"]["verdict"] == "inconclusive"
     ]
     if inconclusive:
-        extended = run_benchmark(
-            SEEDS_STAGE_1 + SEEDS_STAGE_2, include_ablation=False
-        )
+        extended = run_benchmark(SEEDS_STAGE_1 + SEEDS_STAGE_2, include_ablation=False)
         results["stage_2"] = extended
     # Research artifacts live at the *top-level* ``research/`` tree
     # (outside the git repo), not under ``langgoap/``.  The harness may
@@ -464,8 +482,7 @@ def main() -> None:
     else:
         base = cwd
     out_dir = (
-        base / "research" / "experiments" / "results"
-        / "2026-04-20-mcts-on-stochastic"
+        base / "research" / "experiments" / "results" / "2026-04-20-mcts-on-stochastic"
     )
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "results.json").write_text(json.dumps(results, indent=2))

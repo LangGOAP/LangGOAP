@@ -20,7 +20,7 @@ from typing import Any
 
 import pytest
 
-from langgoap import ActionSpec, GoalSpec, GoapGraph, ReplanStrategy
+from langgoap import ActionSpec, GoalPolicy, GoalSpec, GoapGraph, ReplanStrategy
 
 # ---------------------------------------------------------------------------
 # Deterministic stubs for GOAP mechanics tests.
@@ -474,7 +474,7 @@ class TestWriteAndReview:
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(
                 conditions={"review_complete": True},
-                replan_strategy=ReplanStrategy.ON_DEVIATION,
+                policy=GoalPolicy(replan_strategy=ReplanStrategy.ON_DEVIATION),
             ),
             world_state={"has_user_input": True, "user_input": "dragons and knights"},
         )
@@ -496,7 +496,7 @@ class TestWriteAndReview:
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(
                 conditions={"review_complete": True},
-                replan_strategy=ReplanStrategy.NEVER,
+                policy=GoalPolicy(replan_strategy=ReplanStrategy.NEVER),
             ),
             world_state={"has_user_input": True, "user_input": "a cat named Whiskers"},
         )

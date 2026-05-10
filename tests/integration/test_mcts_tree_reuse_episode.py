@@ -22,12 +22,18 @@ from __future__ import annotations
 
 import random
 
-from langgoap.planner.mcts import MCTSStrategy
+from langgoap.planner.mcts import (
+    MCTSExploration,
+    MCTSReuseConfig,
+    MCTSStrategy,
+    MCTSTracingConfig,
+)
 from langgoap.state import PlanningState
+from tests.benchmarks.stochastic_gridworld_bench import GridworldMDPRollout
 from tests.fixtures.stochastic_gridworld import (
+    _DELTAS,
     Episode,
     SlipperyTransitionModel,
-    _DELTAS,
     _clamp_cell,
     _compute_effect,
     _reward_for_cell,
@@ -36,7 +42,6 @@ from tests.fixtures.stochastic_gridworld import (
     gridworld_start_state,
     make_gridworld_actions,
 )
-from tests.benchmarks.stochastic_gridworld_bench import GridworldMDPRollout
 
 SEEDS = list(range(42, 52))  # 10 seeds
 SLIP_PROB = 1.0 / 3.0
@@ -51,9 +56,15 @@ def _build_strategy(
 ) -> MCTSStrategy:
     rng = random.Random(seed)
     return MCTSStrategy(
-        iterations=ITERATIONS,
-        wall_clock_ms=WALL_CLOCK_MS,
-        rollout_depth=ROLLOUT_DEPTH,
+        exploration=MCTSExploration(
+            iterations=ITERATIONS,
+            wall_clock_ms=WALL_CLOCK_MS,
+            rollout_depth=ROLLOUT_DEPTH,
+            seed=seed,
+        ),
+        reuse=MCTSReuseConfig(
+            anytime_fallback=True, reuse_tree=reuse, tree_reuse_decay=0.6
+        ),
         rollout_policy=GridworldMDPRollout(
             topology=model.topology,
             model=model,
@@ -61,15 +72,15 @@ def _build_strategy(
             rng=rng,
         ),
         transition_model=model,
-        seed=seed,
-        anytime_fallback=True,
-        reuse_tree=reuse,
-        tree_reuse_decay=0.6,
     )
 
 
 def _run_episode_with_trace(
-    *, strategy: MCTSStrategy, topology, model, max_steps: int,
+    *,
+    strategy: MCTSStrategy,
+    topology,
+    model,
+    max_steps: int,
     rng: random.Random,
 ) -> tuple[Episode, list[dict]]:
     actions = make_gridworld_actions(topology)
@@ -86,7 +97,7 @@ def _run_episode_with_trace(
             break
 
         used_carryover = (
-            strategy.reuse_tree and strategy._carryover_root is not None
+            strategy.reuse.reuse_tree and strategy._carryover_root is not None
         )
         ps = PlanningState.from_dict(state)
         plan_result = strategy.plan(ps, goal, actions)
@@ -105,7 +116,7 @@ def _run_episode_with_trace(
         state = {**state, **resolved}
 
         matched = False
-        if strategy.reuse_tree:
+        if strategy.reuse.reuse_tree:
             strategy.advance(chosen, PlanningState.from_dict(state))
             matched = strategy._carryover_root is not None
 
@@ -138,8 +149,11 @@ def _collect_traces(*, reuse: bool) -> list[list[dict]]:
         env_rng = random.Random(seed ^ 0xABCDEF)
         strategy = _build_strategy(seed=seed, model=model, reuse=reuse)
         _, trace = _run_episode_with_trace(
-            strategy=strategy, topology=topology, model=model,
-            max_steps=MAX_STEPS, rng=env_rng,
+            strategy=strategy,
+            topology=topology,
+            model=model,
+            max_steps=MAX_STEPS,
+            rng=env_rng,
         )
         traces.append(trace)
     return traces

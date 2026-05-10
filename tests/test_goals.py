@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from langgoap.goals import ConstraintSpec, GoalSpec
+from langgoap.goals import ConstraintSpec, GoalPolicy, GoalSpec
 from langgoap.types import Maximize, Minimize, ObjectiveDirection, ReplanStrategy
 
 
@@ -16,11 +16,11 @@ class TestGoalSpecCreation:
     def test_defaults(self) -> None:
         goal = GoalSpec()
         assert dict(goal.conditions) == {}
-        assert goal.replan_strategy == ReplanStrategy.ON_DEVIATION
+        assert goal.policy.replan_strategy == ReplanStrategy.ON_DEVIATION
         assert goal.constraints == ()
         assert goal.objectives is None
-        assert goal.priority == 0
-        assert goal.max_replans == 10
+        assert goal.policy.priority == 0
+        assert goal.policy.max_replans == 10
 
     def test_frozen(self) -> None:
         goal = GoalSpec(conditions={"a": True})
@@ -55,9 +55,9 @@ class TestReplanStrategy:
     def test_strategy_in_goal(self) -> None:
         goal = GoalSpec(
             conditions={"done": True},
-            replan_strategy=ReplanStrategy.EVERY_ACTION,
+            policy=GoalPolicy(replan_strategy=ReplanStrategy.EVERY_ACTION),
         )
-        assert goal.replan_strategy == ReplanStrategy.EVERY_ACTION
+        assert goal.policy.replan_strategy == ReplanStrategy.EVERY_ACTION
 
 
 class TestConstraintSpec:

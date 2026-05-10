@@ -86,7 +86,9 @@ class TestDeterministicTransitionModel:
         from langgoap.planner.transitions import DeterministicTransitionModel
 
         # Absent or None opts into strict enforcement.
-        assert getattr(DeterministicTransitionModel(), "divergence_policy", None) is None
+        assert (
+            getattr(DeterministicTransitionModel(), "divergence_policy", None) is None
+        )
 
 
 class TestConformanceStrict:
@@ -111,7 +113,9 @@ class TestConformanceStrict:
             def expected(self, state, action):  # type: ignore[no-untyped-def]
                 # Silent bug: shifts the declared +1 to +2.
                 declared = dict(action.get_effects(state))
-                return {k: (v + 1 if isinstance(v, int) else v) for k, v in declared.items()}
+                return {
+                    k: (v + 1 if isinstance(v, int) else v) for k, v in declared.items()
+                }
 
             def sample(self, state, action, rng):  # type: ignore[no-untyped-def]
                 return action.get_effects(state)
@@ -136,7 +140,9 @@ class TestConformanceOptOut:
             def expected(self, state, action):  # type: ignore[no-untyped-def]
                 # Deliberately pessimistic — divergence by design.
                 declared = dict(action.get_effects(state))
-                return {k: (0 if isinstance(v, int) else v) for k, v in declared.items()}
+                return {
+                    k: (0 if isinstance(v, int) else v) for k, v in declared.items()
+                }
 
             def sample(self, state, action, rng):  # type: ignore[no-untyped-def]
                 return action.get_effects(state)

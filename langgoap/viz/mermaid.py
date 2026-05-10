@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING, Any, Sequence
 
 from langgoap.planner.csp import build_dependency_graph
 
@@ -248,3 +248,26 @@ def render_mermaid_gantt(plan: Plan) -> str:
             f"    {safe_name} :task_{start_ms}_{dur_ms}_{safe_name}, {start_ms}, {dur_ms}ms"
         )
     return "\n".join(lines) + "\n"
+
+
+def draw_mermaid_png(plan: Plan, **kwargs: Any) -> bytes:
+    """Render ``plan`` as a PNG image via Mermaid.
+
+    Delegates to ``langchain_core``'s ``draw_mermaid_png()`` which uses
+    the mermaid.ink API by default.  All keyword arguments are forwarded
+    (e.g. ``background_color``, ``draw_method``).
+    """
+    from langchain_core.runnables.graph_mermaid import draw_mermaid_png as _draw
+
+    return _draw(render_mermaid(plan), **kwargs)
+
+
+def draw_gantt_png(plan: Plan, **kwargs: Any) -> bytes:
+    """Render ``plan``'s schedule as a PNG Gantt chart via Mermaid.
+
+    Requires ``plan.metadata.csp.schedule`` to be populated; otherwise
+    :func:`render_mermaid_gantt` raises ``ValueError`` first.
+    """
+    from langchain_core.runnables.graph_mermaid import draw_mermaid_png as _draw
+
+    return _draw(render_mermaid_gantt(plan), **kwargs)

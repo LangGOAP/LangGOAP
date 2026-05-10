@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from langgoap.actions import ActionSpec
-from langgoap.goals import GoalSpec
+from langgoap.goals import GoalPolicy, GoalSpec
 from langgoap.graph.builder import GoapGraph
 from langgoap.sensors import FunctionalSensor
 from langgoap.types import ReplanStrategy
@@ -62,8 +62,7 @@ def test_sensor_e2e_sensor_updates_on_every_replan() -> None:
 
     goal = GoalSpec(
         conditions={"done": True},
-        replan_strategy=ReplanStrategy.ON_DEVIATION,
-        max_replans=5,
+        policy=GoalPolicy(replan_strategy=ReplanStrategy.ON_DEVIATION, max_replans=5),
     )
 
     sensor = FunctionalSensor("counter", counting_sensor)

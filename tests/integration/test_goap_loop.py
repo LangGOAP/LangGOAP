@@ -12,7 +12,7 @@ import pytest
 from langgraph.graph import END, START, StateGraph
 
 from langgoap.actions import ActionSpec
-from langgoap.goals import GoalSpec
+from langgoap.goals import GoalPolicy, GoalSpec
 from langgoap.graph.builder import GoapGraph
 from langgoap.graph.nodes import GoapExecutor, GoapObserver, GoapPlanner
 from langgoap.graph.state import GoapState, successful_action_names
@@ -136,7 +136,7 @@ class TestFullGoapLoop:
             {
                 "goal": GoalSpec(
                     conditions={"report_complete": True},
-                    replan_strategy=ReplanStrategy.ON_DEVIATION,
+                    policy=GoalPolicy(replan_strategy=ReplanStrategy.ON_DEVIATION),
                 ),
                 "world_state": {},
             }
@@ -212,7 +212,7 @@ class TestFullGoapLoop:
             {
                 "goal": GoalSpec(
                     conditions={"b": True},
-                    replan_strategy=ReplanStrategy.EVERY_ACTION,
+                    policy=GoalPolicy(replan_strategy=ReplanStrategy.EVERY_ACTION),
                 ),
                 "world_state": {},
             }
@@ -272,7 +272,7 @@ class TestFullGoapLoop:
         result = GoapGraph(actions=actions).invoke(
             goal=GoalSpec(
                 conditions={"done": True},
-                replan_strategy=ReplanStrategy.NEVER,
+                policy=GoalPolicy(replan_strategy=ReplanStrategy.NEVER),
             ),
         )
 
@@ -353,10 +353,7 @@ class TestFullGoapLoop:
             ActionSpec(name="bad_action", effects={"done": True}, execute=always_fails)
         ]
         result = GoapGraph(actions=actions).invoke(
-            goal=GoalSpec(
-                conditions={"done": True},
-                max_replans=2,
-            ),
+            goal=GoalSpec(conditions={"done": True}, policy=GoalPolicy(max_replans=2)),
         )
 
         assert result["status"] == "failed"

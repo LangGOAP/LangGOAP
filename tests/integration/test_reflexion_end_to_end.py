@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from langgoap.actions import ActionSpec
-from langgoap.goals import GoalSpec
+from langgoap.goals import GoalPolicy, GoalSpec
 from langgoap.graph.builder import GoapGraph
 from langgoap.reflexion import ReflexionTracer
 from langgoap.tracing import MultiTracer, NullTracer
@@ -33,8 +33,7 @@ def test_reflexion_e2e_action_fails_then_succeeds() -> None:
 
     goal = GoalSpec(
         conditions={"done": True},
-        replan_strategy=ReplanStrategy.ON_DEVIATION,
-        max_replans=5,
+        policy=GoalPolicy(replan_strategy=ReplanStrategy.ON_DEVIATION, max_replans=5),
     )
 
     tracer = ReflexionTracer()
@@ -82,10 +81,7 @@ async def test_reflexion_e2e_async() -> None:
         execute=flaky,
         max_retries=1,
     )
-    goal = GoalSpec(
-        conditions={"done": True},
-        max_replans=5,
-    )
+    goal = GoalSpec(conditions={"done": True}, policy=GoalPolicy(max_replans=5))
 
     tracer = ReflexionTracer()
     graph = GoapGraph(actions=[action], tracer=tracer)
@@ -111,7 +107,7 @@ def test_reflexion_e2e_composable_with_multi_tracer() -> None:
         execute=flaky,
         max_retries=1,
     )
-    goal = GoalSpec(conditions={"done": True}, max_replans=5)
+    goal = GoalSpec(conditions={"done": True}, policy=GoalPolicy(max_replans=5))
 
     reflexion = ReflexionTracer()
     multi = MultiTracer([reflexion, NullTracer()])
@@ -138,7 +134,7 @@ def test_reflexion_e2e_multiple_failures() -> None:
         execute=very_flaky,
         max_retries=2,
     )
-    goal = GoalSpec(conditions={"done": True}, max_replans=10)
+    goal = GoalSpec(conditions={"done": True}, policy=GoalPolicy(max_replans=10))
 
     tracer = ReflexionTracer(max_reflections=10)
     graph = GoapGraph(actions=[action], tracer=tracer)

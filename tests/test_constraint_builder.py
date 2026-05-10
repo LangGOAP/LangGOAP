@@ -185,5 +185,5 @@ class TestGoalSpecFromBuilder:
         goal = GoalSpec.from_builder(
             conditions={"done": True}, builder_output=None, priority=5, max_replans=3
         )
-        assert goal.priority == 5
-        assert goal.max_replans == 3
+        assert goal.policy.priority == 5
+        assert goal.policy.max_replans == 3

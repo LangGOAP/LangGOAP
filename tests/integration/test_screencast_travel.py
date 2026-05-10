@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from langgoap import ActionSpec, GoalSpec, GoapGraph, ReplanStrategy
+from langgoap import ActionSpec, GoalPolicy, GoalSpec, GoapGraph, ReplanStrategy
 
 # ---------------------------------------------------------------------------
 # Shared execute functions
@@ -119,7 +119,7 @@ def _travel_actions() -> list[ActionSpec]:
 
 _GOAL = GoalSpec(
     conditions={"at_venue": True, "on_time": True},
-    replan_strategy=ReplanStrategy.ON_DEVIATION,
+    policy=GoalPolicy(replan_strategy=ReplanStrategy.ON_DEVIATION),
 )
 
 _BASE_WS: dict[str, Any] = {"has_destination": True, "destination": "Chicago"}

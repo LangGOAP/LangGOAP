@@ -17,7 +17,12 @@ from typing import Any
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
-from langgoap.planner.mcts import MCTSStrategy
+from langgoap.planner.mcts import (
+    MCTSExploration,
+    MCTSReuseConfig,
+    MCTSStrategy,
+    MCTSTracingConfig,
+)
 from langgoap.state import PlanningState
 
 
@@ -100,11 +105,8 @@ def test_mcts_emits_search_expand_events() -> None:
     start, goal, actions = _toy_domain()
     tracer = _RecordingTracer()
     strategy = MCTSStrategy(
-        iterations=20,
-        wall_clock_ms=0.0,
-        seed=7,
-        tracer=tracer,
-        record_expansions=True,
+        exploration=MCTSExploration(iterations=20, wall_clock_ms=0.0, seed=7),
+        tracing=MCTSTracingConfig(tracer=tracer, record_expansions=True),
     )
     plan = strategy.plan(start, goal, actions)
     assert plan is not None
@@ -121,11 +123,8 @@ def test_mcts_emits_single_search_complete() -> None:
     start, goal, actions = _toy_domain()
     tracer = _RecordingTracer()
     strategy = MCTSStrategy(
-        iterations=10,
-        wall_clock_ms=0.0,
-        seed=1,
-        tracer=tracer,
-        record_expansions=True,
+        exploration=MCTSExploration(iterations=10, wall_clock_ms=0.0, seed=1),
+        tracing=MCTSTracingConfig(tracer=tracer, record_expansions=True),
     )
     strategy.plan(start, goal, actions)
     assert len(tracer.completes) == 1
@@ -135,7 +134,10 @@ def test_mcts_emits_single_search_complete() -> None:
 def test_mcts_silent_when_record_expansions_false() -> None:
     start, goal, actions = _toy_domain()
     tracer = _RecordingTracer()
-    strategy = MCTSStrategy(iterations=10, wall_clock_ms=0.0, seed=1, tracer=tracer)
+    strategy = MCTSStrategy(
+        exploration=MCTSExploration(iterations=10, wall_clock_ms=0.0, seed=1),
+        tracing=MCTSTracingConfig(tracer=tracer),
+    )
     strategy.plan(start, goal, actions)
     assert tracer.expands == []
     assert tracer.completes == []
@@ -145,12 +147,48 @@ def test_mcts_aplan_emits_async_events() -> None:
     start, goal, actions = _toy_domain()
     tracer = _RecordingTracer()
     strategy = MCTSStrategy(
-        iterations=10,
-        wall_clock_ms=0.0,
-        seed=2,
-        tracer=tracer,
-        record_expansions=True,
+        exploration=MCTSExploration(iterations=10, wall_clock_ms=0.0, seed=2),
+        tracing=MCTSTracingConfig(tracer=tracer, record_expansions=True),
     )
     asyncio.run(strategy.aplan(start, goal, actions))
     assert len(tracer.expands) > 0
     assert len(tracer.completes) == 1
+
+
+def test_mcts_aplan_does_not_mutate_strategy_tracer() -> None:
+    start, goal, actions = _toy_domain()
+    tracer = _RecordingTracer()
+    strategy = MCTSStrategy(
+        exploration=MCTSExploration(iterations=10, wall_clock_ms=0.0, seed=3),
+        tracing=MCTSTracingConfig(tracer=tracer, record_expansions=True),
+    )
+    asyncio.run(strategy.aplan(start, goal, actions))
+    assert strategy.tracing.tracer is tracer
+
+
+def test_mcts_concurrent_aplan_does_not_clobber_tracers() -> None:
+    start, goal, actions = _toy_domain()
+    tracer_a = _RecordingTracer()
+    tracer_b = _RecordingTracer()
+    strategy_a = MCTSStrategy(
+        exploration=MCTSExploration(iterations=10, wall_clock_ms=0.0, seed=4),
+        tracing=MCTSTracingConfig(tracer=tracer_a, record_expansions=True),
+    )
+    strategy_b = MCTSStrategy(
+        exploration=MCTSExploration(iterations=10, wall_clock_ms=0.0, seed=4),
+        tracing=MCTSTracingConfig(tracer=tracer_b, record_expansions=True),
+    )
+
+    async def _run_both() -> None:
+        await asyncio.gather(
+            strategy_a.aplan(start, goal, actions),
+            strategy_b.aplan(start, goal, actions),
+        )
+
+    asyncio.run(_run_both())
+    assert strategy_a.tracing.tracer is tracer_a
+    assert strategy_b.tracing.tracer is tracer_b
+    assert len(tracer_a.expands) > 0
+    assert len(tracer_b.expands) > 0
+    assert len(tracer_a.completes) == 1
+    assert len(tracer_b.completes) == 1

@@ -84,9 +84,7 @@ class TestShapeRewardBackwardCompat:
 
 
 class TestShapeRewardWithHeuristic:
-    def test_heuristic_value_propagates_to_reward(
-        self, count_goal: GoalSpec
-    ) -> None:
+    def test_heuristic_value_propagates_to_reward(self, count_goal: GoalSpec) -> None:
         from langgoap.planner.mcts import _shape_reward
 
         def half_done(state: PlanningState, goal: GoalSpec) -> float:
@@ -182,9 +180,9 @@ class TestRolloutPoliciesWithHeuristic:
             return 1.0 - remaining / 20.0
 
         rng = random.Random(7)
-        shaped = RandomRollout(
-            max_depth=3, rng=rng, scalar_heuristic=progress
-        ).rollout(state=count_start, goal=count_goal, actions=count_actions)
+        shaped = RandomRollout(max_depth=3, rng=rng, scalar_heuristic=progress).rollout(
+            state=count_start, goal=count_goal, actions=count_actions
+        )
         assert -1.0 <= shaped <= 1.0
         assert shaped > -1.0  # default without heuristic would be -1.0 exactly
 
@@ -195,7 +193,12 @@ class TestMCTSStrategyWithHeuristic:
         count_actions: list[ActionSpec],
         count_goal: GoalSpec,
     ) -> None:
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
 
         def progress(state: PlanningState, goal: GoalSpec) -> float:
             remaining = int(state.to_dict().get("remaining", 0))
@@ -203,9 +206,7 @@ class TestMCTSStrategyWithHeuristic:
 
         start = PlanningState.from_dict({"remaining": 4, "done": False})
         strategy = MCTSStrategy(
-            iterations=64,
-            rollout_depth=4,
-            seed=7,
+            exploration=MCTSExploration(iterations=64, rollout_depth=4, seed=7),
             scalar_heuristic=progress,
         )
         plan = strategy.plan(start, count_goal, count_actions)
@@ -220,7 +221,12 @@ class TestMCTSStrategyWithHeuristic:
         """On a problem where default reward is uniformly -1.0, the
         scalar-heuristic strategy must reach the goal within the same
         budget while the flat-reward one cannot discriminate children."""
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
 
         def progress(state: PlanningState, goal: GoalSpec) -> float:
             remaining = int(state.to_dict().get("remaining", 0))
@@ -229,12 +235,13 @@ class TestMCTSStrategyWithHeuristic:
         start = PlanningState.from_dict({"remaining": 4, "done": False})
 
         shaped = MCTSStrategy(
-            iterations=128, rollout_depth=2, seed=7, scalar_heuristic=progress
+            exploration=MCTSExploration(iterations=128, rollout_depth=2, seed=7),
+            scalar_heuristic=progress,
         ).plan(start, count_goal, count_actions)
         assert shaped is not None and len(shaped.actions) == 4
 
     def test_exports_scalar_heuristic_from_public_api(self) -> None:
-        from langgoap.planner.mcts import ScalarHeuristic as FromModule
         from langgoap.planner import ScalarHeuristic as FromPackage
+        from langgoap.planner.mcts import ScalarHeuristic as FromModule
 
         assert FromModule is FromPackage

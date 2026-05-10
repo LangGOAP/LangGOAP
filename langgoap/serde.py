@@ -63,7 +63,13 @@ from langgraph.checkpoint.serde.jsonplus import (
 from langgraph.checkpoint.serde.jsonplus import _option as _stock_option
 
 from langgoap.actions import ActionSpec
-from langgoap.goals import ConstraintSpec, GoalSpec, MultiGoal, SoftGoal
+from langgoap.goals import (
+    ConstraintSpec,
+    GoalPolicy,
+    GoalSpec,
+    MultiGoal,
+    SoftGoal,
+)
 from langgoap.graph.state import ActionResult
 from langgoap.guards import GuardResult
 from langgoap.history import ExecutionRecord
@@ -114,6 +120,7 @@ LANGGOAP_ALLOWED_MSGPACK_TYPES: tuple[type, ...] = (
     ConstraintSpec,
     CSPMetadata,
     ExecutionRecord,
+    GoalPolicy,
     GoalSpec,
     GuardResult,
     HardSoftScore,
@@ -477,6 +484,28 @@ def _make_langgoap_redis_serializer_cls() -> type:
                 return cls(kwargs["__enum_value__"])
 
             return super()._reconstruct_from_constructor(obj)
+
+        def _revive_if_needed(self, obj: Any) -> Any:
+            # Intercept our custom LC encodings (frozenset, tuple, enum)
+            # before the base ``_reviver`` runs.  The base treats
+            # ``["builtins", "frozenset"]`` as a "safe" type and tries
+            # ``frozenset(__set_items__=[...])``, which raises ``TypeError``
+            # and is silently swallowed \u2014 returning ``None`` for the field.
+            # Without this short-circuit, deserializing a ``PlanningState``
+            # whose ``conditions`` round-tripped through Redis would yield
+            # ``PlanningState(conditions=None)`` and break ``to_dict()``.
+            if (
+                isinstance(obj, dict)
+                and obj.get("lc") == 2
+                and obj.get("type") == "constructor"
+            ):
+                id_parts = obj.get("id", [])
+                kwargs = obj.get("kwargs", {})
+                if id_parts in (["builtins", "frozenset"], ["builtins", "tuple"]):
+                    return self._reconstruct_from_constructor(obj)
+                if "__enum_value__" in kwargs:
+                    return self._reconstruct_from_constructor(obj)
+            return super()._revive_if_needed(obj)
 
         def _default_handler(self, obj: Any) -> Any:
             # Catch any MappingProxyType that slips past preprocessing.

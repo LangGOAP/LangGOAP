@@ -79,7 +79,10 @@ class TransitionModel(Protocol):
     enforced by :func:`assert_expected_matches_declared`.
     """
 
-    divergence_policy: "DivergencePolicy | None"
+    # Declared as a read-only property so frozen-dataclass implementations
+    # (e.g. :class:`DeterministicTransitionModel`) satisfy the Protocol.
+    @property
+    def divergence_policy(self) -> "DivergencePolicy | None": ...
 
     def expected(
         self, state: Mapping[str, Any], action: ActionSpec

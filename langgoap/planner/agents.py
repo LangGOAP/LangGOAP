@@ -24,14 +24,26 @@ the :class:`TransitionModel`.
 from __future__ import annotations
 
 from random import Random
-from typing import Any, Callable, Generic, Mapping, Protocol, Sequence, TypeVar
-from typing import runtime_checkable
+from typing import (
+    Any,
+    Callable,
+    Generic,
+    Mapping,
+    Protocol,
+    Sequence,
+    TypeVar,
+    runtime_checkable,
+)
 
 A = TypeVar("A")
+# Covariant variant for the read-only Protocol surface (action only appears
+# in return position).  Concrete classes keep using the invariant ``A``
+# because Generic[...] cannot accept variant TypeVars.
+A_co = TypeVar("A_co", covariant=True)
 
 
 @runtime_checkable
-class AgentModel(Protocol[A]):
+class AgentModel(Protocol[A_co]):
     """Predicts an external agent's next action given a world state.
 
     Generic over the action type ``A``.  Conventional values include
@@ -40,11 +52,11 @@ class AgentModel(Protocol[A]):
     hashable action token.
     """
 
-    def expected(self, state: Mapping[str, Any]) -> A:
+    def expected(self, state: Mapping[str, Any]) -> A_co:
         """Return the deterministic point-estimate action for ``state``."""
         ...
 
-    def sample(self, state: Mapping[str, Any], rng: Random) -> A:
+    def sample(self, state: Mapping[str, Any], rng: Random) -> A_co:
         """Draw one action from this agent's distribution for ``state``."""
         ...
 

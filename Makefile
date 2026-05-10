@@ -1,7 +1,10 @@
-.PHONY: install format lint test test-all clean check-types check docs docs-clean docs-serve test-coverage coverage-report coverage-html find-dead-code benchmark benchmark-compare
+.PHONY: install install-frozen format lint test test-all clean check-types check docs docs-clean docs-serve test-coverage coverage-report coverage-html find-dead-code benchmark benchmark-compare
 
 install:
 	uv sync
+
+install-frozen:
+	uv sync --frozen
 
 format:
 	uv run isort ./langgoap ./tests/ --profile black

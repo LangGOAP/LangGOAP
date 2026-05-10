@@ -17,6 +17,7 @@ from langgoap import (
     ActionSpec,
     BendableScore,
     ConstraintSpec,
+    GoalPolicy,
     GoalSpec,
     HardSoftScore,
     LangGoapSerializer,
@@ -232,7 +233,7 @@ class TestGoalSpecRoundTrip:
         original = GoalSpec(
             conditions={"report_ready": True},
             constraints=(c1, c2),
-            max_replans=5,
+            policy=GoalPolicy(max_replans=5),
         )
         restored = _round_trip(serde, original)
         assert isinstance(restored, GoalSpec)
@@ -243,7 +244,7 @@ class TestGoalSpecRoundTrip:
         assert restored.constraints[1].key == "cost_usd"
         assert restored.constraints[1].level == "soft"
         assert restored.constraints[1].weight == 2.0
-        assert restored.max_replans == 5
+        assert restored.policy.max_replans == 5
 
     def test_goal_minimal(self) -> None:
         serde = LangGoapSerializer()
@@ -732,3 +733,52 @@ class TestStockTypesPassThrough:
         serde = LangGoapSerializer()
         assert _round_trip(serde, True) is True
         assert _round_trip(serde, False) is False
+
+
+# ---------------------------------------------------------------------------
+# LangGoapRedisSerializer JSON-path round-trips
+# ---------------------------------------------------------------------------
+#
+# The Redis variant uses a JSON-first path that goes through the base
+# ``_revive_if_needed`` -> ``_reviver`` chain.  The base ``_reviver``
+# treats ``["builtins", "frozenset"]`` and ``["builtins", "tuple"]`` as
+# safe types and tries to instantiate them via ``frozenset(__set_items__=...)``,
+# which raises ``TypeError`` and is silently swallowed (returning
+# ``None``).  Our subclass must intercept these encodings *before* the
+# base reviver runs.  Without that intercept, deserializing a
+# ``PlanningState`` whose ``conditions`` round-tripped through the JSON
+# path yields ``PlanningState(conditions=None)`` and breaks ``to_dict``.
+
+
+def _redis_round_trip(obj: Any) -> Any:
+    redis = pytest.importorskip("langgraph.checkpoint.redis.jsonplus_redis")
+    del redis
+    from langgoap.serde import _get_langgoap_redis_serializer_cls
+
+    cls = _get_langgoap_redis_serializer_cls()
+    serde = cls()
+    type_tag, payload = serde.dumps_typed(obj)
+    return serde.loads_typed((type_tag, payload))
+
+
+class TestRedisSerializerRoundTrip:
+    def test_planning_state_conditions_survive_json_path(self) -> None:
+        original = PlanningState.from_dict({"data": True, "done": False})
+        restored = _redis_round_trip(original)
+        assert isinstance(restored, PlanningState)
+        # The bug was that conditions came back as ``None``; assert it
+        # round-trips as the original frozenset and ``to_dict`` works.
+        assert restored.conditions == original.conditions
+        assert restored.to_dict() == {"data": True, "done": False}
+
+    def test_bare_frozenset_of_tuples_survives_json_path(self) -> None:
+        original = frozenset({("a", 1), ("b", 2)})
+        restored = _redis_round_trip(original)
+        assert isinstance(restored, frozenset)
+        assert restored == original
+
+    def test_bare_tuple_survives_json_path(self) -> None:
+        original = ("x", "y", 3)
+        restored = _redis_round_trip(original)
+        assert isinstance(restored, tuple)
+        assert restored == original

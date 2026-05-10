@@ -347,8 +347,14 @@ def test_reflections_persisted_to_store() -> None:
     assert stored[0]["error"] == "persist err"
 
 
-def test_reflections_loaded_from_store_on_init() -> None:
-    """A new ReflexionTracer with the same store picks up prior reflections."""
+def test_reflections_loaded_from_store_lazily() -> None:
+    """A new ReflexionTracer with the same store picks up prior
+    reflections on first hook (or via an explicit ``load()`` call).
+
+    Construction itself never performs I/O — see
+    ``test_init_does_not_perform_blocking_io_on_async_only_store`` for
+    the regression case that motivated deferring the load.
+    """
     from langgraph.store.memory import InMemoryStore
 
     from langgoap.history import StoreExecutionHistory
@@ -367,11 +373,105 @@ def test_reflections_loaded_from_store_on_init() -> None:
     tracer1.on_action_complete(result)
     assert len(tracer1.reflections) == 1
 
-    # Second tracer shares the same store — must load tracer1's reflection.
+    # Second tracer shares the store but defers I/O until first use.
     tracer2 = ReflexionTracer(history=history)
+    assert tracer2.reflections == []
+    # Either an explicit ``load()`` or any sync hook hydrates state.
+    tracer2.load()
     assert len(tracer2.reflections) == 1
     assert tracer2.reflections[0].action_name == "old_action"
     assert tracer2.reflections[0].error == "old error"
+
+    # ``load()`` is idempotent — a second call is a no-op even after
+    # additional persisted state.
+    tracer2.load()
+    assert len(tracer2.reflections) == 1
+
+
+def test_init_does_not_perform_blocking_io_on_async_only_store() -> None:
+    """Construction must not call ``store.get`` — async-only stores
+    raise ``NotImplementedError`` from the sync path and would crash
+    the tracer at import-equivalent timing.
+    """
+
+    class _AsyncOnlyStore:
+        def __init__(self) -> None:
+            self.sync_get_calls = 0
+
+        def get(self, *_a: Any, **_kw: Any) -> None:
+            self.sync_get_calls += 1
+            raise NotImplementedError("sync get is not supported")
+
+        async def aget(self, *_a: Any, **_kw: Any) -> None:
+            return None
+
+        def put(self, *_a: Any, **_kw: Any) -> None:
+            pass
+
+        async def aput(self, *_a: Any, **_kw: Any) -> None:
+            pass
+
+    class _History:
+        def __init__(self, store: Any) -> None:
+            self._store = store
+
+    store = _AsyncOnlyStore()
+    history = _History(store)
+    # Construction must complete without touching ``store.get``.
+    tracer = ReflexionTracer(history=history)
+    assert store.sync_get_calls == 0
+    assert tracer.reflections == []
+
+
+@pytest.mark.asyncio
+async def test_aload_uses_async_store_path() -> None:
+    """``aload`` must prefer ``store.aget`` over ``store.get`` so
+    async-only stores are awaited rather than raising from sync paths.
+    """
+
+    class _Item:
+        def __init__(self, value: dict[str, Any]) -> None:
+            self.value = value
+
+    class _AsyncOnlyStore:
+        def __init__(self) -> None:
+            self.aget_calls = 0
+            self.sync_get_calls = 0
+
+        def get(self, *_a: Any, **_kw: Any) -> None:
+            self.sync_get_calls += 1
+            raise NotImplementedError
+
+        async def aget(self, _ns: Any, _key: str) -> Any:
+            self.aget_calls += 1
+            return _Item(
+                {
+                    "reflections": [
+                        {
+                            "action_name": "from_async",
+                            "error": "boom",
+                            "reflection": "r",
+                            "suggestion": "s",
+                            "timestamp": "2026-01-01T00:00:00+00:00",
+                        }
+                    ]
+                }
+            )
+
+    class _History:
+        def __init__(self, store: Any) -> None:
+            self._store = store
+
+    store = _AsyncOnlyStore()
+    tracer = ReflexionTracer(history=_History(store))
+    await tracer.aload()
+    assert store.sync_get_calls == 0
+    assert store.aget_calls == 1
+    assert len(tracer.reflections) == 1
+    assert tracer.reflections[0].action_name == "from_async"
+    # Idempotent.
+    await tracer.aload()
+    assert store.aget_calls == 1
 
 
 @pytest.mark.asyncio

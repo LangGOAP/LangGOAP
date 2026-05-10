@@ -126,6 +126,7 @@ class TestTransitionModelInExecutor:
         that dict *is* the runtime truth and the transition model is
         bypassed, matching the contract documented on ``_apply_result``.
         """
+
         def _truthy_execute(world: Mapping[str, Any]) -> dict[str, Any]:
             return {"stage_a": True, "authoritative": True}
 

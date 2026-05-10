@@ -51,16 +51,17 @@ class _BiasedModel:
     def __post_init__(self) -> None:
         from langgoap.planner.transitions import DivergencePolicy
 
-        self.divergence_policy = DivergencePolicy(
-            reason="test double", kind="other"
-        )
+        self.divergence_policy = DivergencePolicy(reason="test double", kind="other")
 
     def expected(self, state, action):  # type: ignore[no-untyped-def]
         return action.get_effects(dict(state))
 
     def sample(self, state, action, rng):  # type: ignore[no-untyped-def]
         declared = dict(action.get_effects(dict(state)))
-        return {k: (v + self.shift if isinstance(v, int) else v) for k, v in declared.items()}
+        return {
+            k: (v + self.shift if isinstance(v, int) else v)
+            for k, v in declared.items()
+        }
 
 
 class TestStochasticRollout:
@@ -130,27 +131,44 @@ class TestStochasticRollout:
 
 class TestMCTSStrategyTransitionModel:
     def test_defaults_to_deterministic_model(self) -> None:
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
         from langgoap.planner.transitions import DeterministicTransitionModel
 
-        strat = MCTSStrategy(iterations=4, wall_clock_ms=0)
+        strat = MCTSStrategy(exploration=MCTSExploration(iterations=4, wall_clock_ms=0))
         assert isinstance(strat.transition_model, DeterministicTransitionModel)
 
     def test_accepts_custom_model(self) -> None:
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
 
         model = _CountingModel()
         strat = MCTSStrategy(
-            iterations=4, wall_clock_ms=0, transition_model=model
+            exploration=MCTSExploration(iterations=4, wall_clock_ms=0),
+            transition_model=model,
         )
         assert strat.transition_model is model
 
     def test_tree_expansion_uses_model_expected(self) -> None:
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
 
         model = _CountingModel()
         strat = MCTSStrategy(
-            iterations=6, wall_clock_ms=0, transition_model=model, seed=1
+            exploration=MCTSExploration(iterations=6, wall_clock_ms=0, seed=1),
+            transition_model=model,
         )
         goal = GoalSpec(conditions={"done": True})
         actions = [
@@ -168,27 +186,27 @@ class TestMCTSStrategyTransitionModel:
         """When a non-deterministic model is passed and no rollout is
         explicitly wired, the strategy should default to
         :class:`StochasticRollout` so ``sample`` is actually exercised."""
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
 
         model = _CountingModel()
         strat = MCTSStrategy(
-            iterations=4,
-            wall_clock_ms=0,
-            rollout_depth=3,
+            exploration=MCTSExploration(
+                iterations=4, wall_clock_ms=0, rollout_depth=3, seed=1
+            ),
             transition_model=model,
-            seed=1,
         )
         # Two-step goal so rollouts do not terminate on the first
         # expansion \u2014 otherwise ``StochasticRollout.rollout`` exits on
         # the initial satisfied-check before ever calling ``sample``.
         goal = GoalSpec(conditions={"step_a": True, "step_b": True})
         actions = [
-            ActionSpec(
-                name="a", preconditions={}, effects={"step_a": True}, cost=1.0
-            ),
-            ActionSpec(
-                name="b", preconditions={}, effects={"step_b": True}, cost=1.0
-            ),
+            ActionSpec(name="a", preconditions={}, effects={"step_a": True}, cost=1.0),
+            ActionSpec(name="b", preconditions={}, effects={"step_b": True}, cost=1.0),
         ]
         start = PlanningState.from_dict({})
 

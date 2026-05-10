@@ -53,8 +53,18 @@ class PlanningStrategy(Protocol):
         actions: list[ActionSpec],
         *,
         blacklisted_actions: list[str] | None = None,
+        prior_plan: Plan | None = None,
+        current_step: int = 0,
     ) -> Plan | None:
-        """Return a plan from ``start`` to ``goal``."""
+        """Return a plan from ``start`` to ``goal``.
+
+        ``prior_plan`` and ``current_step`` are advisory: most strategies
+        ignore them, but repair-style strategies (see
+        :class:`~langgoap.planner.repair.RepairStrategy`) use them to
+        patch a partially-executed plan instead of replanning from
+        scratch.  Strategies that do not consume them must still accept
+        the keyword arguments to remain LSP-substitutable.
+        """
         ...
 
 
@@ -81,7 +91,10 @@ class AStarStrategy:
         actions: list[ActionSpec],
         *,
         blacklisted_actions: list[str] | None = None,
+        prior_plan: Plan | None = None,
+        current_step: int = 0,
     ) -> Plan | None:
+        del prior_plan, current_step  # A* plans from scratch
         return astar_plan(
             start,
             goal,
@@ -111,7 +124,10 @@ class CSPRefinementStrategy:
         actions: list[ActionSpec],
         *,
         blacklisted_actions: list[str] | None = None,
+        prior_plan: Plan | None = None,
+        current_step: int = 0,
     ) -> Plan | None:
+        del prior_plan, current_step  # CSP refines the constructor-time candidate
         # Local import to avoid pipeline ↔ strategy import cycles.
         from langgoap.planner.csp import validate_plan
         from langgoap.planner.pipeline import _augment_plan
@@ -139,7 +155,10 @@ class TwoPhasePipelineStrategy:
         actions: list[ActionSpec],
         *,
         blacklisted_actions: list[str] | None = None,
+        prior_plan: Plan | None = None,
+        current_step: int = 0,
     ) -> Plan | None:
+        del prior_plan, current_step  # pipeline plans from scratch
         return pipeline_plan(
             start,
             goal,
@@ -188,10 +207,28 @@ class LazyDecompositionStrategy:
         actions: list[ActionSpec],
         *,
         blacklisted_actions: list[str] | None = None,
+        prior_plan: Plan | None = None,
+        current_step: int = 0,
     ) -> Plan | None:
-        full_plan = self._inner.plan(
-            start, goal, actions, blacklisted_actions=blacklisted_actions
-        )
+        # Forward repair kwargs only when meaningful so legacy inner
+        # strategies whose signature predates the widened Protocol keep
+        # working on initial plans.
+        if prior_plan is not None:
+            full_plan = self._inner.plan(
+                start,
+                goal,
+                actions,
+                blacklisted_actions=blacklisted_actions,
+                prior_plan=prior_plan,
+                current_step=current_step,
+            )
+        else:
+            full_plan = self._inner.plan(
+                start,
+                goal,
+                actions,
+                blacklisted_actions=blacklisted_actions,
+            )
         if full_plan is None:
             return None
 
@@ -261,17 +298,32 @@ class AnytimePlanningStrategy:
         actions: list[ActionSpec],
         *,
         blacklisted_actions: list[str] | None = None,
+        prior_plan: Plan | None = None,
+        current_step: int = 0,
     ) -> Plan | None:
         import concurrent.futures
 
+        # Forward repair kwargs only when meaningful so legacy inner
+        # strategies that predate the widened Protocol keep working.
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(
-                self._inner.plan,
-                start,
-                goal,
-                actions,
-                blacklisted_actions=blacklisted_actions,
-            )
+            if prior_plan is not None:
+                future = pool.submit(
+                    self._inner.plan,
+                    start,
+                    goal,
+                    actions,
+                    blacklisted_actions=blacklisted_actions,
+                    prior_plan=prior_plan,
+                    current_step=current_step,
+                )
+            else:
+                future = pool.submit(
+                    self._inner.plan,
+                    start,
+                    goal,
+                    actions,
+                    blacklisted_actions=blacklisted_actions,
+                )
             try:
                 return future.result(timeout=self._budget_ms / 1000.0)
             except concurrent.futures.TimeoutError:

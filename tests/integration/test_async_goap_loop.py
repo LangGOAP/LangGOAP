@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 from langgoap.actions import ActionSpec, GoapAction
-from langgoap.goals import GoalSpec
+from langgoap.goals import GoalPolicy, GoalSpec
 from langgoap.graph.builder import GoapGraph
 from langgoap.types import ReplanStrategy
 from tests.conftest import make_action as _action
@@ -130,7 +130,7 @@ class TestAsyncGoapLoop:
         ]
 
         result = await GoapGraph(actions=actions).ainvoke(
-            goal=GoalSpec(conditions={"done": True}, max_replans=5),
+            goal=GoalSpec(conditions={"done": True}, policy=GoalPolicy(max_replans=5)),
             world_state={},
         )
 
@@ -197,7 +197,7 @@ class TestAsyncGoapLoop:
         result = await GoapGraph(actions=actions).ainvoke(
             goal=GoalSpec(
                 conditions={"done": True},
-                replan_strategy=ReplanStrategy.NEVER,
+                policy=GoalPolicy(replan_strategy=ReplanStrategy.NEVER),
             ),
             world_state={},
         )

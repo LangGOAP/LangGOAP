@@ -658,3 +658,135 @@ class TestBoundedSearchBuffer:
         dead_ends = [e for e in final_events if e["kind"] == "search_dead_end"]
         assert len(dead_ends) == 1
         assert dead_ends[0]["reason"] == "exhausted"
+
+
+class TestConcurrentActionTracing:
+    """``LangSmithTracer`` must correlate concurrent ``on_action_start``
+    / ``on_action_complete`` pairs by ``action_name`` so a parallel wave
+    of N actions emits N distinct child runs whose outputs land on the
+    correct run id.
+    """
+
+    def test_parallel_action_runs_do_not_clobber_each_other(
+        self,
+        mock_client: MagicMock,
+        goal: GoalSpec,
+        actions: list[ActionSpec],
+    ) -> None:
+        import threading
+
+        tracer = LangSmithTracer(client=mock_client, project_name="test")
+        tracer.on_plan_start(goal, {}, "a_star")
+
+        # Two actions whose start/complete pairs interleave from
+        # different threads.  Without per-action correlation the second
+        # ``on_action_start`` would overwrite the first run id and both
+        # ``on_action_complete`` calls would target the same child run.
+        a, b = actions
+
+        start = threading.Barrier(2)
+        results: dict[str, _StubResult] = {
+            "gather": _StubResult(action_name="gather", success=True),
+            "process": _StubResult(action_name="process", success=False, error="boom"),
+        }
+
+        def _run(action: ActionSpec) -> None:
+            start.wait()
+            tracer.on_action_start(action, {})
+            tracer.on_action_complete(results[action.name])
+
+        threads = [threading.Thread(target=_run, args=(act,)) for act in (a, b)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # Two child create_run calls (plus the root) and two action
+        # update_run calls — one per action, addressed to its own id.
+        action_creates = [
+            c
+            for c in mock_client.create_run.call_args_list
+            if c.kwargs.get("run_type") == "tool"
+        ]
+        assert len(action_creates) == 2
+        name_to_id = {
+            c.kwargs["name"].removeprefix("goap_action:"): c.kwargs["id"]
+            for c in action_creates
+        }
+        assert set(name_to_id) == {"gather", "process"}
+
+        # Each action update_run targets exactly one of the freshly
+        # created child run ids.  The error/success payloads must not
+        # be cross-wired between actions.
+        action_updates = {
+            c.args[0]: c.kwargs
+            for c in mock_client.update_run.call_args_list
+            if c.args and c.args[0] in name_to_id.values()
+        }
+        assert len(action_updates) == 2
+        assert action_updates[name_to_id["gather"]]["error"] is None
+        assert action_updates[name_to_id["process"]]["error"] == "boom"
+
+    def test_action_complete_without_matching_start_is_noop(
+        self,
+        tracer: LangSmithTracer,
+        mock_client: MagicMock,
+        goal: GoalSpec,
+    ) -> None:
+        """Stray ``on_action_complete`` (no matching start) must not
+        update an unrelated run id; in the legacy single-slot impl this
+        could update the most recent action by accident.
+        """
+        tracer.on_plan_start(goal, {}, "a_star")
+        mock_client.update_run.reset_mock()
+        tracer.on_action_complete(_StubResult(action_name="never_started"))
+        # No update_run targeting an action run id should fire.
+        assert mock_client.update_run.call_count == 0
+
+    def test_action_complete_accepts_state_update_dict_payload(
+        self,
+        mock_client: MagicMock,
+        goal: GoalSpec,
+        actions: list[ActionSpec],
+    ) -> None:
+        """The graph executor passes its state-update dict (with
+        ``execution_history: [ActionResult]``) to ``on_action_complete``
+        rather than a raw :class:`ActionResult`.  The tracer must
+        resolve ``action_name`` from the inner :class:`ActionResult`
+        so the corresponding child run is closed.
+
+        Pins the regression that surfaced when
+        :class:`~langgoap.tracing.langsmith.LangSmithTracer` was
+        refactored to look up runs by ``result.action_name`` directly:
+        the dict payload silently bypassed the close because
+        ``getattr(dict, 'action_name', '')`` returned ``''``.
+        """
+        tracer = LangSmithTracer(client=mock_client, project_name="test")
+        tracer.on_plan_start(goal, {}, "a_star")
+        a = actions[0]
+
+        tracer.on_action_start(a, {})
+        # Mimic what GoapExecutor.acall actually passes \u2014 a state-update
+        # dict with execution_history wrapping the ActionResult.
+        executor_payload = {
+            "world_state": {"x": True},
+            "current_step": 1,
+            "execution_history": [
+                _StubResult(action_name=a.name, success=True),
+            ],
+        }
+        tracer.on_action_complete(executor_payload)
+
+        action_creates = [
+            c
+            for c in mock_client.create_run.call_args_list
+            if c.kwargs.get("run_type") == "tool"
+        ]
+        assert len(action_creates) == 1
+        run_id = action_creates[0].kwargs["id"]
+        closes = [
+            c
+            for c in mock_client.update_run.call_args_list
+            if c.args and c.args[0] == run_id and "outputs" in c.kwargs
+        ]
+        assert len(closes) == 1, "tracer must close the action run when given a dict"

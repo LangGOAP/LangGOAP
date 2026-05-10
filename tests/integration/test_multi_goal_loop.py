@@ -12,7 +12,7 @@ from typing import Any, cast
 import pytest
 
 from langgoap.actions import ActionSpec
-from langgoap.goals import GoalSpec, MultiGoal
+from langgoap.goals import GoalPolicy, GoalSpec, MultiGoal
 from langgoap.graph.builder import GoapGraph
 from langgoap.graph.nodes import GoapObserver
 from langgoap.graph.state import GoapState
@@ -282,8 +282,8 @@ class TestSequentialReplanBudget:
         ]
         mg = MultiGoal(
             goals=(
-                GoalSpec(conditions={"a_done": True}, max_replans=1),
-                GoalSpec(conditions={"b_done": True}, max_replans=1),
+                GoalSpec(conditions={"a_done": True}, policy=GoalPolicy(max_replans=1)),
+                GoalSpec(conditions={"b_done": True}, policy=GoalPolicy(max_replans=1)),
             ),
             mode="sequential",
         )

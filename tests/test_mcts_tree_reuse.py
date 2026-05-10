@@ -25,18 +25,22 @@ from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
 from langgoap.state import PlanningState
 
-
 # --- Fixtures --------------------------------------------------------
+
 
 @dataclass
 class _SlipCounterModel:
     slip_p: float = 0.3
     divergence_policy: Any = None
 
-    def expected(self, state: Mapping[str, Any], action: ActionSpec) -> Mapping[str, Any]:
+    def expected(
+        self, state: Mapping[str, Any], action: ActionSpec
+    ) -> Mapping[str, Any]:
         return action.get_effects(dict(state))
 
-    def sample(self, state: Mapping[str, Any], action: ActionSpec, rng: random.Random) -> Mapping[str, Any]:
+    def sample(
+        self, state: Mapping[str, Any], action: ActionSpec, rng: random.Random
+    ) -> Mapping[str, Any]:
         if rng.random() < self.slip_p:
             rem = int(state.get("remaining", 0))
             return {"remaining": rem, "done": False}
@@ -59,61 +63,97 @@ def _counter_action() -> ActionSpec:
 
 # --- API surface -----------------------------------------------------
 
+
 class TestTreeReuseAPI:
     def test_strategy_exposes_reuse_tree_flag_default_false(self) -> None:
-        from langgoap.planner.mcts import MCTSStrategy
-        assert MCTSStrategy().reuse_tree is False
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
+
+        assert MCTSStrategy().reuse.reuse_tree is False
 
     def test_strategy_exposes_tree_reuse_decay_default_zero_point_six(self) -> None:
-        from langgoap.planner.mcts import MCTSStrategy
-        assert MCTSStrategy().tree_reuse_decay == pytest.approx(0.6)
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
+
+        assert MCTSStrategy().reuse.tree_reuse_decay == pytest.approx(0.6)
 
     def test_strategy_exposes_advance_method(self) -> None:
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
+
         assert callable(getattr(MCTSStrategy(), "advance", None))
 
     def test_strategy_exposes_carryover_root_handle(self) -> None:
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
+
         strategy = MCTSStrategy()
         assert strategy._carryover_root is None
 
 
 # --- Backward compatibility -----------------------------------------
 
+
 class TestReuseOffIsBitIdentical:
     def test_reuse_off_leaves_carryover_unset(self) -> None:
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
 
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"remaining": 3, "done": False})
-        strategy = MCTSStrategy(iterations=32, rollout_depth=4, seed=7)
+        strategy = MCTSStrategy(
+            exploration=MCTSExploration(iterations=32, rollout_depth=4, seed=7)
+        )
         strategy.plan(start, goal, [_counter_action()])
-        assert strategy.reuse_tree is False
+        assert strategy.reuse.reuse_tree is False
         assert strategy._carryover_root is None
 
 
 # --- advance() under a stochastic model -----------------------------
 
+
 class TestAdvancePromotesObservedChildStochastic:
     def test_advance_promotes_matching_chance_successor(self) -> None:
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
 
         model = _SlipCounterModel(slip_p=0.3)
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"remaining": 3, "done": False})
         strategy = MCTSStrategy(
-            iterations=64,
-            rollout_depth=4,
-            seed=7,
+            exploration=MCTSExploration(iterations=64, rollout_depth=4, seed=7),
+            reuse=MCTSReuseConfig(reuse_tree=True, tree_reuse_decay=0.6),
             transition_model=model,
-            reuse_tree=True,
-            tree_reuse_decay=0.6,
         )
         strategy.plan(start, goal, [_counter_action()])
         root = strategy._last_root
-        assert root is not None and root.chance_children, (
-            "precondition: stochastic model populates chance_children"
-        )
+        assert (
+            root is not None and root.chance_children
+        ), "precondition: stochastic model populates chance_children"
         chance = root.chance_children[0]
         action = chance.action
         observed_decision = next(iter(chance.children_by_key.values()))
@@ -126,14 +166,20 @@ class TestAdvancePromotesObservedChildStochastic:
         assert new_root.parent is None
 
     def test_advance_state_mismatch_falls_back_to_cold_start(self) -> None:
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
 
         model = _SlipCounterModel(slip_p=0.3)
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"remaining": 3, "done": False})
         strategy = MCTSStrategy(
-            iterations=32, rollout_depth=4, seed=7,
-            transition_model=model, reuse_tree=True,
+            exploration=MCTSExploration(iterations=32, rollout_depth=4, seed=7),
+            reuse=MCTSReuseConfig(reuse_tree=True),
+            transition_model=model,
         )
         strategy.plan(start, goal, [_counter_action()])
         action = strategy._last_root.chance_children[0].action
@@ -146,21 +192,27 @@ class TestAdvancePromotesObservedChildStochastic:
 
 # --- advance() under the deterministic fast path --------------------
 
+
 class TestAdvancePromotesObservedChildDeterministic:
     def test_advance_promotes_matching_decision_child(self) -> None:
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
 
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"remaining": 3, "done": False})
         strategy = MCTSStrategy(
-            iterations=32, rollout_depth=4, seed=7,
-            reuse_tree=True, tree_reuse_decay=0.6,
+            exploration=MCTSExploration(iterations=32, rollout_depth=4, seed=7),
+            reuse=MCTSReuseConfig(reuse_tree=True, tree_reuse_decay=0.6),
         )
         strategy.plan(start, goal, [_counter_action()])
         root = strategy._last_root
-        assert root is not None and root.children, (
-            "precondition: deterministic model populates children"
-        )
+        assert (
+            root is not None and root.children
+        ), "precondition: deterministic model populates children"
         child = root.children[0]
         action = child.action
         assert action is not None
@@ -173,17 +225,23 @@ class TestAdvancePromotesObservedChildDeterministic:
 
 # --- Decay semantics ------------------------------------------------
 
+
 class TestDecaySemantics:
     def _build_reused_tree(self, decay: float):
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
 
         model = _SlipCounterModel(slip_p=0.3)
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"remaining": 3, "done": False})
         strategy = MCTSStrategy(
-            iterations=64, rollout_depth=4, seed=7,
-            transition_model=model, reuse_tree=True,
-            tree_reuse_decay=decay,
+            exploration=MCTSExploration(iterations=64, rollout_depth=4, seed=7),
+            reuse=MCTSReuseConfig(reuse_tree=True, tree_reuse_decay=decay),
+            transition_model=model,
         )
         strategy.plan(start, goal, [_counter_action()])
         root = strategy._last_root
@@ -213,17 +271,23 @@ class TestDecaySemantics:
 
 # --- End-to-end reuse across ticks ----------------------------------
 
+
 class TestReuseAccumulatesStatsAcrossTicks:
     def test_second_plan_reuses_carryover_as_new_root(self) -> None:
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
 
         model = _SlipCounterModel(slip_p=0.3)
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"remaining": 3, "done": False})
         strategy = MCTSStrategy(
-            iterations=64, rollout_depth=4, seed=7,
-            transition_model=model, reuse_tree=True,
-            tree_reuse_decay=1.0,
+            exploration=MCTSExploration(iterations=64, rollout_depth=4, seed=7),
+            reuse=MCTSReuseConfig(reuse_tree=True, tree_reuse_decay=1.0),
+            transition_model=model,
         )
         strategy.plan(start, goal, [_counter_action()])
         root1 = strategy._last_root
@@ -240,11 +304,17 @@ class TestReuseAccumulatesStatsAcrossTicks:
 
 # --- advance() before any plan() is a no-op -------------------------
 
+
 class TestAdvanceBeforePlanIsNoOp:
     def test_advance_with_no_prior_root_leaves_carryover_none(self) -> None:
-        from langgoap.planner.mcts import MCTSStrategy
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+            MCTSTracingConfig,
+        )
 
-        strategy = MCTSStrategy(reuse_tree=True)
+        strategy = MCTSStrategy(reuse=MCTSReuseConfig(reuse_tree=True))
         some_state = PlanningState.from_dict({"x": 1})
         strategy.advance(_counter_action(), some_state)
         assert strategy._carryover_root is None

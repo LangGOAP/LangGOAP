@@ -106,9 +106,23 @@ def _render_dot_display(source: str) -> str | Any:
         return source
     try:
         png_bytes = graphviz.Source(source).pipe(format="png")
-    except Exception as exc:  # pragma: no cover — environment-dependent
+    except Exception as exc:  # pragma: no cover \u2014 environment-dependent
         logger.warning("graphviz render failed (%s); returning DOT source.", exc)
         return source
     from IPython.display import Image
 
     return Image(png_bytes)
+
+
+def repr_mimebundle(plan: Plan, **_kwargs: Any) -> dict[str, Any]:
+    """Build the Jupyter rich-display MIME bundle for ``plan``.
+
+    Used by :meth:`langgoap.planner.types.Plan._repr_mimebundle_`.
+    Renders the plan as an inline PNG via :func:`draw_mermaid_png`.
+    """
+    from langgoap.viz.mermaid import draw_mermaid_png
+
+    return {
+        "text/plain": repr(plan),
+        "image/png": draw_mermaid_png(plan),
+    }

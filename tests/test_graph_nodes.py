@@ -8,7 +8,7 @@ import pytest
 from langgraph.graph import END
 
 from langgoap.actions import ActionSpec
-from langgoap.goals import GoalSpec
+from langgoap.goals import GoalPolicy, GoalSpec
 from langgoap.graph.nodes import (
     GoapExecutor,
     GoapObserver,
@@ -261,6 +261,20 @@ class TestGoapExecutor:
         result = executor(state)
         assert result == {}
 
+    def test_default_rng_is_single_instance_across_calls(self) -> None:
+        """Omitting ``rng`` yields one ``random.Random`` reused for the
+        executor's lifetime, not a fresh entropy-seeded RNG per action.
+        """
+        import random as _random
+
+        executor = GoapExecutor()
+        assert isinstance(executor._rng, _random.Random)
+        rng_first = executor._rng
+        # Drawing from the rng advances its internal state; the next
+        # access must return the *same* instance, not a fresh one.
+        _ = rng_first.random()
+        assert executor._rng is rng_first
+
 
 # ---------------------------------------------------------------------------
 # Observer node
@@ -316,7 +330,7 @@ class TestGoapObserver:
             "world_state": {"a": True, "b": False},  # b deviated!
             "goal": GoalSpec(
                 conditions={"c": True},
-                replan_strategy=ReplanStrategy.ON_DEVIATION,
+                policy=GoalPolicy(replan_strategy=ReplanStrategy.ON_DEVIATION),
             ),
             "plan": plan_obj,
             "current_step": 1,
@@ -336,7 +350,7 @@ class TestGoapObserver:
             "world_state": {"a": True},
             "goal": GoalSpec(
                 conditions={"b": True},
-                replan_strategy=ReplanStrategy.EVERY_ACTION,
+                policy=GoalPolicy(replan_strategy=ReplanStrategy.EVERY_ACTION),
             ),
             "plan": plan_obj,
             "current_step": 1,
@@ -421,7 +435,7 @@ class TestGoapObserver:
             "world_state": {"a": True, "b": False},  # deviated!
             "goal": GoalSpec(
                 conditions={"c": True},
-                replan_strategy=ReplanStrategy.NEVER,
+                policy=GoalPolicy(replan_strategy=ReplanStrategy.NEVER),
             ),
             "plan": plan_obj,
             "current_step": 1,
@@ -441,7 +455,7 @@ class TestGoapObserver:
             "world_state": {},
             "goal": GoalSpec(
                 conditions={"a": True},
-                replan_strategy=ReplanStrategy.NEVER,
+                policy=GoalPolicy(replan_strategy=ReplanStrategy.NEVER),
             ),
             "plan": plan_obj,
             "current_step": 0,
@@ -460,7 +474,7 @@ class TestGoapObserver:
         observer = GoapObserver()
         state: GoapState = {
             "world_state": {},
-            "goal": GoalSpec(conditions={"a": True}, max_replans=3),
+            "goal": GoalSpec(conditions={"a": True}, policy=GoalPolicy(max_replans=3)),
             "plan": plan_obj,
             "current_step": 0,
             "status": "action_failed",
@@ -479,7 +493,7 @@ class TestGoapObserver:
         observer = GoapObserver()
         state: GoapState = {
             "world_state": {},
-            "goal": GoalSpec(conditions={"a": True}, max_replans=0),
+            "goal": GoalSpec(conditions={"a": True}, policy=GoalPolicy(max_replans=0)),
             "plan": plan_obj,
             "current_step": 0,
             "status": "action_failed",
@@ -699,7 +713,7 @@ class TestGoapObserverRichState:
             "world_state": {"a": True, "extra": "irrelevant_data"},
             "goal": GoalSpec(
                 conditions={"b": True},
-                replan_strategy=ReplanStrategy.ON_DEVIATION,
+                policy=GoalPolicy(replan_strategy=ReplanStrategy.ON_DEVIATION),
             ),
             "plan": plan_obj,
             "current_step": 1,  # after step1, before step2
@@ -1061,6 +1075,32 @@ class TestParallelGoapExecutor:
         assert result2["current_step"] == 2
         assert executor._dep_cache is cache_after_wave1  # same cache object
 
+    def test_dep_cache_keyed_by_action_name_signature(self) -> None:
+        """Cache key is the action-name tuple, not ``id(plan_actions)``,
+        so two distinct plan tuples with the same action sequence reuse
+        the cached dependency graph and a different sequence invalidates
+        it.  Guards against stale-cache hazards from id() reuse.
+        """
+        a = _action("a", eff={"x": True})
+        b = _action("b", pre={"x": True}, eff={"y": True})
+        c = _action("c", eff={"z": True})
+        plan_p1 = _make_plan(a, b)
+        plan_p2 = _make_plan(a, b)  # distinct tuple, same names
+        plan_p3 = _make_plan(a, c)  # different name signature
+        executor = ParallelGoapExecutor()
+
+        deps_1 = executor._get_deps(plan_p1.actions)
+        cache_after_p1 = executor._dep_cache
+        deps_2 = executor._get_deps(plan_p2.actions)
+        # Same name signature ⇒ cache hit (object reused, not recomputed).
+        assert executor._dep_cache is cache_after_p1
+        assert deps_2 is deps_1
+
+        deps_3 = executor._get_deps(plan_p3.actions)
+        # Different name signature ⇒ cache miss (replaced).
+        assert executor._dep_cache is not cache_after_p1
+        assert deps_3 is not deps_1
+
     def test_transition_model_sample_drives_wave_effects(self) -> None:
         """Declared-effect actions in a wave go through ``model.sample``."""
         import random as _random
@@ -1088,9 +1128,7 @@ class TestParallelGoapExecutor:
         a = _action("a", eff={"x": True})
         b = _action("b", eff={"y": True})
         plan_obj = _make_plan(a, b)
-        executor = ParallelGoapExecutor(
-            transition_model=model, rng=_random.Random(0)
-        )
+        executor = ParallelGoapExecutor(transition_model=model, rng=_random.Random(0))
         state: GoapState = {"world_state": {}, "plan": plan_obj, "current_step": 0}
         result = executor(state)
 
