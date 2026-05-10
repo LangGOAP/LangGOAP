@@ -59,8 +59,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["langgoap"]
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest>=8.4",
     "pytest-asyncio>=1.1.0",
     "pytest-xdist[psutil]>=3.8.0",

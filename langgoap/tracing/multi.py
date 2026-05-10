@@ -82,9 +82,7 @@ class MultiTracer:
         exception: BaseException,
         backoff_ms: float,
     ) -> None:
-        self._fan_sync(
-            "on_action_retry", action, attempt, exception, backoff_ms
-        )
+        self._fan_sync("on_action_retry", action, attempt, exception, backoff_ms)
 
     def on_strategy_chosen(self, strategy_name: str) -> None:
         self._fan_sync("on_strategy_chosen", strategy_name)

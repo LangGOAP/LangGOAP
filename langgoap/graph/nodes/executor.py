@@ -5,9 +5,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import random
-from typing import Any
-
 import time
+from typing import Any
 
 from langgoap.actions import ActionSpec
 from langgoap.graph.nodes._execution import (

@@ -83,9 +83,7 @@ class Plan:
         """Create an empty plan (goal already satisfied)."""
         return cls(actions=(), expected_states=(), total_cost=0.0)
 
-    def net_value(
-        self, goal: Any, world_state: Any | None = None
-    ) -> float:
+    def net_value(self, goal: Any, world_state: Any | None = None) -> float:
         """Return ``goal.value - total_cost`` for ``MultiGoal`` selection.
 
         ``goal.value`` may be a static float or a callable resolved

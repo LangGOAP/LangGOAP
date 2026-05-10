@@ -42,9 +42,7 @@ class RecordingTracer:
         exception: BaseException,
         backoff_ms: float,
     ) -> None:
-        self.calls.append(
-            ("on_action_retry", (action, attempt, exception, backoff_ms))
-        )
+        self.calls.append(("on_action_retry", (action, attempt, exception, backoff_ms)))
 
     def on_strategy_chosen(self, strategy_name: str) -> None:
         self.calls.append(("on_strategy_chosen", (strategy_name,)))

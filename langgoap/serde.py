@@ -295,9 +295,7 @@ def _merge_langgoap_allowlist(
 _SERDE_SENTINEL: Any = object()
 
 
-def _langgoap_unpack_ext_hook(
-    code: int, data: bytes, fallback: Any
-) -> Any:
+def _langgoap_unpack_ext_hook(code: int, data: bytes, fallback: Any) -> Any:
     """Custom Ext hook that intercepts the ``__import_class__`` marker.
 
     When :func:`_langgoap_msgpack_default` encounters a class type it

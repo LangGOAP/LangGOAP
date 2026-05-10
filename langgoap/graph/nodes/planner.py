@@ -82,9 +82,7 @@ class GoapPlanner:
         # only consults a single object.  Empty list short-circuits to
         # NO_RESOLUTION on each consultation.
         self._stuck_handler: MulticastStuckHandler | None = (
-            MulticastStuckHandler(list(stuck_handlers))
-            if stuck_handlers
-            else None
+            MulticastStuckHandler(list(stuck_handlers)) if stuck_handlers else None
         )
         if max_stuck_iterations < 1:
             raise ValueError(

@@ -187,9 +187,7 @@ class GoapObserver:
             list(termination_policies) if termination_policies else []
         )
 
-    def _consult_termination(
-        self, state: GoapState
-    ) -> Command[str] | None:
+    def _consult_termination(self, state: GoapState) -> Command[str] | None:
         """Return a terminal Command if any policy fires, else ``None``.
 
         Each policy call is wrapped in try/except so a misbehaving
@@ -216,9 +214,7 @@ class GoapObserver:
                     goto=END,
                     update={
                         "status": "terminated",
-                        "replan_reason": (
-                            f"{decision.policy_name}: {decision.reason}"
-                        ),
+                        "replan_reason": (f"{decision.policy_name}: {decision.reason}"),
                     },
                 )
         return None

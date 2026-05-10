@@ -53,9 +53,7 @@ def _actions() -> list[Any]:
 
 
 def _publish_goal() -> GoalSpec:
-    return GoalSpec(
-        conditions={"published": True}, policy=GoalPolicy(max_replans=0)
-    )
+    return GoalSpec(conditions={"published": True}, policy=GoalPolicy(max_replans=0))
 
 
 # ---------------------------------------------------------------------------
