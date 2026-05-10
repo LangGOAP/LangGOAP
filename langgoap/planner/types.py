@@ -19,7 +19,14 @@ class PlanMetadata:
     """Metadata about how a plan was generated.
 
     Attributes:
-        nodes_explored: Number of A* nodes expanded during search.
+        nodes_explored: Number of A* / MCTS / pipeline nodes expanded
+            during search.  Search-style strategies populate this; the
+            greedy :class:`~langgoap.planner.utility.UtilityStrategy`
+            leaves it at ``0`` and reports its per-tick branching
+            factor in :attr:`applicable_count` instead.
+        applicable_count: Number of actions whose preconditions were
+            satisfied during this planning round.  Populated by the
+            utility planner; ``0`` for the search planners.
         planning_time_ms: Wall-clock time spent planning in milliseconds.
         actions_pruned: Number of actions removed by optimization passes.
         csp: Results from CSP constraint validation/optimization, or ``None``
@@ -27,6 +34,7 @@ class PlanMetadata:
     """
 
     nodes_explored: int = 0
+    applicable_count: int = 0
     planning_time_ms: float = 0.0
     actions_pruned: int = 0
     csp: CSPMetadata | None = None
@@ -74,6 +82,33 @@ class Plan:
     def empty(cls) -> Plan:
         """Create an empty plan (goal already satisfied)."""
         return cls(actions=(), expected_states=(), total_cost=0.0)
+
+    def net_value(
+        self, goal: Any, world_state: Any | None = None
+    ) -> float:
+        """Return ``goal.value - total_cost`` for ``MultiGoal`` selection.
+
+        ``goal.value`` may be a static float or a callable resolved
+        against ``world_state`` if supplied (preferred — preserves
+        rich, non-planning context that's stripped from the planner's
+        :class:`PlanningState`); otherwise it falls back to the plan's
+        expected end state, then to an empty mapping.
+
+        Used by ``MultiGoal(mode='best_value')`` to pick the goal with
+        the highest net utility.
+        """
+        value_attr = getattr(goal, "value", 1.0)
+        if callable(value_attr):
+            if world_state is not None:
+                ctx: Any = world_state
+            elif self.expected_states:
+                ctx = self.expected_states[-1].to_dict()
+            else:
+                ctx = {}
+            value = float(value_attr(ctx))
+        else:
+            value = float(value_attr)
+        return value - self.total_cost
 
     # ------------------------------------------------------------------
     # Visualization

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Literal, Mapping, Sequence
 
 from langgoap.types import ObjectiveDirection, ReplanStrategy
 
@@ -173,6 +173,12 @@ class GoalSpec:
     constraints: tuple[ConstraintSpec, ...] = field(default_factory=tuple)
     soft_goals: tuple[SoftGoal, ...] = field(default_factory=tuple)
     metrics: tuple["PlanQualityMetric", ...] = field(default_factory=tuple)
+    value: float | Callable[[Mapping[str, Any]], float] = 1.0
+    """Utility weight consulted by ``MultiGoal(mode='best_value')``.
+
+    Either a static float or a callable resolved against world state.
+    Defaults to ``1.0`` so existing code is unaffected.
+    """
 
     def __post_init__(self) -> None:
         # Accept plain dicts from callers and silently wrap conditions.
@@ -363,16 +369,17 @@ class MultiGoal:
     """
 
     goals: tuple[GoalSpec, ...]
-    mode: Literal["sequential", "any"] = "sequential"
+    mode: Literal["sequential", "any", "best_value"] = "sequential"
 
     def __post_init__(self) -> None:
         if not isinstance(self.goals, tuple):
             object.__setattr__(self, "goals", tuple(self.goals))
         if not self.goals:
             raise ValueError("MultiGoal must contain at least one GoalSpec")
-        if self.mode not in ("sequential", "any"):
+        if self.mode not in ("sequential", "any", "best_value"):
             raise ValueError(
-                f"MultiGoal.mode must be 'sequential' or 'any', got {self.mode!r}"
+                "MultiGoal.mode must be 'sequential', 'any', or 'best_value'; "
+                f"got {self.mode!r}"
             )
         for i, g in enumerate(self.goals):
             if not isinstance(g, GoalSpec):
