@@ -18,10 +18,15 @@ from langgoap.graph.nodes._execution import (
     _build_failure,
     _build_guard_block,
     _build_success,
+    _check_human_approval,
     _prepare_execution,
 )
 from langgoap.graph.nodes._helpers import logger
-from langgoap.graph.nodes.executor import async_execute_action
+from langgoap.graph.nodes.executor import (
+    _execute_with_retries_async,
+    _execute_with_retries_sync,
+    async_execute_action,
+)
 from langgoap.graph.state import ActionResult, GoapState
 from langgoap.guards import (
     ActionGuard,
@@ -111,18 +116,31 @@ class ParallelGoapExecutor:
         guards: list[ActionGuard | AsyncActionGuard] | None = None,
         transition_model: TransitionModel | None = None,
         rng: random.Random | None = None,
+        actions: list[ActionSpec] | None = None,
     ) -> None:
         # See ``GoapExecutor.__init__`` for the SafeTracerProxy rationale.
         self._tracer: PlanningTracer = SafeTracerProxy(tracer or NullTracer())
         self._guards: list[ActionGuard | AsyncActionGuard] = guards or []
         self._transition_model: TransitionModel | None = transition_model
         self._rng: random.Random = rng if rng is not None else random.Random()
+        # Source-of-truth action map for rebinding fields the serializer
+        # cannot round-trip (callable execute, qos, Pydantic
+        # require_human_approval class refs, human_input_key strings).
+        # See :class:`GoapExecutor._rebind` for the full rationale —
+        # same pattern, applied per-action inside each parallel wave.
+        self._actions: dict[str, ActionSpec] = (
+            {a.name: a for a in actions} if actions else {}
+        )
         # Cache the dependency graph by the plan's action-name signature
         # so it is computed once per plan rather than once per wave.  A
         # name tuple is used (not ``id(plan_actions)``) because Python
         # may reuse object addresses after garbage collection, which
         # would let a stale cache leak across distinct plans.
         self._dep_cache: tuple[tuple[str, ...], dict[int, list[int]]] | None = None
+
+    def _rebind(self, action: ActionSpec) -> ActionSpec:
+        """Restore the live ``ActionSpec`` for ``action.name`` if known."""
+        return self._actions.get(action.name, action)
 
     def _get_deps(self, plan_actions: tuple[ActionSpec, ...]) -> dict[int, list[int]]:
         """Return the dependency graph, caching by action-name signature."""
@@ -151,7 +169,7 @@ class ParallelGoapExecutor:
         all_results: list[ActionResult] = []
 
         for idx in group:
-            action = plan_obj.actions[idx]
+            action = self._rebind(plan_obj.actions[idx])
             logger.info(
                 "ParallelExecutor: running action %r (wave idx %d/%d)",
                 action.name,
@@ -170,13 +188,17 @@ class ParallelGoapExecutor:
                     self._tracer.on_action_complete(result)
                     return result
 
+            denial = _check_human_approval(action, merged_world, state_before)
+            if denial is not None:
+                self._tracer.on_action_complete(denial)
+                return denial
+
             try:
-                if action.aexecute is not None and action.execute is None:
-                    raise RuntimeError(
-                        f"Action {action.name!r} is async-only. Use ainvoke()."
-                    )
-                raw = (
-                    action.execute(merged_world) if action.execute is not None else None
+                raw = _execute_with_retries_sync(
+                    action,
+                    merged_world,
+                    tracer=self._tracer,
+                    rng=self._rng,
                 )
                 _apply_result(
                     raw,
@@ -216,7 +238,7 @@ class ParallelGoapExecutor:
         group = _find_parallel_group(plan_obj.actions, current_step, deps)
 
         async def _run_one(idx: int) -> dict[str, Any]:
-            action = plan_obj.actions[idx]
+            action = self._rebind(plan_obj.actions[idx])
             # Each parallel action gets a snapshot of the world-state as it
             # was at the start of this wave (independent actions don't see
             # each other's in-progress effects).
@@ -236,8 +258,18 @@ class ParallelGoapExecutor:
                     await self._tracer.aon_action_complete(result)
                     return result
 
+            denial = _check_human_approval(action, ws_snapshot, state_before)
+            if denial is not None:
+                await self._tracer.aon_action_complete(denial)
+                return denial
+
             try:
-                raw = await async_execute_action(action, ws_snapshot)
+                raw = await _execute_with_retries_async(
+                    action,
+                    ws_snapshot,
+                    tracer=self._tracer,
+                    rng=self._rng,
+                )
                 _apply_result(
                     raw,
                     action,

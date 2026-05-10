@@ -114,3 +114,4 @@ class GoapState(TypedDict, total=False):
     current_subgoal_index: int
     no_plan_explanation: dict[str, Any] | None
     reflection_context: list[str]
+    wall_clock_started_at: float | None

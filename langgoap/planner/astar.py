@@ -253,6 +253,10 @@ def _search(
     # Sort actions by descending precondition count (specificity tie-breaking)
     sorted_actions = sorted(actions, key=lambda a: len(a.preconditions), reverse=True)
 
+    # Hoist the single-use detection out of the per-expansion loop: the
+    # common case (every action is rerunnable) pays no cost.
+    has_single_use_actions = any(not a.can_rerun for a in sorted_actions)
+
     # A* search — ``counter`` is a mutable box so ``_expand_neighbors`` can
     # increment the tie-breaker and keep the open list's ordering stable
     # across calls.
@@ -298,7 +302,13 @@ def _search(
             continue
 
         _expand_neighbors(
-            current, sorted_actions, goal_conditions, best_g, open_list, counter
+            current,
+            sorted_actions,
+            goal_conditions,
+            best_g,
+            open_list,
+            counter,
+            has_single_use_actions=has_single_use_actions,
         )
 
     # Open list exhausted without reaching the goal — reachability pre-check
@@ -356,14 +366,29 @@ def _expand_neighbors(
     best_g: dict[PlanningState, float],
     open_list: list[_SearchNode],
     counter: list[int],
+    *,
+    has_single_use_actions: bool = False,
 ) -> None:
     """Push every improving neighbour of ``current`` onto the open list.
 
     ``counter`` is a single-element mutable list used as a tie-breaker
     box so the caller's value survives across invocations.
+
+    When ``has_single_use_actions`` is ``True`` the expander tracks the
+    set of action names already on the path through ``current`` and
+    skips any successor whose action has ``can_rerun=False``.  The flag
+    is hoisted to the caller so the common case (every action is
+    rerunnable) pays no per-expansion cost.
     """
     current_dict = current.state.to_dict()
+    used_names: frozenset[str] = (
+        frozenset(a.name for a in current.actions)
+        if has_single_use_actions
+        else frozenset()
+    )
     for action in sorted_actions:
+        if not action.can_rerun and action.name in used_names:
+            continue
         if not current.state.satisfies(action.preconditions):
             continue
         new_state = current.state.apply(action.get_effects(current_dict))

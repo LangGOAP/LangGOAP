@@ -168,25 +168,38 @@ def _is_approved(resume_value: Any) -> bool:
     return bool(resume_value)
 
 
+def _is_form_model(value: Any) -> bool:
+    """Return True iff ``value`` is a Pydantic ``BaseModel`` subclass."""
+    try:
+        from pydantic import BaseModel
+    except ImportError:  # pragma: no cover - Pydantic ships with LangChain
+        return False
+    return isinstance(value, type) and issubclass(value, BaseModel)
+
+
 def _check_human_approval(
     action: ActionSpec,
     world_state: dict[str, Any],
     state_before: dict[str, Any],
 ) -> dict[str, Any] | None:
-    """Gate execution behind a human approval interrupt when required.
+    """Gate execution behind a human-approval interrupt when required.
 
-    Calls :func:`~langgraph.types.interrupt` to pause the graph.  On
-    first encounter LangGraph raises ``GraphInterrupt`` (persisted by
-    the checkpointer).  On resume, ``interrupt()`` returns the
-    ``Command(resume=...)`` payload.
+    Three modes (``ActionSpec.require_human_approval``):
 
-    Returns:
-        ``None`` if the action is approved (or does not require approval).
-        A ``GoapState`` delta dict if the action was denied \u2014 the caller
-        should return this immediately and skip execution.
+    * ``False`` \u2014 no gate; returns ``None`` immediately.
+    * ``True`` \u2014 boolean approve/deny gate.
+    * Pydantic ``BaseModel`` subclass \u2014 typed-form gate; the interrupt
+      payload includes the model's JSON schema; the resume payload is
+      validated via ``Model.model_validate`` and merged into world
+      state under :attr:`ActionSpec.human_input_key` (or the action's
+      name when unset).
     """
-    if not action.require_human_approval:
+    requirement = action.require_human_approval
+    if not requirement:
         return None
+
+    if _is_form_model(requirement):
+        return _check_form_approval(action, world_state, state_before)
 
     resume_value = interrupt(
         {
@@ -211,6 +224,74 @@ def _check_human_approval(
     result = _build_failure(
         action,
         RuntimeError(f"human_approval_denied: {reason}"),
+        state_before,
+        world_state,
+    )
+    result["action_failure_counts"] = {action.name: action.max_retries + 1}
+    return result
+
+
+def _check_form_approval(
+    action: ActionSpec,
+    world_state: dict[str, Any],
+    state_before: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Typed-form HITL gate.  See :func:`_check_human_approval`."""
+    from pydantic import BaseModel, ValidationError
+
+    model_cls: type[BaseModel] = action.require_human_approval  # type: ignore[assignment]
+    schema = model_cls.model_json_schema()
+    resume_value = interrupt(
+        {
+            "type": "goap_action_form",
+            "action": action.name,
+            "form_schema": schema,
+            "model_name": model_cls.__name__,
+            "preconditions": dict(action.preconditions),
+            "world_state": dict(world_state),
+        }
+    )
+
+    if resume_value is None or not isinstance(resume_value, (dict, BaseModel)):
+        return _build_form_invalid_failure(
+            action,
+            "form payload missing or wrong shape",
+            state_before,
+            world_state,
+        )
+    try:
+        if isinstance(resume_value, BaseModel):
+            parsed = resume_value
+        else:
+            parsed = model_cls.model_validate(resume_value)
+    except ValidationError as exc:
+        return _build_form_invalid_failure(
+            action,
+            f"form payload failed validation: {exc.errors()!r}",
+            state_before,
+            world_state,
+        )
+
+    # Approved \u2014 merge the validated form (as JSON-friendly dict) into
+    # world_state under human_input_key (default: action name).  Storing
+    # the dict rather than the Pydantic instance keeps the value
+    # round-trippable through any checkpointer serializer without
+    # extra type registration.
+    key = action.human_input_key or action.name
+    world_state[key] = parsed.model_dump(mode="json")
+    return None
+
+
+def _build_form_invalid_failure(
+    action: ActionSpec,
+    reason: str,
+    state_before: dict[str, Any],
+    world_state: dict[str, Any],
+) -> dict[str, Any]:
+    """Build a failure result for a rejected typed-form HITL submission."""
+    result = _build_failure(
+        action,
+        RuntimeError(f"human_form_invalid: {reason}"),
         state_before,
         world_state,
     )
