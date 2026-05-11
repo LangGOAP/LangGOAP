@@ -272,10 +272,12 @@ class TestMemorySaver:
 pytest.importorskip(
     "langgraph.checkpoint.postgres",
     reason="Install langgoap[checkpoint-postgres] to run Postgres checkpointer tests",
+    exc_type=ImportError,
 )
 pytest.importorskip(
     "testcontainers.postgres",
     reason="testcontainers[postgres] required for Postgres checkpointer tests",
+    exc_type=ImportError,
 )
 
 

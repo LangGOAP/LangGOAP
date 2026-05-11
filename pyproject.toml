@@ -80,6 +80,11 @@ dev = [
     "langgraph-checkpoint-postgres>=3.0.0,<4.0.0",
     "langgraph-checkpoint-redis>=0.4.0,<1.0.0",
     "mfcqi>=0.0.4",
+    # psycopg[binary] ships a prebuilt libpq so the postgres
+    # checkpointer + testcontainers integration tests can actually
+    # talk to the postgres container instead of being skipped on a
+    # missing libpq wrapper.
+    "psycopg[binary]>=3.2",
 ]
 
 [tool.pytest.ini_options]
