@@ -30,13 +30,18 @@ CATALOG: dict[str, list[str]] = {
     "basics": [
         "plan_visualization.ipynb",
         "nl_goal_interpreter.ipynb",
+        "create_goap_agent_quickstart.ipynb",
+        "termination_policies.ipynb",
+        "stuck_handlers.ipynb",
+        "typed_form_hitl.ipynb",
+        "action_qos.ipynb",
     ],
     "tutorials": [
         # Tier 1 — Primers
         "directory_handler.ipynb",
         "robot_navigation.ipynb",
         "hungry_agent.ipynb",
-        # Tier 2 — Constraint optimization + workflow agents
+        # Tier 2 — Workflows and constraint optimization
         "cloud_balancing.ipynb",
         "vehicle_routing.ipynb",
         "nurse_rostering.ipynb",
@@ -44,12 +49,19 @@ CATALOG: dict[str, list[str]] = {
         "task_assigning.ipynb",
         "sql_query_agent.ipynb",
         "vulnerability_scanner.ipynb",
-        # Tier 3 — Full-feature showcases
+        "cost_bounded_research_agent.ipynb",
+        "personal_shopper_agent.ipynb",
+        "scheduled_delivery_confirmer.ipynb",
+        "deepagents_integration.ipynb",
+        # Tier 3 — Full-stack showcases
         "deep_research_agent.ipynb",
         "hierarchical_product_launch.ipynb",
         "content_builder_agent.ipynb",
         "temporal_match_cellar.ipynb",
         "flexible_job_shop.ipynb",
+        "supply_chain_disruption_mediator.ipynb",
+        "code_review_agent_mcp_deployment.ipynb",
+        "from_routing_graphs_to_goap.ipynb",
     ],
 }
 

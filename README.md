@@ -1,392 +1,233 @@
-# LangGOAP
+<div align="center">
+  <h1>LangGOAP</h1>
+  <h3>GOAP planning for LangGraph agents.</h3>
+</div>
 
-**Goal-Oriented Action Planning for [LangGraph](https://langchain-ai.github.io/langgraph/), with constraint optimization.**
+<div align="center">
 
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
+[![License](https://img.shields.io/pypi/l/langgoap)](LICENSE)
+[![Python](https://img.shields.io/pypi/pyversions/langgoap)](pyproject.toml)
+[![PyPI](https://img.shields.io/pypi/v/langgoap?label=%20)](https://pypi.org/project/langgoap/)
+[![Downloads](https://img.shields.io/pepy/dt/langgoap)](https://pypistats.org/packages/langgoap)
 [![MFCQI Score](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/integrallis/langgoap/main/.github/badges/mfcqi.json)](https://github.com/bsbodden/mfcqi)
 
-LangGOAP turns a declarative goal and a set of actions into a **compiled
-LangGraph `StateGraph`** that plans, executes, and replans. It combines
-classical GOAP A\* search with OR-Tools CP-SAT constraint optimization
-and LLM-driven natural-language goal interpretation, and ships as a
-first-class citizen of the LangChain ecosystem.
+</div>
 
-Built by [Integrallis Software](https://integrallis.com).
+<br>
 
----
-
-## Why LangGOAP
-
-| Capability                              | LangGOAP | `create_react_agent` |
-|-----------------------------------------|:--------:|:--------------------:|
-| A\* planning over explicit actions      |    Yes   |          No          |
-| Resource constraints (hard + soft)      |    Yes   |          No          |
-| Multi-objective optimization (CP-SAT)   |    Yes   |          No          |
-| Temporal scheduling (`IntervalVar`)     |    Yes   |          No          |
-| Natural-language goal interpretation    |    Yes   |          —           |
-| Human-in-the-loop (`interrupt()`)       |    Yes   |         Yes          |
-| Compiled `StateGraph` as the plan       |    Yes   |         Yes          |
-| Sync + async parity                     |    Yes   |         Yes          |
-| Multi-goal sequential decomposition     |    Yes   |          No          |
-| Execution history in `BaseStore`        |    Yes   |          —           |
-| Checkpointing (Memory / Postgres / Redis) |  Yes   |         Yes          |
-| Plan visualization (Mermaid / DOT)      |    Yes   |          No          |
-| Stochastic dynamics (`TransitionModel`) |    Yes   |          No          |
-| Feature-based strategy routing          |    Yes   |          No          |
-
----
-
-## Installation
+LangGOAP plans before it acts. Give it a goal and a set of LangChain
+tools; it returns a [compiled `StateGraph`](https://langchain-ai.github.io/langgraph/concepts/low_level/)
+that picks the cheapest valid action sequence, executes it, and replans
+on failure — no hand-written routing, no free-form ReAct loop,
+deterministic by default.
 
 ```bash
-pip install langgoap
+pip install -U langgoap
 ```
 
-Requires Python 3.10+. OR-Tools CP-SAT is included as a core dependency
-for constraint optimization, temporal scheduling, and multi-plan selection.
+> [!TIP]
+> For developing, debugging, and deploying agents, see
+> [LangSmith](https://docs.langchain.com/langsmith/home). LangGOAP ships
+> a `LangSmithTracer` that maps plan / replan / goal-achieved events to
+> LangSmith runs alongside LangGraph's automatic node-level tracing.
 
----
+## Why LangGOAP?
 
-## Quickstart — the one-liner
+- **[Deterministic planning](https://docs.langchain.com/oss/python/langgraph/overview)** — A classical A* search over your action set produces a checked plan before any tool runs; the same inputs always yield the same plan.
+- **Constraint optimization built in** — Hard resource caps, soft objectives, temporal `IntervalVar` scheduling, and multi-plan Pareto selection via OR-Tools CP-SAT, with no extra configuration.
+- **The plan _is_ a `StateGraph`** — Every plan compiles to a real LangGraph graph, so checkpointers, stores, streaming, `interrupt()`, and LangSmith all just work.
+- **Replans automatically** — Action fails, world drifts, or a sensor invalidates a precondition; the executor blacklists the offender and the planner picks a new path without any routing code.
+- **LLM where it earns its keep** — Natural-language goals are parsed once by `GoalInterpreter`; the loop itself stays symbolic. No ReAct, no agentic reasoning between tool calls.
+
+## Quickstart
 
 ```python
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgoap import create_goap_agent
 
-
 @tool
 def research_topic(topic: str) -> str:
     """Produce a short research brief for a topic."""
     return f"Brief on {topic}"
-
 
 @tool
 def write_article(brief: str) -> str:
     """Turn a research brief into an article draft."""
     return f"Article from: {brief}"
 
-
 @tool
 def publish_article(draft: str) -> str:
     """Publish an article draft."""
     return f"Published: {draft}"
 
-
 agent = create_goap_agent(
     tools=[research_topic, write_article, publish_article],
     goal="Publish an article about GOAP for LangGraph",
     llm=ChatOpenAI(model="gpt-4o-mini"),
-    # Pre/post conditions keep the planner honest — never LLM-inferred.
-    effects={
-        "research_topic":   {"have_brief": True},
-        "write_article":    {"have_draft": True},
-        "publish_article":  {"published":  True},
-    },
+    # Preconditions/effects keep the planner honest — never LLM-inferred.
     preconditions={
-        "write_article":    {"have_brief": True},
-        "publish_article":  {"have_draft": True},
+        "write_article":   {"have_brief": True},
+        "publish_article": {"have_draft": True},
+    },
+    effects={
+        "research_topic":  {"have_brief": True},
+        "write_article":   {"have_draft": True},
+        "publish_article": {"published":  True},
     },
 )
 
 result = agent.invoke({"world_state": {}, "goal": agent.goap_goal})
 ```
 
-No free-form ReAct loop — the planner produces a deterministic action
-sequence before a single tool executes, and re-plans on failure.
+`agent` is a compiled LangGraph graph. Use it with streaming,
+checkpointers, `interrupt()`, or any LangGraph feature.
 
-### With checkpointing
+## Three ways to use it
 
-```python
-from langgraph.checkpoint.memory import MemorySaver
+LangGOAP ships three on-ramps so you can adopt as much or as little as
+you need without rewriting your action definitions.
 
-graph = GoapGraph(actions).compile(checkpointer=MemorySaver())
-result = graph.invoke(
-    {"world_state": {}, "goal": goal},
-    config={"configurable": {"thread_id": "run-1"}},
-)
-```
+- **`create_goap_agent`** — Natural-language goal plus LangChain tools.
+  The shortest path. Used in
+  [`examples/tutorials/deep_research_agent.ipynb`](examples/tutorials/deep_research_agent.ipynb).
+- **`goapify_tool` / `GoapGraph`** — Hand-authored `ActionSpec` objects
+  with explicit preconditions, effects, costs, and validators. The
+  workhorse API used by every tutorial.
+- **`GoapSubgraph` / `add_goap_subgraph`** — Drop a GOAP loop into an
+  existing `StateGraph` as a sealed node. Useful when GOAP is one
+  reasoning mode among many.
 
-<details>
-<summary>With Redis or Postgres</summary>
+Each layer is covered by an integration test:
+[`test_prebuilt.py`](tests/integration/test_prebuilt.py),
+[`test_goapify_tool.py`](tests/integration/test_goapify_tool.py),
+[`test_subgraph.py`](tests/integration/test_subgraph.py).
 
-```python
-# Redis
-from langgraph.checkpoint.redis import RedisSaver
-
-with RedisSaver.from_conn_string("redis://localhost:6379") as saver:
-    saver.setup()
-    graph = GoapGraph(actions).compile(checkpointer=saver)
-
-# Postgres
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-
-async with AsyncPostgresSaver.from_conn_string(dsn) as saver:
-    await saver.setup()
-    graph = GoapGraph(actions).compile(checkpointer=saver)
-```
-
-</details>
-
----
-
-## Three-layer low-code on-ramp
-
-LangGOAP ships three integration layers so you can start simple and
-graduate without rewriting action definitions.
-
-```text
-┌─────────────────────────────────────────────────────────────────────┐
-│ Layer A — create_goap_agent(tools, goal, llm=, …)                   │
-│   The one-liner. NL goal + tools → compiled StateGraph.             │
-├─────────────────────────────────────────────────────────────────────┤
-│ Layer B — goapify_tool(tool, preconditions=, effects=, …)           │
-│   Explicit BaseTool → ActionSpec adapter. Fully deterministic.      │
-├─────────────────────────────────────────────────────────────────────┤
-│ Layer C — GoapSubgraph / add_goap_subgraph(parent, …)               │
-│   Drop a GOAP loop into an existing StateGraph as a sealed node.    │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-Internally, Layer A delegates to Layer B, and Layer C uses the same
-`GoapGraph` builder — there is no duplicated wiring code. End-to-end
-use of each layer is covered by
-[`tests/integration/test_prebuilt.py`](tests/integration/test_prebuilt.py),
-[`tests/integration/test_goapify_tool.py`](tests/integration/test_goapify_tool.py),
-and [`tests/integration/test_subgraph.py`](tests/integration/test_subgraph.py);
-the Tier 2 tutorial notebooks below exercise Layer A (`create_goap_agent`)
-and Layer B (`goapify_tool`) on real problems.
-
----
-
-## What's in the box
+## Features
 
 ### Planning
 
-- **A\* planner** (`langgoap.plan`) — classical GOAP search with
-  customizable cost functions, effect validators, and per-action retry
-  budgets.
-- **Two-phase pipeline** (`langgoap.pipeline_plan`) — A\* produces a
-  candidate plan, then CSP refines or replaces it with a better
-  alternative when the goal has constraints or objectives.
-- **Planning strategy hierarchy** — `PlanningStrategy` Protocol with
-  built-in `AStarStrategy`, `MCTSStrategy`, `CSPRefinementStrategy`,
-  and `TwoPhasePipelineStrategy`. Pass your own strategy to
-  `GoapPlanner(strategy=...)`.
-- **`StrategyRouter`** — dispatches to the best built-in strategy
-  based on cheap-to-compute `ProblemFeatures` (hard constraints,
-  stochasticity, branching factor). Composes transparently: the
-  router itself satisfies `PlanningStrategy`.
-- **`TransitionModel`** — separates declared action effects from
-  sampled world dynamics so A\* plans under an expected-value view
-  while MCTS rollouts and the graph runtime see the actual sampled
-  view. `DeterministicTransitionModel` is the zero-config default.
+- **A* planner** with custom cost functions, effect validators, and per-action retry budgets.
+- **Two-phase pipeline** — A* produces a candidate plan, then OR-Tools CP-SAT refines or replaces it when the goal carries constraints or objectives.
+- **Pluggable strategies** via the `PlanningStrategy` Protocol — built-in `AStarStrategy`, `MCTSStrategy`, `CSPRefinementStrategy`, `TwoPhasePipelineStrategy`, `UtilityStrategy`, `AnytimePlanningStrategy`, and `RepairStrategy`.
+- **`StrategyRouter`** that dispatches to the right strategy based on cheap-to-compute `ProblemFeatures` (hard constraints, stochasticity, branching factor). Reproducible — routing is a pure function of the problem.
+- **`TransitionModel`** to separate declared effects from sampled dynamics, so A* plans under expected values while MCTS rollouts and the graph runtime see the actual sampled world.
 
-### Constraints and scoring
+### Constraints and scheduling
 
-- **`Score` hierarchy** — `SimpleScore`, `HardSoftScore`,
-  `BendableScore`. Lexicographic comparison, sign convention matches
-  a penalize/reward convention (`hard ≤ 0`).
-- **Fluent `ConstraintBuilder`** — `for_each_action().where(...)
-  .sum_resource("gpu_hours").bounded(max=budget).penalize(level="hard",
-  weight=1.0).as_constraint("gpu_budget")`.
-- **Hard vs soft constraints** — hard violations mark plans
-  `INFEASIBLE`; soft bounds contribute weighted penalties to the
-  CP-SAT objective via non-negative violation variables.
-- **Temporal scheduling** — CP-SAT `IntervalVar` per action, precedence
-  from the dependency graph, makespan minimization. Render Gantt charts
-  from `CSPMetadata.schedule`.
+- **`Score` hierarchy** — `SimpleScore`, `HardSoftScore`, `BendableScore`, with lexicographic comparison and a consistent penalize/reward sign convention.
+- **Fluent `ConstraintBuilder`** for resource caps, soft objectives, and weighted penalties: `for_each_action().where(...).sum_resource("gpu_hours").bounded(max=budget)...`
+- **Temporal scheduling** — CP-SAT `IntervalVar` per action, precedence from the dependency graph, makespan minimization. Render Gantt charts from `CSPMetadata.schedule`.
 
 ### LangGraph-native execution
 
-- **`GoapGraph`** — builds and compiles a real `StateGraph` with
-  planner / executor / observer nodes. Every node has sync and async
-  variants so tracer hooks fire from both `.invoke()` and `.ainvoke()`.
-- **Execution history in `BaseStore`** — `StoreExecutionHistory` with
-  reverse-index storage that works on `InMemoryStore`,
-  `AsyncPostgresStore`, and any custom `BaseStore` without requiring an
-  embedder.
-- **`MultiGoal`** — sequential and `any`-mode multi-goal decomposition,
-  dispatched at the observer/planner level.
+- **`GoapGraph`** compiles a real `StateGraph` with planner / executor / observer nodes. Sync and async variants of each node so tracer hooks fire from both `.invoke()` and `.ainvoke()`.
+- **`StoreExecutionHistory`** persists execution traces in any LangGraph `BaseStore` (`InMemoryStore`, `AsyncPostgresStore`, custom) without requiring an embedder.
+- **`MultiGoal`** for sequential and `any`-mode goal decomposition, dispatched at the observer/planner level.
+- **Plan visualization** via `render_mermaid`, `render_mermaid_gantt`, `render_dot`, `render_ascii`, `render_ascii_gantt`, and the top-level `visualize` dispatcher — pure Python, no binary dependencies for Mermaid / ASCII.
+
+### Reliability and recovery
+
+- **`ActionQos`** — per-action retry policy, idempotency markers (`FIRE_ONCE`, `can_rerun`, `read_only`).
+- **`require_human_approval`** — pass a Pydantic `BaseModel` to collect a typed form from a human via LangGraph's `interrupt()`; pass `True` for a plain approve/deny gate. Validated on resume.
+- **Stuck handlers** — when planning fails, `MulticastStuckHandler` runs ordered recovery handlers that can mutate world state, swap in a relaxed goal, or escalate to a human. The first handler that returns `REPLAN` wins.
+- **Early-termination policies** — `MaxCostPolicy`, `MaxWallClockPolicy`, `MaxLLMCallsPolicy`, `MaxTokensPolicy`, `MaxActionsPolicy`, `OnStuckPolicy`, composed with `FirstOfPolicy` / `AllOfPolicy`.
 
 ### Observability
 
-- **`PlanningTracer` Protocol** with sync + async hooks (`on_*` /
-  `aon_*`). `NullTracer`, `LoggingTracer`, `MultiTracer`, and
-  `LangSmithTracer` ship in-tree. `LangSmithTracer` maps GOAP domain
-  events (plan/replan/goal-achieved) to LangSmith runs alongside
-  LangGraph's automatic node-level tracing. Custom tracers
-  (OpenTelemetry, Prometheus) are ordinary Python classes that implement
-  the protocol. Tracer exceptions never propagate into the planner.
-- **Plan visualization** — `render_mermaid`, `render_mermaid_gantt`,
-  `render_dot`, `render_ascii`, `render_ascii_gantt`, `visualize`.
-  Pure Python; no binary dependencies for Mermaid / ASCII output.
-
-### Human-in-the-loop
-
-- **`ActionSpec.require_human_approval`** — when `True`, the executor
-  calls `interrupt()` before running the action and waits for a resume.
-  Denied actions are immediately blacklisted and the planner replans.
-  Requires a checkpointer (`MemorySaver`, `AsyncPostgresSaver`,
-  `RedisSaver`, etc.).
+- **`PlanningTracer` Protocol** with sync + async hooks (`on_plan_complete`, `on_action_retry`, `on_strategy_chosen`, …). `NullTracer`, `LoggingTracer`, `MultiTracer`, and `LangSmithTracer` ship in-tree. Custom tracers (OpenTelemetry, Prometheus) are ordinary classes that implement the protocol; tracer exceptions never propagate into the planner.
+- **`CostAccumulator`** + `DEFAULT_COST_PER_1K_TOKENS` for live LLM token / USD accounting, plumbed into world state for `MaxCostPolicy` and the `cost_bounded_research_agent` tutorial.
 
 ### Checkpointing
 
-- **Tested with all three LangGraph backends**: `MemorySaver`,
-  `AsyncPostgresSaver`, and `RedisSaver`/`AsyncRedisSaver`. Custom
-  ormsgpack serializers round-trip frozen dataclasses,
-  `MappingProxyType`, `frozenset`, `timedelta`, and `tuple` correctly.
-  Install optional extras: `pip install langgoap[checkpoint-postgres]`
-  or `pip install langgoap[checkpoint-redis]`.
-
-### Stochastic domains and strategy routing
-
-Two opt-in APIs let LangGOAP plan under uncertainty without disturbing
-the deterministic default path:
-
-- **`TransitionModel`** — user-supplied dynamics. `expected(state,
-  action)` is consumed by A\* / CSP / MCTS tree expansion and must
-  match the action's declared effects unless a `DivergencePolicy`
-  opts out (e.g. CVaR / risk-averse planners). `sample(state,
-  action, rng)` is consumed by MCTS rollouts and the graph executor
-  and is free to diverge — that divergence is the whole point of a
-  non-deterministic model.
-- **`StrategyRouter`** — rule-based dispatcher keyed on
-  `ProblemFeatures`. The default `RuleBasedClassifier` is
-  conservative: it routes to `"csp-pipeline"` when the goal carries
-  hard constraints, soft objectives, or trajectory metrics; to
-  `"mcts"` when the user declared a risk-averse `DivergencePolicy`
-  or passed `prefer_mcts_for_stochastic=True`; and to `"astar"`
-  otherwise. Routing is a pure function of the problem, so results
-  are reproducible.
-
-Users on the 90% deterministic path need not wire either API.
-Passing a router or a non-default transition model is additive; the
-pre-existing behaviour is bit-identical when neither is supplied.
-
-See `examples/basics/stochastic_gridworld.ipynb` for the canonical
-end-to-end flow on `FrozenLake-4x4`.
+- **All three LangGraph backends supported and tested**: `MemorySaver`, `AsyncPostgresSaver`, `RedisSaver` / `AsyncRedisSaver`. Custom `ormsgpack` serde round-trips frozen dataclasses, `MappingProxyType`, `frozenset`, `timedelta`, and `tuple` correctly. Install with `pip install langgoap[checkpoint-postgres]` or `pip install langgoap[checkpoint-redis]`.
 
 ### Natural-language goals
 
-- **`GoalInterpreter`** — provider-agnostic via `BaseChatModel`
-  structured output. `GoapGraph.invoke_nl(request, llm=...)` /
-  `ainvoke_nl()` accept a plain string and produce a `GoalSpec` on
-  the fly.
+- **`GoalInterpreter`** parses plain-English requests into a `GoalSpec` via any LangChain chat model that supports structured output. `GoapGraph.invoke_nl(request, llm=...)` / `ainvoke_nl()` accept a string directly.
 
----
+### CLI and deployment
 
-## Tutorial catalog
+- **`langgoap` CLI** — `plan`, `actions`, `explain`, `visualize`, `deploy-init`. Loads actions, goals, and world state from `module:variable` references.
+- **LangGraph deployment scaffold** — `scaffold_deployment` (and `langgoap deploy-init`) generate a complete `langgraph dev`-ready directory in one command. Every `langgraph` deployment serves an `/mcp` endpoint, so a LangGOAP graph becomes an MCP tool with no extra wiring.
 
-All 15 tutorials in `examples/tutorials/` have a corresponding passing
-integration test under `tests/integration/`. Tutorial helpers and
-domain data live in the shared
-`examples/tutorials/tutorial_examples/` package.
+### DeepAgents and tool interop
 
-### Tier 1 — Primers
+- **`create_goap_tool`** wraps a `GoapGraph` as a LangChain `StructuredTool`.
+- **`create_goap_subagent`** returns a `CompiledSubAgent`-compatible dict for [Deep Agents](https://github.com/langchain-ai/deepagents).
+- Both call `GoalInterpreter` under the hood so the calling agent sends a natural-language request.
 
-- (1) `directory_handler.ipynb` — GOAP basics from `GOApy`.
-- (2) `robot_navigation.ipynb` — A\* primer from `unified-planning`.
-- (3) `hungry_agent.ipynb` — NL goal interpreter walk-through.
+## Examples
 
-### Tier 2 — Constraint optimization + workflow agents
+The [`examples/`](examples/) directory holds three flavours of runnable
+documentation. Every featured tutorial has a corresponding integration
+test under [`tests/integration/`](tests/integration/) — the notebook is
+the explanation; the test is the source of truth.
 
-- (4) `cloud_balancing.ipynb` — VM bin-packing with the one-liner.
-- (5) `vehicle_routing.ipynb` — capacity-constrained routing with Gantt.
-- (6) `nurse_rostering.ipynb` — skill matching with `HardSoftScore`.
-- (7) `project_job_scheduling.ipynb` — RCPSP and critical path.
-- (8) `task_assigning.ipynb` — fluent `ConstraintBuilder`.
-- (9) `sql_query_agent.ipynb` — schema → generate → test → refine.
-- (10) `vulnerability_scanner.ipynb` — phased discovery and
-  blacklisting.
+- **[`examples/basics/`](examples/basics/)** — short primers that each
+  exercise a single mechanic: quickstart, CLI, plan visualization,
+  natural-language goals, tracing, termination policies, stuck
+  handlers, typed-form HITL, action QoS, MCTS vs A* on stochastic
+  domains.
+- **[`examples/tutorials/`](examples/tutorials/)** — end-to-end
+  walkthroughs in three tiers. Tier 1 introduces GOAP on toy domains;
+  Tier 2 covers constraint-optimization workflows; Tier 3 showcases
+  the full stack on substantial problems
+  (`deep_research_agent`, `flexible_job_shop`, `supply_chain_disruption_mediator`,
+  `code_review_agent_mcp_deployment`).
+- **[`examples/screencast/`](examples/screencast/)** — five-minute
+  before/after/disrupted demos that contrast a hand-wired LangGraph
+  workflow with the same logic expressed in GOAP. Three scenarios:
+  incident response, supply chain, travel disruption.
 
-### Tier 3 — Full-feature showcases
+Start with [`examples/tutorials/directory_handler.ipynb`](examples/tutorials/directory_handler.ipynb)
+if you are new to GOAP, or with
+[`examples/screencast/incident/`](examples/screencast/incident/) if
+you want to see GOAP replace a routing graph immediately.
 
-- (11) `deep_research_agent.ipynb` — `StoreExecutionHistory` + tracing.
-- (12) `hierarchical_product_launch.ipynb` — `MultiGoal` decomposition.
-- (13) `content_builder_agent.ipynb` — multi-objective CSP.
-- (14) `temporal_match_cellar.ipynb` — durative overlapping actions.
-- (15) `flexible_job_shop.ipynb` — every v0.1.0 feature in one notebook.
+## LangGraph ecosystem
 
-Basics notebooks (`examples/basics/`) cover plan visualization
-(`plan_visualization.ipynb`) and the natural-language goal interpreter
-(`nl_goal_interpreter.ipynb`). The three integration layers, tracing,
-and execution history are covered by the tutorial notebooks above and
-by their corresponding integration tests under `tests/integration/`.
+LangGOAP is built on LangGraph and integrates with the rest of the
+LangChain stack:
 
----
+- **[LangGraph](https://docs.langchain.com/oss/python/langgraph/overview)** — the runtime substrate. Every LangGOAP plan compiles to a real `StateGraph` and works with streaming, checkpointing, and `interrupt()`.
+- **[LangSmith](https://docs.langchain.com/langsmith/home)** — `LangSmithTracer` emits GOAP plan / replan / goal-achieved events to LangSmith alongside LangGraph's automatic node-level traces.
+- **[LangGraph deployment](https://docs.langchain.com/langsmith/deployments)** — `langgoap deploy-init` scaffolds a `langgraph dev`-ready directory; the generated deployment serves an `/mcp` endpoint so a LangGOAP graph is callable from any MCP client (Claude Desktop, Cursor, …).
+- **[Deep Agents](https://docs.langchain.com/oss/python/deepagents/overview)** — `create_goap_tool` and `create_goap_subagent` embed a LangGOAP graph as a tool or subagent inside a Deep Agents harness.
 
-## Inspiration
+## Documentation
+
+- [Changelog](CHANGELOG.md) – Release notes for every public version.
+- [`langgoap/__init__.py`](langgoap/__init__.py) – Authoritative list of public symbols. Anything not re-exported from the top-level package is internal and subject to change.
+- [OptaPlanner concept mapping](docs/optaplanner_mapping.md) – How LangGOAP's `Score` hierarchy and `ConstraintBuilder` map onto OptaPlanner.
+
+## Contributing
+
+LangGOAP is developed test-first: every feature starts with a failing
+integration test that uses real infrastructure via TestContainers, never
+mocks. Notebooks are runnable documentation of what the tests already
+verify — never the other way around.
+
+```bash
+uv sync
+make check                                              # full lint + test suite
+uv run pytest tests/integration/test_flexible_job_shop.py -vv
+uv run pytest -m api                                    # requires OPENAI_API_KEY / ANTHROPIC_API_KEY
+```
+
+## Acknowledgements
 
 LangGOAP builds on ideas and implementations from several projects:
 
-- **[GOAP](https://alumni.media.mit.edu/~jorkin/gdc2006_orkin_jeff_fear.pdf)** (Jeff Orkin / F.E.A.R.) — Goal-Oriented Action Planning, the
-  classical game-AI technique that drives LangGOAP's A\* planner.
-- **[Embabel](https://github.com/embabel/embabel-agent)** — first to
-  apply GOAP planning to agentic LLM workflows, demonstrating that
-  declarative goals + action preconditions/effects can replace
-  hand-wired routing graphs.
-- **[OptaPlanner](https://www.optaplanner.org/)** — the Score hierarchy
-  (`HardSoftScore`, `BendableScore`) and fluent `ConstraintBuilder`
-  pattern are adapted from OptaPlanner's constraint-solving API. See
-  [`docs/optaplanner_mapping.md`](docs/optaplanner_mapping.md) for the
-  full concept mapping.
-- **[OR-Tools CP-SAT](https://developers.google.com/optimization/cp/cp_solver)** —
-  constraint solver backing LangGOAP's CSP pipeline for resource
-  validation, temporal scheduling, and multi-plan optimization.
-- **[GOApy](https://github.com/leopoldmaillard/GOApy)** — pure Python
-  GOAP implementation used as a reference for A\* search correctness.
-- **[unified-planning](https://github.com/aiplan4eu/unified-planning)** —
-  formal AI planning concepts (temporal, numeric, PDDL interop) that
-  informed LangGOAP's action/effect model.
-- **[LangGraph](https://langchain-ai.github.io/langgraph/)** — the
-  runtime substrate. LangGOAP plans compile to real `StateGraph`
-  instances and integrate natively with checkpointers, stores, and the
-  rest of the LangChain ecosystem.
+- **[GOAP](https://alumni.media.mit.edu/~jorkin/gdc2006_orkin_jeff_fear.pdf)** (Jeff Orkin / F.E.A.R.) — the classical game-AI technique that drives LangGOAP's A* planner.
+- **[Embabel](https://github.com/embabel/embabel-agent)** — first to apply GOAP planning to agentic LLM workflows.
+- **[OptaPlanner](https://www.optaplanner.org/)** — the `Score` hierarchy and fluent `ConstraintBuilder` are adapted from OptaPlanner's constraint-solving API.
+- **[OR-Tools CP-SAT](https://developers.google.com/optimization/cp/cp_solver)** — the constraint solver behind LangGOAP's CSP pipeline.
+- **[GOApy](https://github.com/leopoldmaillard/GOApy)** — pure-Python GOAP implementation used as a reference for A* correctness.
+- **[unified-planning](https://github.com/aiplan4eu/unified-planning)** — formal AI planning concepts (temporal, numeric, PDDL interop) that informed LangGOAP's action/effect model.
+- **[LangGraph](https://langchain-ai.github.io/langgraph/)** — the runtime substrate.
 
----
-
-## Development
-
-```bash
-# Set up the environment
-uv sync
-
-# Run the full lint + test suite
-make check
-
-# Run a single integration test file
-uv run pytest tests/integration/test_flexible_job_shop.py -vv
-
-# Run live API tests (requires OPENAI_API_KEY / ANTHROPIC_API_KEY)
-uv run pytest -m api
-```
-
-LangGOAP is developed test-first: every feature starts with a failing
-integration test that uses real infrastructure via TestContainers,
-never mocks. Notebooks are runnable documentation of what the tests
-already verify — never the other way around.
-
----
-
-## Public API
-
-All symbols exported from `langgoap` are part of the stable v0.1.0
-public surface. The full list is in
-[`langgoap/__init__.py`](langgoap/__init__.py) and mirrored in the
-[changelog](CHANGELOG.md). Anything not re-exported from the top-level
-package is internal and subject to change.
-
----
-
-## Reference
-
-- **Changelog**: [`CHANGELOG.md`](CHANGELOG.md)
-- **LangGraph**: <https://langchain-ai.github.io/langgraph/>
-- **OR-Tools CP-SAT**: <https://developers.google.com/optimization/cp/cp_solver>
-
----
+Built by [Integrallis Software](https://integrallis.com).
 
 ## License
 
