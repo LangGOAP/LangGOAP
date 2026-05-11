@@ -12,7 +12,7 @@ from langgoap.constraints import (
     BuilderOutput,
     ConstraintBuilder,
 )
-from langgoap.goals import ConstraintSpec, GoalSpec
+from langgoap.goals import ConstraintSpec, GoalPolicy, GoalSpec
 from langgoap.types import ObjectiveDirection
 
 
@@ -183,7 +183,9 @@ class TestGoalSpecFromBuilder:
 
     def test_from_builder_forwards_kwargs(self) -> None:
         goal = GoalSpec.from_builder(
-            conditions={"done": True}, builder_output=None, priority=5, max_replans=3
+            conditions={"done": True},
+            builder_output=None,
+            policy=GoalPolicy(priority=5, max_replans=3),
         )
         assert goal.policy.priority == 5
         assert goal.policy.max_replans == 3

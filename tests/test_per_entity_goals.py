@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from langgoap.goals import GoalSpec, MultiGoal
+from langgoap.goals import GoalPolicy, GoalSpec, MultiGoal
 from langgoap.types import ReplanStrategy
 
 
@@ -78,12 +78,11 @@ class TestPerEntityMode:
 
 
 class TestPerEntityGoalKwargs:
-    def test_forwards_priority_and_max_replans_to_every_child(self) -> None:
+    def test_forwards_policy_to_every_child(self) -> None:
         mg = GoalSpec.per_entity(
             entity_ids=["a", "b"],
             conditions={"safe_from_{entity}": True},
-            priority=7,
-            max_replans=3,
+            policy=GoalPolicy(priority=7, max_replans=3),
         )
         for child in mg.goals:
             assert child.policy.priority == 7
@@ -93,7 +92,7 @@ class TestPerEntityGoalKwargs:
         mg = GoalSpec.per_entity(
             entity_ids=["a"],
             conditions={"safe_from_{entity}": True},
-            replan_strategy=ReplanStrategy.EVERY_ACTION,
+            policy=GoalPolicy(replan_strategy=ReplanStrategy.EVERY_ACTION),
         )
         assert mg.goals[0].policy.replan_strategy is ReplanStrategy.EVERY_ACTION
 

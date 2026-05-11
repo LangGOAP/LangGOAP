@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from langgoap import ActionSpec, GoalSpec, GoapGraph, ReplanStrategy
+from langgoap import ActionSpec, GoalPolicy, GoalSpec, GoapGraph, ReplanStrategy
 
 # ---------------------------------------------------------------------------
 # Execute functions — disruption-aware
@@ -156,7 +156,7 @@ def run(label: str, world_state: dict[str, Any]) -> None:
     result = GoapGraph(actions=incident_actions).invoke(
         goal=GoalSpec(
             conditions={"service_healthy": True, "stakeholders_notified": True},
-            replan_strategy=ReplanStrategy.ON_DEVIATION,
+            policy=GoalPolicy(replan_strategy=ReplanStrategy.ON_DEVIATION),
         ),
         world_state=world_state,
     )

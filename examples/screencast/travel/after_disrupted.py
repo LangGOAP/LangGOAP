@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from langgoap import ActionSpec, GoalSpec, GoapGraph, ReplanStrategy
+from langgoap import ActionSpec, GoalPolicy, GoalSpec, GoapGraph, ReplanStrategy
 
 # ---------------------------------------------------------------------------
 # Reusable execute functions (from after.py)
@@ -176,7 +176,7 @@ def run(label: str, world_state: dict[str, Any]) -> None:
     result = GoapGraph(actions=travel_actions).invoke(
         goal=GoalSpec(
             conditions={"at_venue": True, "on_time": True},
-            replan_strategy=ReplanStrategy.ON_DEVIATION,
+            policy=GoalPolicy(replan_strategy=ReplanStrategy.ON_DEVIATION),
         ),
         world_state=world_state,
     )

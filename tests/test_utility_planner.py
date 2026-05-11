@@ -38,14 +38,16 @@ class TestNirvanaGoal:
         assert NIRVANA_NAME == "Nirvana"
 
     def test_user_kwargs_pass_through(self) -> None:
+        from langgoap.goals import GoalPolicy
         from langgoap.types import ReplanStrategy
 
-        # Flat policy kwargs are bundled into ``policy=GoalPolicy(...)``
-        # by ``NirvanaGoal.__init__`` so the historical Embabel-style
-        # construction continues to work after the GoalPolicy refactor.
+        # GoalSpec kwargs (``policy=GoalPolicy(...)``) forwarded
+        # verbatim to the parent ``GoalSpec`` constructor.
         g = NirvanaGoal(
-            replan_strategy=ReplanStrategy.EVERY_ACTION,
-            max_replans=999,
+            policy=GoalPolicy(
+                replan_strategy=ReplanStrategy.EVERY_ACTION,
+                max_replans=999,
+            ),
         )
         assert g.policy.replan_strategy is ReplanStrategy.EVERY_ACTION
         assert g.policy.max_replans == 999

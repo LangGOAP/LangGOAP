@@ -227,7 +227,9 @@ class TestUtilityLoop:
         )
 
         result = graph.invoke(
-            goal=NirvanaGoal(replan_strategy=ReplanStrategy.EVERY_ACTION),
+            goal=NirvanaGoal(
+                policy=GoalPolicy(replan_strategy=ReplanStrategy.EVERY_ACTION)
+            ),
             world_state={},
         )
 
@@ -348,7 +350,9 @@ class TestPersonalShopperStory:
             strategy=UtilityStrategy(),
         )
         result = graph.invoke(
-            goal=NirvanaGoal(replan_strategy=ReplanStrategy.EVERY_ACTION),
+            goal=NirvanaGoal(
+                policy=GoalPolicy(replan_strategy=ReplanStrategy.EVERY_ACTION)
+            ),
             world_state={
                 "need_milk": True,
                 "need_bread": True,

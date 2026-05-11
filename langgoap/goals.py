@@ -93,38 +93,13 @@ class SoftGoal:
         return self.name or str(dict(self.conditions))
 
 
-_POLICY_KWARG_NAMES = ("replan_strategy", "priority", "max_replans")
-
-
-def _bundle_policy_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Bundle legacy flat policy kwargs into a ``policy=GoalPolicy(...)`` kwarg.
-
-    Used by :meth:`GoalSpec.from_builder` and
-    :meth:`GoalSpec.per_entity` so callers that historically passed
-    ``replan_strategy=`` / ``priority=`` / ``max_replans=`` directly
-    keep working unchanged.  When ``policy=`` is also explicitly
-    provided, the explicit value wins and the flat kwargs are ignored
-    (tests covering this contract live in
-    :mod:`tests.test_per_entity_goals` and
-    :mod:`tests.test_constraint_builder`).
-    """
-    flat = {k: kwargs.pop(k) for k in _POLICY_KWARG_NAMES if k in kwargs}
-    if "policy" in kwargs or not flat:
-        return kwargs
-    kwargs["policy"] = GoalPolicy(**flat)
-    return kwargs
-
-
 @dataclass(frozen=True, slots=True)
 class GoalPolicy:
     """Replanning + multi-goal-priority policy for a :class:`GoalSpec`.
 
     Grouping these three orthogonal-to-the-conditions knobs into a
     sub-dataclass keeps the :class:`GoalSpec` constructor focused on
-    *what* the goal is, not *how* the planner should chase it.  The
-    defaults match the historical flat-field defaults, so a bare
-    ``GoalPolicy()`` is behaviourally identical to the pre-Phase-7
-    implicit policy.
+    *what* the goal is, not *how* the planner should chase it.
 
     Attributes:
         replan_strategy: When the observer should trigger replanning
@@ -234,10 +209,9 @@ class GoalSpec:
                 :meth:`~langgoap.constraints.ConstraintBuilder.build`.
                 ``None`` produces a GoalSpec with no constraints or
                 objectives, equivalent to ``GoalSpec(conditions=...)``.
-            **kwargs: Any other ``GoalSpec`` fields, plus the legacy
-                flat policy kwargs (``replan_strategy``, ``priority``,
-                ``max_replans``) which are bundled into a
-                :class:`GoalPolicy` for the caller's convenience.
+            **kwargs: Any other ``GoalSpec`` fields (e.g.
+                ``policy=GoalPolicy(...)``, ``soft_goals=...``,
+                ``metrics=...``).
 
         Returns:
             A new ``GoalSpec`` with the builder's constraints and
@@ -249,7 +223,6 @@ class GoalSpec:
             constraints = builder_output.constraints
             if builder_output.objectives:
                 objectives = builder_output.objectives
-        kwargs = _bundle_policy_kwargs(kwargs)
         return cls(
             conditions=MappingProxyType(dict(conditions or {})),
             constraints=constraints,
@@ -290,8 +263,8 @@ class GoalSpec:
                 cheapest".  Use ``"sequential"`` when the per-entity
                 ordering encodes execution intent.
             **goal_kwargs: Forwarded verbatim to every :class:`GoalSpec`
-                child (``priority``, ``max_replans``,
-                ``replan_strategy``, etc.).
+                child (e.g. ``policy=GoalPolicy(...)``, ``soft_goals=``,
+                ``metrics=``).
 
         Returns:
             A :class:`MultiGoal` whose ``goals`` tuple has one
@@ -316,11 +289,6 @@ class GoalSpec:
                 "goal would be identical.  Got conditions="
                 f"{dict(conditions)!r}."
             )
-        # Bundle the legacy flat policy kwargs into a GoalPolicy so
-        # callers passing ``replan_strategy`` / ``priority`` /
-        # ``max_replans`` directly into per_entity (the documented API
-        # before Phase 7) keep working.
-        goal_kwargs = _bundle_policy_kwargs(goal_kwargs)
         children: list[GoalSpec] = []
         for eid in ids:
             formatted: dict[str, Any] = {}

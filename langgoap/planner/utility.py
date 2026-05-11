@@ -59,14 +59,8 @@ class NirvanaGoal(GoalSpec):
     def __init__(self, **kwargs: Any) -> None:
         # Carry through any GoalSpec kwargs the user provides but
         # ensure conditions is empty — Nirvana never has concrete
-        # satisfaction criteria.  Flat policy kwargs
-        # (``replan_strategy=`` / ``priority=`` / ``max_replans=``)
-        # are bundled into ``policy=GoalPolicy(...)`` so callers do
-        # not need to construct the policy themselves.
-        from langgoap.goals import _bundle_policy_kwargs
-
+        # satisfaction criteria.
         kwargs.setdefault("conditions", {})
-        kwargs = _bundle_policy_kwargs(kwargs)
         super().__init__(**kwargs)
 
 
@@ -113,9 +107,9 @@ class UtilityStrategy:
        :class:`Plan`.  Ties tie-break by list order for stability.
     4. Return ``None`` when no applicable action remains.
 
-    Pair with ``GoalSpec.replan_strategy=ReplanStrategy.EVERY_ACTION``
-    so the loop calls the planner again after every action — the
-    utility model is iterative, not multi-step.
+    Pair with ``policy=GoalPolicy(replan_strategy=ReplanStrategy.EVERY_ACTION)``
+    on the goal so the loop calls the planner again after every action —
+    the utility model is iterative, not multi-step.
     """
 
     name: str = "UtilityStrategy"
