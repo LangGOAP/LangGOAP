@@ -85,6 +85,10 @@ dev = [
     # talk to the postgres container instead of being skipped on a
     # missing libpq wrapper.
     "psycopg[binary]>=3.2",
+    "tavily-python>=0.5",
+    "ddgs>=9.0",
+    "matplotlib>=3.10.9",
+    "python-dotenv>=1.0",
 ]
 
 [tool.pytest.ini_options]

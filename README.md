@@ -175,15 +175,21 @@ the explanation; the test is the source of truth.
   the full stack on substantial problems
   (`deep_research_agent`, `flexible_job_shop`, `supply_chain_disruption_mediator`,
   `code_review_agent_mcp_deployment`).
-- **[`examples/screencast/`](examples/screencast/)** — five-minute
-  before/after/disrupted demos that contrast a hand-wired LangGraph
-  workflow with the same logic expressed in GOAP. Three scenarios:
-  incident response, supply chain, travel disruption.
+- **[`examples/screencast/`](examples/screencast/)** — the flagship
+  YouTube companion lives at
+  [`examples/screencast/research_agent/`](examples/screencast/research_agent/):
+  four agents (`create_react_agent` baseline, hand-wired `StateGraph`,
+  LangGOAP, LangGOAP-under-disruption) on the same brief with real
+  OpenAI + Tavily costs and a Tavily-key revocation as the climax.
+  Three hermetic case studies (incident, supply chain, travel) sit
+  alongside it for vertical-specific walk-throughs.
 
-Start with [`examples/tutorials/directory_handler.ipynb`](examples/tutorials/directory_handler.ipynb)
-if you are new to GOAP, or with
-[`examples/screencast/incident/`](examples/screencast/incident/) if
-you want to see GOAP replace a routing graph immediately.
+Start with
+[`examples/screencast/research_agent/`](examples/screencast/research_agent/)
+to see GOAP replace a routing graph and survive a runtime disruption
+in one sitting, or
+[`examples/tutorials/directory_handler.ipynb`](examples/tutorials/directory_handler.ipynb)
+if you are new to GOAP and want a smaller starting point.
 
 ## LangGraph ecosystem
 

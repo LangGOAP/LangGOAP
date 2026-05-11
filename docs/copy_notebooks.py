@@ -63,6 +63,9 @@ CATALOG: dict[str, list[str]] = {
         "code_review_agent_mcp_deployment.ipynb",
         "from_routing_graphs_to_goap.ipynb",
     ],
+    "screencast/research_agent": [
+        "screencast.ipynb",
+    ],
 }
 
 

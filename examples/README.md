@@ -13,6 +13,7 @@ the source of truth.
 
 ## Start here
 
+- **First time here?** Open [`screencast/research_agent/`](screencast/research_agent/) — the flagship four-way head-to-head (react baseline vs. hand-wired LangGraph vs. LangGOAP vs. LangGOAP-under-disruption) with real OpenAI + Tavily costs.
 - **New to GOAP?** Open [`tutorials/directory_handler.ipynb`](tutorials/directory_handler.ipynb) — a minimal GOAP loop in fewer than 30 cells.
 - **Coming from a routing graph?** Open [`screencast/incident/`](screencast/incident/) — a hand-wired LangGraph incident-response workflow rewritten as a four-line GOAP graph, then perturbed at runtime.
 - **Building a LangChain agent today?** Open [`tutorials/deep_research_agent.ipynb`](tutorials/deep_research_agent.ipynb) — drop-in `create_goap_agent` over LangChain tools with `LangSmithTracer` tracing.
@@ -34,11 +35,9 @@ See [`tutorials/README.md`](tutorials/README.md) for the full 22-tutorial catalo
 
 ## Screencasts
 
-Five-minute paired demos. Each scenario ships three runnable scripts:
-a hand-written LangGraph baseline (`before.py`), the same logic as a
-GOAP graph (`after.py`), and the GOAP version run under disruption
-(`after_disrupted.py`). The contrast is the point: identical behaviour
-when nothing goes wrong, divergent behaviour when reality drifts.
+**Flagship**: [`screencast/research_agent/`](screencast/research_agent/) — four-way comparison (react baseline / hand-wired LangGraph / LangGOAP / LangGOAP-disrupted) with real OpenAI + Tavily costs and a Tavily-key-revocation climax. Backed by [`test_screencast_research_agent.py`](../tests/integration/test_screencast_research_agent.py).
+
+**Further case studies** — single-domain paired demos with hermetic fixtures (no API keys). Each ships `before.py` (hand-wired LangGraph), `after.py` (same logic as GOAP), and `after_disrupted.py` (GOAP under perturbation):
 
 - [`screencast/incident/`](screencast/incident/) — Incident response. Backed by [`test_screencast_incident.py`](../tests/integration/test_screencast_incident.py).
 - [`screencast/supply_chain/`](screencast/supply_chain/) — Supply-chain disruption. Backed by [`test_screencast_supply_chain.py`](../tests/integration/test_screencast_supply_chain.py).

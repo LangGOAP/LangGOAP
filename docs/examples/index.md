@@ -6,6 +6,10 @@ test under `tests/integration/` that runs in CI, so the notebooks are
 verified end-to-end — they are documentation *of* the test suite, not
 a substitute for it.
 
+## Flagship screencast
+
+- `screencast/research_agent/screencast.ipynb` — four-way head-to-head (`create_react_agent` baseline vs. hand-wired `StateGraph` vs. LangGOAP vs. LangGOAP-under-disruption) with real OpenAI + Tavily costs and Tavily-key revocation as the climax.
+
 ## Basics
 
 Short primers — each notebook exercises a single mechanic.
@@ -52,6 +56,14 @@ Complete end-to-end walkthroughs across three tiers of complexity.
 20. `flexible_job_shop.ipynb` — Every v0.1.0 feature in one notebook.
 21. `supply_chain_disruption_mediator.ipynb` — Stuck handlers and goal relaxation under cascading disruption.
 22. `code_review_agent_mcp_deployment.ipynb` — `langgoap deploy-init` scaffolds a `langgraph dev`-ready deployment with an `/mcp` endpoint.
+
+```{toctree}
+:hidden:
+:maxdepth: 1
+:caption: Flagship screencast
+
+screencast/research_agent/screencast
+```
 
 ```{toctree}
 :hidden:
