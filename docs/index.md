@@ -108,7 +108,7 @@ optaplanner_mapping
 :maxdepth: 1
 :hidden:
 
-Changelog <https://github.com/integrallis/langgoap/releases>
+Changelog <https://github.com/LangGOAP/LangGOAP/releases>
 PyPI <https://pypi.org/project/langgoap/>
-GitHub <https://github.com/integrallis/langgoap>
+GitHub <https://github.com/LangGOAP/LangGOAP>
 ```

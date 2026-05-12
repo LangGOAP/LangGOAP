@@ -1,5 +1,5 @@
 <div align="center">
-  <a href="https://github.com/integrallis/langgoap">
+  <a href="https://github.com/LangGOAP/LangGOAP">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset=".github/images/logo-dark.svg">
       <source media="(prefers-color-scheme: light)" srcset=".github/images/logo-light.svg">
@@ -17,7 +17,7 @@
   <a href="https://pypistats.org/packages/langgoap" target="_blank"><img src="https://img.shields.io/pepy/dt/langgoap" alt="PyPI - Downloads"></a>
   <a href="https://pypi.org/project/langgoap/" target="_blank"><img src="https://img.shields.io/pypi/v/langgoap.svg?label=%20" alt="Version"></a>
   <a href="pyproject.toml" target="_blank"><img src="https://img.shields.io/pypi/pyversions/langgoap" alt="Python versions"></a>
-  <a href="https://github.com/bsbodden/mfcqi" target="_blank"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/integrallis/langgoap/main/.github/badges/mfcqi.json" alt="MFCQI Score"></a>
+  <a href="https://github.com/bsbodden/mfcqi" target="_blank"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/LangGOAP/LangGOAP/main/.github/badges/mfcqi.json" alt="MFCQI Score"></a>
 </div>
 
 <br>

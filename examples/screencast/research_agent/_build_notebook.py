@@ -340,7 +340,7 @@ cells.append(
   unpacks the termination-policy and wall-clock cap surface that this
   notebook only sketches.
 - **Star** the repo and open an issue with the scenario you'd like to
-  see next \u2014 [github.com/integrallis/langgoap](https://github.com/integrallis/langgoap)."""
+  see next \u2014 [github.com/LangGOAP/LangGOAP](https://github.com/LangGOAP/LangGOAP)."""
     )
 )
 

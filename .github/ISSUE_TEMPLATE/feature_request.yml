@@ -11,14 +11,14 @@ body:
 
         Use this template to request **new features or enhancements** in LangGoap. For bug reports,
         please use the bug report template instead. For usage questions and design discussions,
-        please use [GitHub Discussions](https://github.com/integrallis/langgoap/discussions) or
+        please use [GitHub Discussions](https://github.com/LangGOAP/LangGOAP/discussions) or
         the [LangChain Forum](https://forum.langchain.com/) for LangChain/LangGraph-core questions.
 
         Before filing, please check whether your idea has already been proposed:
 
         * [LangGoap documentation](https://integrallis.github.io/langgoap)
-        * [GitHub issue search](https://github.com/integrallis/langgoap/issues?q=is%3Aissue)
-        * [GitHub discussion search](https://github.com/integrallis/langgoap/discussions)
+        * [GitHub issue search](https://github.com/LangGOAP/LangGOAP/issues?q=is%3Aissue)
+        * [GitHub discussion search](https://github.com/LangGOAP/LangGOAP/discussions)
 
         **Note:** Do not begin work on a PR unless explicitly assigned to this issue by a maintainer.
   - type: checkboxes

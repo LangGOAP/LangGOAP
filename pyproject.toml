@@ -43,11 +43,11 @@ cli = ["click>=8.1.7"]
 deepagents = ["deepagents>=0.5.0; python_version>='3.11'"]
 
 [project.urls]
-Homepage = "https://github.com/integrallis/langgoap"
+Homepage = "https://github.com/LangGOAP/LangGOAP"
 Documentation = "https://integrallis.github.io/langgoap"
-Repository = "https://github.com/integrallis/langgoap"
-Issues = "https://github.com/integrallis/langgoap/issues"
-Changelog = "https://github.com/integrallis/langgoap/blob/main/CHANGELOG.md"
+Repository = "https://github.com/LangGOAP/LangGOAP"
+Issues = "https://github.com/LangGOAP/LangGOAP/issues"
+Changelog = "https://github.com/LangGOAP/LangGOAP/blob/main/CHANGELOG.md"
 
 [project.scripts]
 langgoap = "langgoap.cli.main:cli"

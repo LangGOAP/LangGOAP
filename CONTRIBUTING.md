@@ -45,7 +45,7 @@ LangGOAP uses [`uv`](https://docs.astral.sh/uv/) for dependency
 management and virtual environments.
 
 ```bash
-git clone https://github.com/integrallis/langgoap.git
+git clone https://github.com/LangGOAP/LangGOAP.git
 cd langgoap
 uv sync --extra optimization
 ```
@@ -141,7 +141,7 @@ through every downstream consumer and are evaluated carefully.
 ## Reporting issues
 
 Please file bugs and feature requests at
-[github.com/integrallis/langgoap/issues](https://github.com/integrallis/langgoap/issues).
+[github.com/LangGOAP/LangGOAP/issues](https://github.com/LangGOAP/LangGOAP/issues).
 Security-sensitive reports should instead follow the process in
 [`SECURITY.md`](SECURITY.md).
 

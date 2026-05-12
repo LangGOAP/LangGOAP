@@ -138,7 +138,7 @@ Pause on the chart. Let it land.
 
 ## 06:30 — 07:00 · Outro (30s)
 
-**On screen**: GitHub repo `integrallis/langgoap`, the README. Zoom on the "Quickstart" section.
+**On screen**: GitHub repo `LangGOAP/LangGOAP`, the README. Zoom on the "Quickstart" section.
 
 **VO**:
 > "Repo is in the description. The mocked integration test for this entire screencast is committed and runs in CI — nothing in this video is staged. Star it, kick the tires, let me know what scenario you'd like to see next. I'm the maintainer; I read every issue."

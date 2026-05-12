@@ -278,4 +278,4 @@ strict `WorldState` `TypedDict` schema enforcement (`DESIGN.md` §14.2
 Sphinx / ReadTheDocs site (the README, docstrings, and notebooks are
 the v0.1.0 documentation surface).
 
-[0.1.0]: https://github.com/integrallis/langgoap/releases/tag/v0.1.0
+[0.1.0]: https://github.com/LangGOAP/LangGOAP/releases/tag/v0.1.0

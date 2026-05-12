@@ -83,7 +83,7 @@ Usually out of scope unless additional, concrete impact is demonstrated:
 **Do not open a public GitHub issue** for security reports.
 
 Please report suspected vulnerabilities privately via
-[GitHub Security Advisories](https://github.com/integrallis/langgoap/security/advisories/new).
+[GitHub Security Advisories](https://github.com/LangGOAP/LangGOAP/security/advisories/new).
 If that channel is unavailable to you, email
 `security@integrallis.com` with the subject line
 `[LangGOAP security] <short description>`.

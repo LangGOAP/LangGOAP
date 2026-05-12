@@ -62,7 +62,7 @@ myst_enable_extensions = ["colon_fence"]
 myst_heading_anchors = 3
 
 html_theme_options = {
-    "repository_url": "https://github.com/integrallis/langgoap",
+    "repository_url": "https://github.com/LangGOAP/LangGOAP",
     "use_repository_button": True,
     "use_edit_page_button": True,
     "use_source_button": True,

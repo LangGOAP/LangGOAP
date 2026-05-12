@@ -10,14 +10,14 @@ body:
         Thank you for taking the time to file a bug report.
 
         For usage questions, design discussions, and general community support, please use
-        [GitHub Discussions](https://github.com/integrallis/langgoap/discussions) or the
+        [GitHub Discussions](https://github.com/LangGOAP/LangGOAP/discussions) or the
         [LangChain Forum](https://forum.langchain.com/) for LangChain/LangGraph-core questions.
 
         Before submitting, please confirm the issue has not already been reported or fixed:
 
         * [LangGoap documentation](https://integrallis.github.io/langgoap)
-        * [CHANGELOG](https://github.com/integrallis/langgoap/blob/main/CHANGELOG.md)
-        * [GitHub issue search](https://github.com/integrallis/langgoap/issues?q=is%3Aissue)
+        * [CHANGELOG](https://github.com/LangGOAP/LangGOAP/blob/main/CHANGELOG.md)
+        * [GitHub issue search](https://github.com/LangGOAP/LangGOAP/issues?q=is%3Aissue)
   - type: checkboxes
     id: checks
     attributes:
