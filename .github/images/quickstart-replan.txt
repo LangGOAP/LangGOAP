@@ -1,0 +1,11 @@
+status:              'goal_achieved'
+replan_count:        1
+blacklisted_actions: ['write_article_fast']
+plan.action_names:   ['write_article_premium', 'publish_article']
+plan.total_cost:     6.0
+execution_history:
+   1. [ok ] research_topic
+   2. [FAIL] write_article_fast  (upstream rate limit (attempt 1))
+   3. [ok ] write_article_premium
+   4. [ok ] publish_article
+world_state (relevant keys): {'topic': 'GOAP for LangGraph', 'brief': 'Brief on GOAP for LangGraph', 'draft': 'Premium draft: Brief on GOAP for LangGraph'}

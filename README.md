@@ -50,12 +50,33 @@ You hand LangGOAP a goal in plain English and a bag of tools, and an LLM reads t
 
 ## Quickstart
 
-The snippet below wraps three LangChain tools and asks LangGOAP to publish an article. The LLM parses the natural-language goal exactly once into a symbolic target like `{"published": True}`, and from there A* takes over. The `preconditions` and `effects` dictionaries describe how each tool changes the world: `write_article` can only run once `have_brief` is true, and `research_topic` is what makes `have_brief` true in the first place. From this static graph the planner derives the chain `research_topic → write_article → publish_article` without any LLM reasoning between tool calls. Every action also has a `cost` — A* minimizes the total cost of the chosen path. We pass `costs={...}` explicitly here so you can see the shape; values that omitted default to `1.0`. Costs only change the plan when multiple chains can reach the goal (e.g., a cached lookup at `1.0` vs. a paid API at `100.0`), and they feed directly into the CSP layer when you want hard resource budgets like `cost_usd` or `tokens` — see [`examples/screencast/research_agent/`](examples/screencast/research_agent/) for that. Finally, `result_keys` plumbs each tool's return value into `world_state` under a chosen key, so `research_topic`'s output lands at `world_state["brief"]` where the next tool's `brief` argument can pick it up — the initial `world_state` only needs to seed the first tool's argument (`topic`).
+The snippet below wraps four LangChain tools and asks LangGOAP to publish an article. The LLM parses the natural-language goal exactly once into a symbolic target like `{"published": True}`, and from there A* takes over. The `preconditions` and `effects` dictionaries describe how each tool changes the world: a writer can only run once `have_brief` is true, and `research_topic` is what makes `have_brief` true in the first place. Two writers compete to satisfy the `have_draft` precondition — `write_article_fast` at `cost=1.0` and `write_article_premium` at `cost=5.0` — and A* picks the cheaper one. If the cheap writer fails at execution time, the executor blacklists it and the planner re-derives a fresh plan through the premium writer without any routing code on the caller's side. The `costs={...}` mapping is what makes that trade-off explicit; omitted tools default to `cost=1.0`, and the same numbers feed directly into the CSP layer when you want hard resource budgets like `cost_usd` or `tokens` — see [`examples/screencast/research_agent/`](examples/screencast/research_agent/) for that. Finally, `result_keys` plumbs each tool's return value into `world_state` under a chosen key, so `research_topic`'s output lands at `world_state["brief"]` where the next tool's `brief` argument can pick it up — the initial `world_state` only needs to seed the first tool's argument (`topic`).
 
 ```python
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgoap import create_goap_agent
+
+# A small counter so the demo can simulate the cheap writer flaking out
+# on its first N invocations.  Flip `fail_fast_n_times` to 1 to see the
+# planner replan through the premium writer.
+def make_writers(fail_fast_n_times: int = 0):
+    state = {"fast_calls": 0}
+
+    @tool
+    def write_article_fast(brief: str) -> str:
+        """Quickly draft an article from a brief. Cheaper, occasionally flaky."""
+        state["fast_calls"] += 1
+        if state["fast_calls"] <= fail_fast_n_times:
+            raise RuntimeError(f"upstream rate limit (attempt {state['fast_calls']})")
+        return f"Fast draft: {brief}"
+
+    @tool
+    def write_article_premium(brief: str) -> str:
+        """Premium-quality article. Higher cost, always reliable."""
+        return f"Premium draft: {brief}"
+
+    return write_article_fast, write_article_premium
 
 @tool
 def research_topic(topic: str) -> str:
@@ -63,39 +84,40 @@ def research_topic(topic: str) -> str:
     return f"Brief on {topic}"
 
 @tool
-def write_article(brief: str) -> str:
-    """Turn a research brief into an article draft."""
-    return f"Article from: {brief}"
-
-@tool
 def publish_article(draft: str) -> str:
     """Publish an article draft."""
     return f"Published: {draft}"
 
+write_article_fast, write_article_premium = make_writers(fail_fast_n_times=0)
+
 agent = create_goap_agent(
-    tools=[research_topic, write_article, publish_article],
+    tools=[research_topic, write_article_fast, write_article_premium, publish_article],
     goal="Publish an article about GOAP for LangGraph",
-    llm=ChatOpenAI(model="gpt-4o-mini"),
+    llm=ChatOpenAI(model="gpt-4o-mini", temperature=0),
     # Preconditions/effects keep the planner honest — never LLM-inferred.
     preconditions={
-        "write_article":   {"have_brief": True},
-        "publish_article": {"have_draft": True},
+        "write_article_fast":    {"have_brief": True},
+        "write_article_premium": {"have_brief": True},
+        "publish_article":       {"have_draft": True},
     },
     effects={
-        "research_topic":  {"have_brief": True},
-        "write_article":   {"have_draft": True},
-        "publish_article": {"published":  True},
+        "research_topic":        {"have_brief": True},
+        "write_article_fast":    {"have_draft": True},
+        "write_article_premium": {"have_draft": True},
+        "publish_article":       {"published":  True},
     },
     # A* minimizes total cost. Omitted tools default to cost=1.0.
     costs={
-        "research_topic":  1.0,
-        "write_article":   3.0,
-        "publish_article": 1.0,
+        "research_topic":        1.0,
+        "write_article_fast":    1.0,
+        "write_article_premium": 5.0,
+        "publish_article":       1.0,
     },
     # Wire each tool's return value into the next tool's input.
     result_keys={
-        "research_topic": "brief",
-        "write_article":  "draft",
+        "research_topic":        "brief",
+        "write_article_fast":    "draft",
+        "write_article_premium": "draft",
     },
 )
 
@@ -108,7 +130,59 @@ result = agent.invoke(
 ```
 
 `agent` is a compiled LangGraph graph. Use it with streaming,
-checkpointers, `interrupt()`, or any LangGraph feature.
+checkpointers, `interrupt()`, or any LangGraph feature. The
+LangGraph cycle that `create_goap_agent` compiles to is small and
+fixed — every plan flows through the same `planner → executor →
+observer` loop:
+
+<p align="center">
+  <img src=".github/images/quickstart-stategraph.png" alt="Compiled StateGraph: planner → executor → observer" width="120">
+</p>
+
+### Scenario 1 — Happy path (cheap writer wins on cost)
+
+A* sees two paths to `have_draft: True` and picks the cheaper one:
+
+<p align="center">
+  <img src=".github/images/quickstart-plan-happy.png" alt="Plan: research_topic → write_article_fast → publish_article" width="220">
+</p>
+
+```text
+status:              'goal_achieved'
+replan_count:        0
+blacklisted_actions: []
+plan.action_names:   ['research_topic', 'write_article_fast', 'publish_article']
+plan.total_cost:     3.0
+execution_history:
+   1. [ok ] research_topic
+   2. [ok ] write_article_fast
+   3. [ok ] publish_article
+world_state (relevant keys): {'topic': 'GOAP for LangGraph', 'brief': 'Brief on GOAP for LangGraph', 'draft': 'Fast draft: Brief on GOAP for LangGraph'}
+```
+
+### Scenario 2 — Cheap writer flakes, planner replans through premium
+
+Set `fail_fast_n_times=1` and run again. `write_article_fast` raises on its first call, the executor blacklists it, and the observer hands control back to the planner. A* re-derives a new plan from the current world state (`have_brief` is already `True` because `research_topic` succeeded), so the remaining work is just the premium writer plus publish:
+
+<p align="center">
+  <img src=".github/images/quickstart-plan-replan.png" alt="Replan: write_article_premium → publish_article" width="320">
+</p>
+
+```text
+status:              'goal_achieved'
+replan_count:        1
+blacklisted_actions: ['write_article_fast']
+plan.action_names:   ['write_article_premium', 'publish_article']
+plan.total_cost:     6.0
+execution_history:
+   1. [ok ] research_topic
+   2. [FAIL] write_article_fast  (upstream rate limit (attempt 1))
+   3. [ok ] write_article_premium
+   4. [ok ] publish_article
+world_state (relevant keys): {'topic': 'GOAP for LangGraph', 'brief': 'Brief on GOAP for LangGraph', 'draft': 'Premium draft: Brief on GOAP for LangGraph'}
+```
+
+The full transcripts and PNGs above are regenerated end-to-end against the real OpenAI API by the `@pytest.mark.api`-gated test [`tests/integration/test_prebuilt.py::TestReadmeQuickstart`](tests/integration/test_prebuilt.py); the artifacts in [`.github/images/`](.github/images/) are the test's output.
 
 ## Three ways to use it
 

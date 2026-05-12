@@ -19,6 +19,7 @@ construction time, before the graph is compiled.
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -28,7 +29,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
 from langgoap.graph.builder import GoapGraph
-from langgoap.integrations.tools import goapify_tool
+from langgoap.integrations.tools import EffectValidator, goapify_tool
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,9 @@ def create_goap_agent(
     resources: dict[str, dict[str, float]] | None = None,
     costs: dict[str, float] | None = None,
     result_keys: dict[str, str] | None = None,
+    max_retries: dict[str, int] | None = None,
+    durations: dict[str, timedelta] | None = None,
+    effect_validators: dict[str, EffectValidator] | None = None,
     **graph_kwargs: Any,
 ) -> CompiledStateGraph:
     """Create a compiled GOAP agent from a list of LangChain tools and a goal.
@@ -79,6 +83,20 @@ def create_goap_agent(
             A* still reasons over the boolean flags in ``effects``.
             A key here must not collide with any key declared for the
             same tool in ``effects`` (see :func:`goapify_tool`).
+        max_retries: Optional mapping of tool name → planner-level
+            retry budget.  ``0`` (default) blacklists the action on
+            its first failure; ``N`` allows ``N`` extra planner-level
+            replans before blacklisting (i.e. ``N + 1`` total
+            failures).  This is the knob that lets a transient
+            failure trigger replanning without giving up entirely.
+        durations: Optional mapping of tool name → :class:`datetime.timedelta`.
+            Used by the CSP scheduler when computing parallel
+            execution windows.  Tools with no entry default to
+            instantaneous actions.
+        effect_validators: Optional mapping of tool name → callable
+            ``(pre_state, post_state) -> bool`` invoked after
+            execution.  Returning ``False`` signals the action did
+            not produce its declared effects (soft failure → replan).
         **graph_kwargs: Forwarded to
             :meth:`GoapGraph.compile` (e.g. ``checkpointer``, ``store``).
 
@@ -96,6 +114,9 @@ def create_goap_agent(
         resources=resources or {},
         costs=costs or {},
         result_keys=result_keys or {},
+        max_retries=max_retries or {},
+        durations=durations or {},
+        effect_validators=effect_validators or {},
     )
     resolved_goal = _resolve_goal(goal, llm=llm, actions=actions)
 
@@ -117,6 +138,9 @@ def _wrap_tools_as_actions(
     resources: dict[str, dict[str, float]],
     costs: dict[str, float],
     result_keys: dict[str, str],
+    max_retries: dict[str, int],
+    durations: dict[str, timedelta],
+    effect_validators: dict[str, EffectValidator],
 ) -> list[ActionSpec]:
     """Wrap every tool with ``goapify_tool`` and warn on empty-effect tools."""
     actions: list[ActionSpec] = []
@@ -134,6 +158,9 @@ def _wrap_tools_as_actions(
                 cost=costs.get(tool.name, 1.0),
                 resources=tool_res,
                 result_key=result_keys.get(tool.name),
+                max_retries=max_retries.get(tool.name, 0),
+                duration=durations.get(tool.name),
+                effect_validator=effect_validators.get(tool.name),
             )
         )
     if tools_without_eff:
