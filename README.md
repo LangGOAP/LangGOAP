@@ -1,43 +1,48 @@
 <div align="center">
-  <h1>LangGOAP</h1>
-  <h3>GOAP planning for LangGraph agents.</h3>
+  <a href="https://github.com/integrallis/langgoap">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset=".github/images/logo-dark.svg">
+      <source media="(prefers-color-scheme: light)" srcset=".github/images/logo-light.svg">
+      <img alt="LangGOAP Logo" src=".github/images/logo-light.svg" width="50%">
+    </picture>
+  </a>
 </div>
 
 <div align="center">
+  <h3>Goal-oriented planning for LangGraph agents.</h3>
+</div>
 
-[![License](https://img.shields.io/pypi/l/langgoap)](LICENSE)
-[![Python](https://img.shields.io/pypi/pyversions/langgoap)](pyproject.toml)
-[![PyPI](https://img.shields.io/pypi/v/langgoap?label=%20)](https://pypi.org/project/langgoap/)
-[![Downloads](https://img.shields.io/pepy/dt/langgoap)](https://pypistats.org/packages/langgoap)
-[![MFCQI Score](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/integrallis/langgoap/main/.github/badges/mfcqi.json)](https://github.com/bsbodden/mfcqi)
-
+<div align="center">
+  <a href="LICENSE" target="_blank"><img src="https://img.shields.io/pypi/l/langgoap" alt="PyPI - License"></a>
+  <a href="https://pypistats.org/packages/langgoap" target="_blank"><img src="https://img.shields.io/pepy/dt/langgoap" alt="PyPI - Downloads"></a>
+  <a href="https://pypi.org/project/langgoap/" target="_blank"><img src="https://img.shields.io/pypi/v/langgoap.svg?label=%20" alt="Version"></a>
+  <a href="pyproject.toml" target="_blank"><img src="https://img.shields.io/pypi/pyversions/langgoap" alt="Python versions"></a>
+  <a href="https://github.com/bsbodden/mfcqi" target="_blank"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/integrallis/langgoap/main/.github/badges/mfcqi.json" alt="MFCQI Score"></a>
 </div>
 
 <br>
 
-LangGOAP plans before it acts. Give it a goal and a set of LangChain
-tools; it returns a [compiled `StateGraph`](https://langchain-ai.github.io/langgraph/concepts/low_level/)
-that picks the cheapest valid action sequence, executes it, and replans
-on failure — no hand-written routing, no free-form ReAct loop,
-deterministic by default.
+LangGOAP turns a goal and a set of LangChain tools into a compiled `StateGraph` that plans before it acts, replans on failure, and stays deterministic by default. The planner is classical A* with optional OR-Tools CP-SAT refinement; the runtime is plain LangGraph, so checkpointing, streaming, `interrupt()`, and LangSmith all just work.
 
 ```bash
 pip install -U langgoap
 ```
 
 > [!TIP]
-> For developing, debugging, and deploying agents, see
-> [LangSmith](https://docs.langchain.com/langsmith/home). LangGOAP ships
-> a `LangSmithTracer` that maps plan / replan / goal-achieved events to
-> LangSmith runs alongside LangGraph's automatic node-level tracing.
+> For developing, debugging, and deploying agents, see [LangSmith](https://docs.langchain.com/langsmith/home). LangGOAP ships a `LangSmithTracer` that maps plan / replan / goal-achieved events to LangSmith runs alongside LangGraph's automatic node-level tracing.
 
 ## Why LangGOAP?
+
+LangGOAP provides a planning layer for *any* agent that has to choose tools in a particular order under hard constraints:
 
 - **[Deterministic planning](https://docs.langchain.com/oss/python/langgraph/overview)** — A classical A* search over your action set produces a checked plan before any tool runs; the same inputs always yield the same plan.
 - **Constraint optimization built in** — Hard resource caps, soft objectives, temporal `IntervalVar` scheduling, and multi-plan Pareto selection via OR-Tools CP-SAT, with no extra configuration.
 - **The plan _is_ a `StateGraph`** — Every plan compiles to a real LangGraph graph, so checkpointers, stores, streaming, `interrupt()`, and LangSmith all just work.
-- **Replans automatically** — Action fails, world drifts, or a sensor invalidates a precondition; the executor blacklists the offender and the planner picks a new path without any routing code.
+- **Replans automatically** — When an action fails, the world drifts, or a sensor invalidates a precondition, the executor blacklists the offender and the planner picks a new path without any routing code.
 - **LLM where it earns its keep** — Natural-language goals are parsed once by `GoalInterpreter`; the loop itself stays symbolic. No ReAct, no agentic reasoning between tool calls.
+
+> [!TIP]
+> See [`examples/screencast/research_agent/`](examples/screencast/research_agent/) for a head-to-head comparison of `create_react_agent`, a hand-wired `StateGraph`, and LangGOAP — same brief, same tools, real OpenAI + Tavily costs, a revoked API key as the climax.
 
 ## Quickstart
 
@@ -193,26 +198,27 @@ if you are new to GOAP and want a smaller starting point.
 
 ## LangGraph ecosystem
 
-LangGOAP is built on LangGraph and integrates with the rest of the
-LangChain stack:
+While LangGOAP can be used wherever LangChain tools are available, it integrates seamlessly with the rest of the LangChain stack:
 
 - **[LangGraph](https://docs.langchain.com/oss/python/langgraph/overview)** — the runtime substrate. Every LangGOAP plan compiles to a real `StateGraph` and works with streaming, checkpointing, and `interrupt()`.
 - **[LangSmith](https://docs.langchain.com/langsmith/home)** — `LangSmithTracer` emits GOAP plan / replan / goal-achieved events to LangSmith alongside LangGraph's automatic node-level traces.
 - **[LangGraph deployment](https://docs.langchain.com/langsmith/deployments)** — `langgoap deploy-init` scaffolds a `langgraph dev`-ready directory; the generated deployment serves an `/mcp` endpoint so a LangGOAP graph is callable from any MCP client (Claude Desktop, Cursor, …).
 - **[Deep Agents](https://docs.langchain.com/oss/python/deepagents/overview)** — `create_goap_tool` and `create_goap_subagent` embed a LangGOAP graph as a tool or subagent inside a Deep Agents harness.
 
+---
+
 ## Documentation
 
-- [Changelog](CHANGELOG.md) – Release notes for every public version.
+- [`examples/screencast/research_agent/`](examples/screencast/research_agent/) – Flagship walkthrough: ReAct vs. hand-wired `StateGraph` vs. LangGOAP on the same brief, with measured OpenAI + Tavily costs.
+- [`examples/tutorials/`](examples/tutorials/) – End-to-end notebooks across three tiers (toy domains, constraint-optimization, full-stack).
+- [`examples/basics/`](examples/basics/) – Short primers, one mechanic per notebook (CLI, visualization, NL goals, tracing, termination policies, stuck handlers, typed-form HITL, MCTS vs A*).
 - [`langgoap/__init__.py`](langgoap/__init__.py) – Authoritative list of public symbols. Anything not re-exported from the top-level package is internal and subject to change.
 - [OptaPlanner concept mapping](docs/optaplanner_mapping.md) – How LangGOAP's `Score` hierarchy and `ConstraintBuilder` map onto OptaPlanner.
+- [Changelog](CHANGELOG.md) – Release notes for every public version.
 
 ## Contributing
 
-LangGOAP is developed test-first: every feature starts with a failing
-integration test that uses real infrastructure via TestContainers, never
-mocks. Notebooks are runnable documentation of what the tests already
-verify — never the other way around.
+LangGOAP is developed test-first: every feature starts with a failing integration test that uses real infrastructure via TestContainers, never mocks. Notebooks are runnable documentation of what the tests already verify — never the other way around.
 
 ```bash
 uv sync
@@ -221,19 +227,11 @@ uv run pytest tests/integration/test_flexible_job_shop.py -vv
 uv run pytest -m api                                    # requires OPENAI_API_KEY / ANTHROPIC_API_KEY
 ```
 
+---
+
 ## Acknowledgements
 
-LangGOAP builds on ideas and implementations from several projects:
-
-- **[GOAP](https://alumni.media.mit.edu/~jorkin/gdc2006_orkin_jeff_fear.pdf)** (Jeff Orkin / F.E.A.R.) — the classical game-AI technique that drives LangGOAP's A* planner.
-- **[Embabel](https://github.com/embabel/embabel-agent)** — first to apply GOAP planning to agentic LLM workflows.
-- **[OptaPlanner](https://www.optaplanner.org/)** — the `Score` hierarchy and fluent `ConstraintBuilder` are adapted from OptaPlanner's constraint-solving API.
-- **[OR-Tools CP-SAT](https://developers.google.com/optimization/cp/cp_solver)** — the constraint solver behind LangGOAP's CSP pipeline.
-- **[GOApy](https://github.com/leopoldmaillard/GOApy)** — pure-Python GOAP implementation used as a reference for A* correctness.
-- **[unified-planning](https://github.com/aiplan4eu/unified-planning)** — formal AI planning concepts (temporal, numeric, PDDL interop) that informed LangGOAP's action/effect model.
-- **[LangGraph](https://langchain-ai.github.io/langgraph/)** — the runtime substrate.
-
-Built by [Integrallis Software](https://integrallis.com).
+LangGOAP is inspired by [GOAP](https://alumni.media.mit.edu/~jorkin/gdc2006_orkin_jeff_fear.pdf) (Jeff Orkin / F.E.A.R.) and [Embabel](https://github.com/embabel/embabel-agent), which first applied GOAP planning to agentic LLM workflows. The `Score` hierarchy and fluent `ConstraintBuilder` are adapted from [OptaPlanner](https://www.optaplanner.org/); the CSP pipeline is built on [OR-Tools CP-SAT](https://developers.google.com/optimization/cp/cp_solver); A* correctness was checked against [GOApy](https://github.com/leopoldmaillard/GOApy); and the action/effect model draws on [unified-planning](https://github.com/aiplan4eu/unified-planning). LangGOAP is built on [LangGraph](https://langchain-ai.github.io/langgraph/) by [Integrallis Software](https://integrallis.com), but can be used wherever LangChain tools are available.
 
 ## License
 
