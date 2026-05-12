@@ -194,10 +194,12 @@ you need without rewriting your action definitions.
   [`examples/tutorials/deep_research_agent.ipynb`](examples/tutorials/deep_research_agent.ipynb).
 - **`goapify_tool` / `GoapGraph`** — Hand-authored `ActionSpec` objects
   with explicit preconditions, effects, costs, and validators. The
-  workhorse API used by every tutorial.
+  workhorse API used by every tutorial. Tier 1 primer:
+  [`examples/tutorials/directory_handler.ipynb`](examples/tutorials/directory_handler.ipynb).
 - **`GoapSubgraph` / `add_goap_subgraph`** — Drop a GOAP loop into an
   existing `StateGraph` as a sealed node. Useful when GOAP is one
-  reasoning mode among many.
+  reasoning mode among many. Quickstart:
+  [`examples/basics/goap_subgraph.ipynb`](examples/basics/goap_subgraph.ipynb).
 
 Each layer is covered by an integration test:
 [`test_prebuilt.py`](tests/integration/test_prebuilt.py),
