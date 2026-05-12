@@ -151,6 +151,91 @@ class TestCreateGoapAgentNLGoal:
         assert result["status"] == "goal_achieved"
 
 
+class TestReadmeQuickstart:
+    """Mirrors the exact Quickstart example shown in the project README.
+
+    The only difference from the README snippet is that ``ChatOpenAI`` is
+    replaced with :class:`FakeStructuredModel` so the test never hits the
+    network.  Any divergence here means the README has drifted from the
+    actual ``create_goap_agent`` API and must be corrected.
+    """
+
+    def test_readme_quickstart_runs_end_to_end(self) -> None:
+        from langchain_core.tools import tool as _tool
+
+        from langgoap.interpreter import InterpretedGoal
+        from tests.conftest import FakeStructuredModel
+
+        @_tool
+        def research_topic(topic: str) -> str:
+            """Produce a short research brief for a topic."""
+            return f"Brief on {topic}"
+
+        @_tool
+        def write_article(brief: str) -> str:
+            """Turn a research brief into an article draft."""
+            return f"Article from: {brief}"
+
+        @_tool
+        def publish_article(draft: str) -> str:
+            """Publish an article draft."""
+            return f"Published: {draft}"
+
+        fake_llm = FakeStructuredModel(
+            response=InterpretedGoal(
+                conditions={"published": True},
+                reasoning="user asked to publish an article",
+            )
+        )
+
+        agent = create_goap_agent(
+            tools=[research_topic, write_article, publish_article],
+            goal="Publish an article about GOAP for LangGraph",
+            llm=fake_llm,
+            preconditions={
+                "write_article":   {"have_brief": True},
+                "publish_article": {"have_draft": True},
+            },
+            effects={
+                "research_topic":  {"have_brief": True},
+                "write_article":   {"have_draft": True},
+                "publish_article": {"published":  True},
+            },
+            costs={
+                "research_topic":  1.0,
+                "write_article":   3.0,
+                "publish_article": 1.0,
+            },
+            # Wire each tool's return value into the next tool's input
+            # under its required argument name.
+            result_keys={
+                "research_topic": "brief",
+                "write_article":  "draft",
+            },
+        )
+
+        result = agent.invoke(
+            {
+                "world_state": {"topic": "GOAP for LangGraph"},
+                "goal": agent.goap_goal,
+            }
+        )
+
+        assert result["status"] == "goal_achieved"
+        assert result["plan"].action_names == [
+            "research_topic",
+            "write_article",
+            "publish_article",
+        ]
+        # The cost-weighted total of the chosen plan: 1.0 + 3.0 + 1.0 = 5.0
+        assert result["plan"].total_cost == pytest.approx(5.0)
+        # The result_keys plumbing should have bridged each tool's output
+        # into the next tool's input, leaving a coherent trail in world_state.
+        ws = result["world_state"]
+        assert ws["brief"] == "Brief on GOAP for LangGraph"
+        assert ws["draft"] == "Article from: Brief on GOAP for LangGraph"
+
+
 class TestCreateGoapAgentResources:
     def test_forwards_resources(self) -> None:
         agent = create_goap_agent(

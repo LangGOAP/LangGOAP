@@ -50,7 +50,7 @@ You hand LangGOAP a goal in plain English and a bag of tools, and an LLM reads t
 
 ## Quickstart
 
-The snippet below wraps three LangChain tools and asks LangGOAP to publish an article. The LLM parses the natural-language goal exactly once into a symbolic target like `{"published": True}`, and from there A* takes over. The `preconditions` and `effects` dictionaries describe how each tool changes the world: `write_article` can only run once `have_brief` is true, and `research_topic` is what makes `have_brief` true in the first place. From this static graph the planner derives the chain `research_topic → write_article → publish_article` without any LLM reasoning between tool calls. Every action also has a `cost` — A* minimizes the total cost of the chosen path. We pass `costs={...}` explicitly here so you can see the shape; values that omitted default to `1.0`. Costs only change the plan when multiple chains can reach the goal (e.g., a cached lookup at `1.0` vs. a paid API at `100.0`), and they feed directly into the CSP layer when you want hard resource budgets like `cost_usd` or `tokens` — see [`examples/screencast/research_agent/`](examples/screencast/research_agent/) for that.
+The snippet below wraps three LangChain tools and asks LangGOAP to publish an article. The LLM parses the natural-language goal exactly once into a symbolic target like `{"published": True}`, and from there A* takes over. The `preconditions` and `effects` dictionaries describe how each tool changes the world: `write_article` can only run once `have_brief` is true, and `research_topic` is what makes `have_brief` true in the first place. From this static graph the planner derives the chain `research_topic → write_article → publish_article` without any LLM reasoning between tool calls. Every action also has a `cost` — A* minimizes the total cost of the chosen path. We pass `costs={...}` explicitly here so you can see the shape; values that omitted default to `1.0`. Costs only change the plan when multiple chains can reach the goal (e.g., a cached lookup at `1.0` vs. a paid API at `100.0`), and they feed directly into the CSP layer when you want hard resource budgets like `cost_usd` or `tokens` — see [`examples/screencast/research_agent/`](examples/screencast/research_agent/) for that. Finally, `result_keys` plumbs each tool's return value into `world_state` under a chosen key, so `research_topic`'s output lands at `world_state["brief"]` where the next tool's `brief` argument can pick it up — the initial `world_state` only needs to seed the first tool's argument (`topic`).
 
 ```python
 from langchain_core.tools import tool
@@ -92,9 +92,19 @@ agent = create_goap_agent(
         "write_article":   3.0,
         "publish_article": 1.0,
     },
+    # Wire each tool's return value into the next tool's input.
+    result_keys={
+        "research_topic": "brief",
+        "write_article":  "draft",
+    },
 )
 
-result = agent.invoke({"world_state": {}, "goal": agent.goap_goal})
+result = agent.invoke(
+    {
+        "world_state": {"topic": "GOAP for LangGraph"},
+        "goal": agent.goap_goal,
+    }
+)
 ```
 
 `agent` is a compiled LangGraph graph. Use it with streaming,

@@ -42,6 +42,7 @@ def create_goap_agent(
     effects: dict[str, dict[str, Any]] | None = None,
     resources: dict[str, dict[str, float]] | None = None,
     costs: dict[str, float] | None = None,
+    result_keys: dict[str, str] | None = None,
     **graph_kwargs: Any,
 ) -> CompiledStateGraph:
     """Create a compiled GOAP agent from a list of LangChain tools and a goal.
@@ -68,6 +69,16 @@ def create_goap_agent(
             Missing tools get empty effects.
         resources: Optional mapping of tool name → resources dict.
         costs: Optional mapping of tool name → action cost override.
+        result_keys: Optional mapping of tool name → world-state key
+            that should receive the tool's raw return value at
+            execution time.  Use this to wire one tool's output into
+            the next tool's input — e.g. ``{"research_topic":
+            "brief"}`` makes the return value of ``research_topic``
+            available to a downstream ``write_article(brief)`` tool
+            via ``world_state["brief"]``.  Planning is unaffected;
+            A* still reasons over the boolean flags in ``effects``.
+            A key here must not collide with any key declared for the
+            same tool in ``effects`` (see :func:`goapify_tool`).
         **graph_kwargs: Forwarded to
             :meth:`GoapGraph.compile` (e.g. ``checkpointer``, ``store``).
 
@@ -84,6 +95,7 @@ def create_goap_agent(
         effects=effects or {},
         resources=resources or {},
         costs=costs or {},
+        result_keys=result_keys or {},
     )
     resolved_goal = _resolve_goal(goal, llm=llm, actions=actions)
 
@@ -104,6 +116,7 @@ def _wrap_tools_as_actions(
     effects: dict[str, dict[str, Any]],
     resources: dict[str, dict[str, float]],
     costs: dict[str, float],
+    result_keys: dict[str, str],
 ) -> list[ActionSpec]:
     """Wrap every tool with ``goapify_tool`` and warn on empty-effect tools."""
     actions: list[ActionSpec] = []
@@ -120,6 +133,7 @@ def _wrap_tools_as_actions(
                 effects=tool_eff,
                 cost=costs.get(tool.name, 1.0),
                 resources=tool_res,
+                result_key=result_keys.get(tool.name),
             )
         )
     if tools_without_eff:
