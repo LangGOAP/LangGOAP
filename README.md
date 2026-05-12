@@ -35,16 +35,22 @@ pip install -U langgoap
 
 LangGOAP provides a planning layer for *any* agent that has to choose tools in a particular order under hard constraints:
 
-- **[Deterministic planning](https://docs.langchain.com/oss/python/langgraph/overview)** — A classical A* search over your action set produces a checked plan before any tool runs; the same inputs always yield the same plan.
+- **Deterministic planning** — A classical A* search over your action set produces a checked plan before any tool runs; the same inputs always yield the same plan.
 - **Constraint optimization built in** — Hard resource caps, soft objectives, temporal `IntervalVar` scheduling, and multi-plan Pareto selection via OR-Tools CP-SAT, with no extra configuration.
 - **The plan _is_ a `StateGraph`** — Every plan compiles to a real LangGraph graph, so checkpointers, stores, streaming, `interrupt()`, and LangSmith all just work.
 - **Replans automatically** — When an action fails, the world drifts, or a sensor invalidates a precondition, the executor blacklists the offender and the planner picks a new path without any routing code.
 - **LLM where it earns its keep** — Natural-language goals are parsed once by `GoalInterpreter`; the loop itself stays symbolic. No ReAct, no agentic reasoning between tool calls.
 
+### In Plain English...
+
+You hand LangGOAP a goal in plain English and a bag of tools, and an LLM reads the goal exactly once to turn it into a symbolic target — that's the only place a model gets to make decisions. From there, a classical A* search picks the shortest sequence of tool calls that reaches the goal, and because the search is deterministic, the same goal and the same tools always produce the same plan. If you've declared resource caps, scheduling windows, or objectives to optimize, those are handed to OR-Tools CP-SAT to refine the plan against real constraints, all without extra wiring. The plan then compiles down to an ordinary LangGraph `StateGraph`, so checkpointing, streaming, `interrupt()`, LangSmith tracing, and everything else in the LangGraph ecosystem work the way you'd expect. When execution hits the real world and something breaks — a tool errors out, a precondition no longer holds, an external sensor disagrees — the executor blacklists the offending action and asks the planner for a new path, so recovery happens automatically rather than through hand-written routing code.
+
 > [!TIP]
 > See [`examples/screencast/research_agent/`](examples/screencast/research_agent/) for a head-to-head comparison of `create_react_agent`, a hand-wired `StateGraph`, and LangGOAP — same brief, same tools, real OpenAI + Tavily costs, a revoked API key as the climax.
 
 ## Quickstart
+
+The snippet below wraps three LangChain tools and asks LangGOAP to publish an article. The LLM parses the natural-language goal exactly once into a symbolic target like `{"published": True}`, and from there A* takes over. The `preconditions` and `effects` dictionaries describe how each tool changes the world: `write_article` can only run once `have_brief` is true, and `research_topic` is what makes `have_brief` true in the first place. From this static graph the planner derives the chain `research_topic → write_article → publish_article` without any LLM reasoning between tool calls. Every action also has a `cost` — A* minimizes the total cost of the chosen path. We pass `costs={...}` explicitly here so you can see the shape; values that omitted default to `1.0`. Costs only change the plan when multiple chains can reach the goal (e.g., a cached lookup at `1.0` vs. a paid API at `100.0`), and they feed directly into the CSP layer when you want hard resource budgets like `cost_usd` or `tokens` — see [`examples/screencast/research_agent/`](examples/screencast/research_agent/) for that.
 
 ```python
 from langchain_core.tools import tool
@@ -79,6 +85,12 @@ agent = create_goap_agent(
         "research_topic":  {"have_brief": True},
         "write_article":   {"have_draft": True},
         "publish_article": {"published":  True},
+    },
+    # A* minimizes total cost. Omitted tools default to cost=1.0.
+    costs={
+        "research_topic":  1.0,
+        "write_article":   3.0,
+        "publish_article": 1.0,
     },
 )
 
