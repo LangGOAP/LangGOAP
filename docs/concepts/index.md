@@ -149,8 +149,7 @@ The default `RuleBasedClassifier` is lexicographic and conservative:
 2. `risk_profile == "risk-averse"` → `"mcts"` (explicit user opt-in
    via `DivergencePolicy(kind="risk-averse")`).
 3. `is_stochastic` **and** `prefer_mcts_for_stochastic=True` →
-   `"mcts"` (flag-gated opt-in; see the outcome-3 gate in
-   `research/experiments/2026-04-20-mcts-on-stochastic.md`).
+   `"mcts"` (flag-gated opt-in).
 4. High branching × deep horizon → `"mcts"`.
 5. Otherwise → `"astar"`.
 
@@ -188,8 +187,6 @@ the planner — observability is a hard invariant.
 
 - {doc}`../api/index` — public API reference.
 - {doc}`../examples/index` — runnable tutorial notebooks.
-- The `optaplanner_mapping.md` document in the repository root
-  explains how constraint-solver concepts map onto CP-SAT primitives.
 
 ```{toctree}
 :maxdepth: 2

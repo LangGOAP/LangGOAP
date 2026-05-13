@@ -1,10 +1,7 @@
 # Examples
 
 Every example below is a runnable Jupyter notebook committed to the
-repository under `examples/`. Each tutorial has a matching integration
-test under `tests/integration/` that runs in CI, so the notebooks are
-verified end-to-end — they are documentation *of* the test suite, not
-a substitute for it.
+repository under `examples/`.
 
 ## Flagship screencast
 

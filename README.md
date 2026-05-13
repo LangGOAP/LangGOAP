@@ -302,7 +302,6 @@ LangGOAP integrates with the rest of the LangChain stack:
 - [`examples/tutorials/`](examples/tutorials/) – End-to-end notebooks across three tiers (toy domains, constraint-optimization, full-stack).
 - [`examples/basics/`](examples/basics/) – Short primers, one mechanic per notebook (CLI, visualization, NL goals, tracing, termination policies, stuck handlers, typed-form HITL, MCTS vs A*).
 - [`langgoap/__init__.py`](langgoap/__init__.py) – Authoritative list of public symbols. Anything not re-exported from the top-level package is internal and subject to change.
-- [OptaPlanner concept mapping](docs/optaplanner_mapping.md) – How LangGOAP's `Score` hierarchy and `ConstraintBuilder` map onto OptaPlanner.
 - [Changelog](CHANGELOG.md) – Release notes for every public version.
 
 ## Contributing

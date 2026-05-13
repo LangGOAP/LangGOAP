@@ -88,8 +88,8 @@ Requires Python 3.10+. OR-Tools CP-SAT is included as a core dependency.
 
 - **[Concepts](concepts/index.md)** — GOAP planning, constraint
   optimization, and the LangGraph-native execution model.
-- **[Examples](examples/index.md)** — 15 tutorial notebooks and
-  two basics notebooks.
+- **[Examples](examples/index.md)** — 27 tutorial notebooks and
+  12 basics notebooks.
 - **[API reference](api/index.md)** — every symbol in the public
   `langgoap.__all__`.
 
@@ -100,7 +100,6 @@ Requires Python 3.10+. OR-Tools CP-SAT is included as a core dependency.
 concepts/index
 examples/index
 api/index
-optaplanner_mapping
 ```
 
 ```{toctree}

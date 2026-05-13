@@ -35,8 +35,6 @@ exclude_patterns = [
     "Thumbs.db",
     ".DS_Store",
     "**.ipynb_checkpoints",
-    # Release-engineering artifacts — not published on the docs site.
-    "release_audit_*.md",
 ]
 
 # -- Options for HTML output -------------------------------------------------

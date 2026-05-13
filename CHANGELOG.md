@@ -89,8 +89,7 @@ implemented in `langgoap.integrations`:
   `CSPRefinementStrategy`, and `TwoPhasePipelineStrategy`. User-defined
   strategies conform to the Protocol and are accepted by
   `GoapPlanner(strategy=...)`. Move, phase, and score-director
-  concepts from constraint-solver literature map to CP-SAT internals —
-  see `docs/optaplanner_mapping.md` for the full table.
+  concepts from constraint-solver literature map to CP-SAT internals.
 - **Two-phase pipeline** (`langgoap.planner.pipeline`): A* produces a
   candidate plan, then CSP (if the goal has constraints or
   objectives) refines or replaces it with a better alternative.
@@ -151,8 +150,6 @@ standard benchmark problems (cloud balancing, vehicle routing, nurse
 rostering, project job scheduling, task assigning). Every instance is
 derived from a small fixture committed under
 `examples/tutorials/tutorial_examples/data/` with provenance headers.
-`docs/optaplanner_mapping.md` explains how constraint-solver concepts
-map to LangGOAP classes.
 
 ### Observability, history, and visualization
 
@@ -264,8 +261,7 @@ surface:
 
 ### Explicitly out of scope for v0.1.0
 
-Documented in the release plan and `docs/optaplanner_mapping.md`:
-utility AI planner, annotation-based `@Agent`/`@Action` reflection API,
+Utility AI planner, annotation-based `@Agent`/`@Action` reflection API,
 recursive HTN-style decomposition, learned cost functions from
 execution history, bundled OpenTelemetry adapter (LangSmith adapter
 ships in-tree as `LangSmithTracer`),
