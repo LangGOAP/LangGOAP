@@ -9,10 +9,12 @@ Two layers of coverage:
   Tavily blacklisted, planner replans through DuckDuckGo, goal
   achieved under the $2.00 cap.
 
-* **Real-API** (gated on ``LANGGOAP_RUN_LIVE_DEMO=1``). Runs all
-  three agents against live OpenAI ``gpt-4o-mini`` + Tavily and
-  asserts the GOAP version finishes under budget. Skipped by
-  default to keep CI fast and free.
+* **Real-API** (auto-enabled when ``OPENAI_API_KEY`` and
+  ``TAVILY_API_KEY`` are present — typically loaded from ``.env``
+  by ``tests/conftest.py``). Runs all three agents against live
+  OpenAI ``gpt-4o-mini`` + Tavily and asserts the GOAP version
+  finishes under the $2.00 budget. Skipped when either key is
+  missing.
 """
 
 from __future__ import annotations
@@ -137,13 +139,10 @@ class TestHandWiredRouted:
 _LIVE_REQUIRED_KEYS = ("OPENAI_API_KEY", "TAVILY_API_KEY")
 
 
+@pytest.mark.api
 @pytest.mark.skipif(
-    os.environ.get("LANGGOAP_RUN_LIVE_DEMO") != "1"
-    or not all(os.environ.get(k) for k in _LIVE_REQUIRED_KEYS),
-    reason=(
-        "Live demo gated on LANGGOAP_RUN_LIVE_DEMO=1 and both "
-        "OPENAI_API_KEY + TAVILY_API_KEY"
-    ),
+    not all(os.environ.get(k) for k in _LIVE_REQUIRED_KEYS),
+    reason="Live demo requires OPENAI_API_KEY + TAVILY_API_KEY in the environment",
 )
 class TestLiveAPI:
     """Real OpenAI + Tavily run. Costs a few cents per execution."""
