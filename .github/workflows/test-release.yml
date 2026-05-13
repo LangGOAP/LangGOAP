@@ -1,0 +1,180 @@
+name: Test Release to Test PyPI
+
+on:
+  workflow_call:
+    outputs:
+      version:
+        description: "Package version"
+        value: ${{ jobs.build.outputs.version }}
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    outputs:
+      version: ${{ steps.check-version.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install build dependencies
+        run: uv pip install --system build twine tomli
+
+      # Keep build *separate* from publish so trusted-publish / token creds
+      # never reach the build step. Per PyPA guidance:
+      # https://github.com/pypa/gh-action-pypi-publish#non-goals
+      - name: Build project for distribution
+        run: python -m build
+
+      - name: Check built package
+        run: python -m twine check dist/*
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-dist
+          path: dist/
+
+      - name: Check Version
+        id: check-version
+        shell: bash
+        run: |
+          VERSION=$(python -c "
+          try:
+              import tomllib
+          except ModuleNotFoundError:
+              import tomli as tomllib
+          print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])
+          ")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Package version: $VERSION"
+
+  publish-test-pypi:
+    needs:
+      - build
+    runs-on: ubuntu-latest
+    environment: release
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: test-dist
+          path: dist/
+
+      - name: Publish to Test PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+          verbose: true
+          print-hash: true
+          # Overwrite duplicate artifacts. Safe *only* on Test PyPI.
+          # https://github.com/pypa/gh-action-pypi-publish#tolerating-release-package-file-duplicates
+          skip-existing: true
+          attestations: false
+
+  validate-test-pypi:
+    needs:
+      - build
+      - publish-test-pypi
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # No caching here — we want maximal sensitivity to dependency-spec gaps.
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@v4
+
+      - name: Upgrade setuptools with UV
+        run: uv pip install --system "setuptools>=40.8.0" wheel
+
+      - name: Install from Test PyPI
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        # Regular PyPI = primary index (deps resolved here);
+        # Test PyPI = extra index so the not-yet-on-PyPI langgoap==VERSION
+        # can be found. unsafe-best-match lets UV pull deps from either.
+        run: |
+          for attempt in 1 2 3; do
+            echo "Attempt $attempt of 3..."
+            if uv pip install --system \
+              --index-strategy unsafe-best-match \
+              --extra-index-url https://test.pypi.org/simple/ \
+              "langgoap==$VERSION"; then
+              echo "✅ Successfully installed langgoap==$VERSION"
+              exit 0
+            fi
+
+            if [ $attempt -lt 3 ]; then
+              delay=$((attempt * 10))
+              echo "⏳ Install failed, waiting ${delay}s before retry..."
+              sleep $delay
+            fi
+          done
+
+          echo "❌ Failed to install after 3 attempts"
+          exit 1
+
+      - name: Verify package import
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          python -c "import langgoap; print(f'langgoap version: {langgoap.__version__}')"
+          echo "✅ Package import successful"
+
+      - name: Verify CLI works
+        run: |
+          langgoap --version
+          echo "✅ CLI executable works"
+
+      - name: Install test dependencies
+        run: uv sync --dev
+
+      - name: Reinstall package from Test PyPI (overwrite editable install)
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          uv pip install --system \
+            --extra-index-url https://test.pypi.org/simple/ \
+            --force-reinstall --no-deps \
+            "langgoap==$VERSION"
+
+      - name: Run smoke tests
+        env:
+          OPENAI_API_KEY: ""
+        run: |
+          # Subset of fast, API-free unit tests verifying the published wheel works.
+          uv run pytest tests/test_state.py tests/test_goals.py tests/test_actions.py -v
+          echo "✅ Smoke tests passed"
+
+      - name: Verify MFCQI can analyze published package
+        run: |
+          uv run python -m mfcqi analyze langgoap --format json --silent > /tmp/mfcqi.json
+          python -c "import json; data = json.load(open('/tmp/mfcqi.json')); print(f\"MFCQI Score: {data['mfcqi_score']}\")"
+          echo "✅ Self-analysis works"
+

@@ -1,44 +1,347 @@
-name: Publish Release
+name: Release to PyPI
 
 on:
   release:
     types: [published]
 
+env:
+  PYTHON_VERSION: "3.12"
+
 jobs:
-  build:
+  # Verify version matches release tag (fail fast)
+  verify-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get-version.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tomli for version parsing
+        run: pip install tomli
+
+      - name: Get package version
+        id: get-version
+        run: |
+          VERSION=$(python -c "
+          try:
+              import tomllib
+          except ModuleNotFoundError:
+              import tomli as tomllib
+          print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])
+          ")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Package version: $VERSION"
+
+      - name: Verify version matches release tag
+        if: github.event_name == 'release'
+        env:
+          VERSION: ${{ steps.get-version.outputs.version }}
+        run: |
+          RELEASE_TAG=${GITHUB_REF#refs/tags/}
+          RELEASE_VERSION=${RELEASE_TAG#v}
+
+          echo "Package version: $VERSION"
+          echo "Release tag: $RELEASE_TAG"
+          echo "Release version: $RELEASE_VERSION"
+
+          if [ "$VERSION" != "$RELEASE_VERSION" ]; then
+            echo "❌ Error: Package version ($VERSION) does not match release version ($RELEASE_VERSION)"
+            echo "Please update the version in pyproject.toml to match the release tag"
+            exit 1
+          fi
+
+          echo "✅ Version verification passed"
+
+  # Test the release on Test PyPI
+  test-release:
+    needs: verify-version
+    uses: ./.github/workflows/test-release.yml
+    permissions: write-all
+    secrets: inherit
+
+  # Run comprehensive pre-release validation
+  pre-release-checks:
+    needs:
+      - verify-version
+      - test-release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # No caching - we want to catch any dependency issues
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@v4
+
+      - name: Upgrade setuptools with UV
+        run: uv pip install --system "setuptools>=40.8.0" wheel
+
+      - name: Install from Test PyPI
+        env:
+          VERSION: ${{ needs.test-release.outputs.version }}
+        run: |
+          uv pip install --system \
+            --index-strategy unsafe-best-match \
+            --extra-index-url https://test.pypi.org/simple/ \
+            "langgoap==$VERSION" || \
+          ( \
+            sleep 5 && \
+            uv pip install --system \
+              --index-strategy unsafe-best-match \
+              --extra-index-url https://test.pypi.org/simple/ \
+              "langgoap==$VERSION" \
+          )
+
+      - name: Install test dependencies
+        run: uv sync --dev --extra checkpoint-postgres --extra checkpoint-redis
+
+      - name: Reinstall package from Test PyPI
+        env:
+          VERSION: ${{ needs.test-release.outputs.version }}
+        run: |
+          uv pip install --system \
+            --extra-index-url https://test.pypi.org/simple/ \
+            --force-reinstall --no-deps \
+            "langgoap==$VERSION"
+
+      - name: Run full test suite
+        env:
+          OPENAI_API_KEY: ""
+        run: |
+          uv run python -m pytest -vv --log-level=CRITICAL -m "not api"
+          echo "✅ All tests passed on Python ${{ matrix.python-version }}"
+
+      - name: Run type checking
+        run: |
+          uv run python -m mypy ./langgoap
+          echo "✅ Type checking passed"
+
+      - name: Run format check
+        run: |
+          uv run black --check ./langgoap ./tests/
+          uv run isort ./langgoap ./tests/ --check-only --profile black
+          echo "✅ Format check passed"
+
+      - name: Verify MFCQI score
+        run: |
+          MFCQI_SCORE=$(uv run python -m mfcqi analyze langgoap --format json --silent | python -c "import sys, json; data=json.load(sys.stdin); print(data['mfcqi_score'])")
+          echo "MFCQI Score: $MFCQI_SCORE"
+
+          # Ensure quality meets minimum threshold (0.75 for releases)
+          THRESHOLD="0.75"
+          if command -v bc >/dev/null 2>&1; then
+            if (( $(echo "$MFCQI_SCORE < $THRESHOLD" | bc -l) )); then
+              echo "⚠️ Warning: MFCQI score ($MFCQI_SCORE) is below recommended threshold ($THRESHOLD)"
+            else
+              echo "✅ MFCQI score meets quality threshold"
+            fi
+          fi
+
+
+  # Get minimum dependency versions and test with them
+  test-min-versions:
+    needs:
+      - verify-version
+      - test-release
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install uv
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install UV
         uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
 
-      - name: Set up Python
-        run: uv python install 3.12
+      - name: Upgrade setuptools with UV
+        run: uv pip install --system "setuptools>=40.8.0" wheel
 
-      - name: Build package
-        run: uv build
+      - name: Install from Test PyPI
+        env:
+          VERSION: ${{ needs.test-release.outputs.version }}
+        run: |
+          uv pip install --system \
+            --index-strategy unsafe-best-match \
+            --extra-index-url https://test.pypi.org/simple/ \
+            "langgoap==$VERSION"
 
-      - name: Upload build
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist/
+      - name: Install tomli for pyproject parsing
+        run: uv pip install --system tomli
 
-  publish:
-    needs: build
+      - name: Get minimum versions from pyproject.toml
+        id: min-versions
+        run: |
+          python -c "
+          try:
+              import tomllib
+          except ModuleNotFoundError:
+              import tomli as tomllib
+          import re
+
+          with open('pyproject.toml', 'rb') as f:
+              data = tomllib.load(f)
+
+          deps = data['project']['dependencies']
+          min_versions = []
+
+          for dep in deps:
+              # Parse 'package>=1.2.3' -> 'package==1.2.3'
+              match = re.match(r'([a-zA-Z0-9_-]+)>=([0-9.]+)', dep)
+              if match:
+                  pkg, ver = match.groups()
+                  # Skip packages with complex constraints
+                  if pkg not in ['langgraph']:
+                      min_versions.append(f'{pkg}=={ver}')
+
+          print(' '.join(min_versions))
+          " > /tmp/min_versions.txt
+
+          MIN_VERSIONS=$(cat /tmp/min_versions.txt)
+          echo "min-versions=$MIN_VERSIONS" >> "$GITHUB_OUTPUT"
+          echo "Minimum versions: $MIN_VERSIONS"
+
+      - name: Install test dependencies
+        run: uv sync --dev --extra checkpoint-postgres --extra checkpoint-redis
+
+      - name: Install minimum dependency versions
+        if: steps.min-versions.outputs.min-versions != ''
+        env:
+          MIN_VERSIONS: ${{ steps.min-versions.outputs.min-versions }}
+        run: |
+          if [ -n "$MIN_VERSIONS" ]; then
+            # Intentional word-splitting on $MIN_VERSIONS: each space-separated
+            # entry is a distinct pip requirement spec.
+            # shellcheck disable=SC2086
+            uv pip install --system $MIN_VERSIONS
+            echo "✅ Installed minimum versions"
+          fi
+
+      - name: Run tests with minimum versions
+        if: steps.min-versions.outputs.min-versions != ''
+        env:
+          OPENAI_API_KEY: ""
+        run: |
+          uv run python -m pytest -vv --log-level=CRITICAL -m "not api"
+          echo "✅ Tests passed with minimum dependency versions"
+
+  # Only publish to production PyPI after all validations pass
+  publish-pypi:
+    needs:
+      - verify-version
+      - test-release
+      - pre-release-checks
+      - test-min-versions
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
+    environment: release
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
         with:
-          name: dist
+          name: test-dist
           path: dist/
 
-      - name: Publish to PyPI
+      - name: Publish to production PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          verbose: true
+          print-hash: true
+          attestations: false
+
+
+  # Create or update GitHub release
+  mark-release:
+    needs:
+      - verify-version
+      - test-release
+      - pre-release-checks
+      - test-min-versions
+      - publish-pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: test-dist
+          path: dist/
+
+      - name: Update release with PyPI links
+        uses: actions/github-script@v7
+        env:
+          VERSION: ${{ needs.verify-version.outputs.version }}
+        with:
+          script: |
+            const version = process.env.VERSION;
+            const packageName = 'langgoap';
+
+            // Get the release (either from the release event or find by tag)
+            let release;
+            if (context.eventName === 'release') {
+              release = context.payload.release;
+            } else {
+              // For workflow_dispatch, find the latest release
+              const { data: releases } = await github.rest.repos.listReleases({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 1
+              });
+              release = releases[0];
+            }
+
+            if (!release) {
+              console.log('No release found, skipping update');
+              return;
+            }
+
+            const pypiLinks = `
+
+            ## 📦 PyPI Release
+
+            This release is now available on PyPI:
+
+            - **PyPI Package**: https://pypi.org/project/${packageName}/${version}/
+            - **Installation**: \`pip install ${packageName}==${version}\`
+            - **Upgrade**: \`pip install --upgrade ${packageName}\`
+
+            ### Quick Start
+
+            \`\`\`bash
+            pip install ${packageName}
+            ${packageName} --help
+            \`\`\`
+
+            ### What's New in v${version}
+
+            See the full changelog above for details.
+            `;
+
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: release.id,
+              body: (release.body || '') + pypiLinks
+            });
+
+            console.log('✅ Updated release with PyPI links');
