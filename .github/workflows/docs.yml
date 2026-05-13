@@ -97,14 +97,14 @@ jobs:
           "
 
           for dir in "$OUTPUT_DIR"/*/; do
-            name=\$(basename "\$dir")
-            cp "$OUTPUT_DIR/versions.json" "\$dir/versions.json"
+            name=$(basename "$dir")
+            cp "$OUTPUT_DIR/versions.json" "$dir/versions.json"
             python3 -c "
           import json
-          with open('\$dir/versions.json') as f:
+          with open('$dir/versions.json') as f:
               data = json.load(f)
-          data['current'] = '\$name'
-          with open('\$dir/versions.json', 'w') as f:
+          data['current'] = '$name'
+          with open('$dir/versions.json', 'w') as f:
               json.dump(data, f, indent=2)
           "
           done
