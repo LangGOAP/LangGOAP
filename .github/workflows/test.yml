@@ -17,6 +17,9 @@ jobs:
     name: Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
 
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
     strategy:
       fail-fast: false
       matrix:
@@ -38,11 +41,9 @@ jobs:
         run: uv sync --extra checkpoint-postgres --extra checkpoint-redis
 
       - name: Run API tests
-        if: matrix.python-version == '3.12'
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        if: matrix.python-version == '3.12' && env.OPENAI_API_KEY != ''
         run: make test-all
 
       - name: Run tests
-        if: matrix.python-version != '3.12'
+        if: matrix.python-version != '3.12' || env.OPENAI_API_KEY == ''
         run: make test
