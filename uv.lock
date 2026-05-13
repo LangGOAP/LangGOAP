@@ -2213,6 +2213,7 @@ deepagents = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "bandit" },
     { name = "black" },
     { name = "click" },
     { name = "coverage" },
@@ -2253,6 +2254,7 @@ provides-extras = ["checkpoint-postgres", "checkpoint-redis", "cli", "deepagents
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "bandit", specifier = ">=1.9.4" },
     { name = "black", specifier = ">=25.1.0" },
     { name = "click", specifier = ">=8.1.7" },
     { name = "coverage", specifier = ">=7.10" },
