@@ -14,8 +14,8 @@ on:
 
 jobs:
   test:
-    name: Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
+    name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
 
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -23,6 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
 
     steps:
@@ -40,10 +41,179 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra checkpoint-postgres --extra checkpoint-redis
 
-      - name: Run API tests
-        if: matrix.python-version == '3.12' && env.OPENAI_API_KEY != ''
-        run: make test-all
+      - name: Install bc (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y bc
 
-      - name: Run tests
-        if: matrix.python-version != '3.12' || env.OPENAI_API_KEY == ''
-        run: make test
+      - name: Install bc (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install bc
+
+      # Windows GH runners have no Docker daemon, so testcontainers-based
+      # tests are excluded there. macOS/Linux runners include them.
+      - name: Run tests with coverage
+        shell: bash
+        run: |
+          IGNORE_ARGS=""
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            IGNORE_ARGS="--ignore=tests/integration/test_checkpointing.py"
+          fi
+          uv run python -m pytest -m "not api" \
+            --cov=langgoap --cov-branch \
+            --cov-report=xml --cov-report=term-missing \
+            --log-level=CRITICAL \
+            $IGNORE_ARGS
+
+      - name: Run API tests
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && env.OPENAI_API_KEY != ''
+        run: uv run python -m pytest -m "api" --log-level=CRITICAL
+
+      - name: Verify coverage file
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        run: |
+          ls -lh coverage.xml
+          echo "Coverage file size: $(stat -c%s coverage.xml) bytes"
+
+      - name: Upload coverage artifact
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+
+      - name: Run MFCQI self-analysis
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          echo "📊 Running MFCQI analysis on langgoap/..."
+          MFCQI_SCORE=$(uv run python -m mfcqi analyze langgoap --format json --silent | python -c "
+          import sys, json
+          try:
+              data = json.load(sys.stdin)
+              print(data['mfcqi_score'])
+          except Exception:
+              print('0.0')
+          ")
+          echo "Current MFCQI Score: $MFCQI_SCORE"
+
+          THRESHOLD="0.75"
+          if command -v bc >/dev/null 2>&1; then
+            if (( $(echo "$MFCQI_SCORE < $THRESHOLD" | bc -l) )); then
+              echo "⚠️  Warning: MFCQI score ($MFCQI_SCORE) is below recommended threshold ($THRESHOLD)"
+            else
+              echo "✅ MFCQI score meets quality threshold"
+            fi
+          fi
+
+
+  quality-gate:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --extra checkpoint-postgres --extra checkpoint-redis
+
+      - name: Install bc
+        run: sudo apt-get update && sudo apt-get install -y bc
+
+      - name: Download coverage artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-xml
+          path: ./coverage-data
+
+      - name: Generate quality report
+        id: quality
+        run: |
+          echo "📊 Generating comprehensive quality report..."
+
+          # MFCQI score
+          MFCQI_OUTPUT=$(uv run python -m mfcqi analyze langgoap --format json --silent)
+          MFCQI_SCORE=$(echo "$MFCQI_OUTPUT" | python -c "import sys, json; data=json.load(sys.stdin); print(data['mfcqi_score'])")
+
+          # Coverage from artifact (avoid re-running tests)
+          if [ -f ./coverage-data/coverage.xml ]; then
+            COVERAGE=$(python -c "import xml.etree.ElementTree as ET; tree = ET.parse('./coverage-data/coverage.xml'); root = tree.getroot(); print(root.attrib['line-rate'])" | awk '{printf "%.0f", $1*100}')
+          else
+            echo "⚠️  Coverage report not found, skipping coverage check"
+            COVERAGE="0"
+          fi
+
+          # Bandit security issues
+          SECURITY_ISSUES=$(uv run bandit -r langgoap/ -f json 2>/dev/null | python -c "import sys, json; data=json.load(sys.stdin); print(len(data.get('results', [])))" || echo "0")
+
+          {
+            echo "mfcqi_score=$MFCQI_SCORE"
+            echo "coverage=$COVERAGE"
+            echo "security_issues=$SECURITY_ISSUES"
+          } >> "$GITHUB_OUTPUT"
+
+          if (( $(echo "$MFCQI_SCORE >= 0.75" | bc -l) )) && (( $(echo "$COVERAGE >= 80" | bc -l) )) && [ "$SECURITY_ISSUES" -eq 0 ]; then
+            {
+              echo "status=passing"
+              echo "emoji=✅"
+            } >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "status=warning"
+              echo "emoji=⚠️"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const mfcqiScore = '${{ steps.quality.outputs.mfcqi_score }}';
+            const coverage = '${{ steps.quality.outputs.coverage }}';
+            const securityIssues = '${{ steps.quality.outputs.security_issues }}';
+            const status = '${{ steps.quality.outputs.status }}';
+            const emoji = '${{ steps.quality.outputs.emoji }}';
+
+            const body = `## ${emoji} Code Quality Report
+
+            | Metric | Score | Status |
+            |--------|-------|--------|
+            | **MFCQI Score** | ${mfcqiScore} | ${parseFloat(mfcqiScore) >= 0.75 ? '✅ Good' : '⚠️ Needs Work'} |
+            | **Test Coverage** | ${coverage}% | ${parseFloat(coverage) >= 80 ? '✅ Good' : '⚠️ Needs Work'} |
+            | **Security Issues** | ${securityIssues} | ${securityIssues === '0' ? '✅ Clean' : '⚠️ Issues Found'} |
+
+            ### Quality Gates
+            - **MFCQI Score**: ${parseFloat(mfcqiScore) >= 0.75 ? '✅' : '❌'} Minimum 0.75 (Current: ${mfcqiScore})
+            - **Test Coverage**: ${parseFloat(coverage) >= 80 ? '✅' : '❌'} Minimum 80% (Current: ${coverage}%)
+            - **Security**: ${securityIssues === '0' ? '✅' : '❌'} Zero vulnerabilities (Current: ${securityIssues})
+
+            ${status === 'passing' ?
+              '🎉 **All quality gates passed!** This PR maintains high code quality standards.' :
+              '⚠️ **Some quality gates need attention.** Please review the metrics above before merging.'
+            }
+
+            <details>
+            <summary>📊 View detailed MFCQI breakdown</summary>
+
+            Run \`uv run python -m mfcqi analyze langgoap\` locally to see detailed metrics breakdown.
+            </details>
+            `;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
