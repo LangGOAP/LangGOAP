@@ -219,7 +219,9 @@ class TestSubgraphQuickstart:
             return {"world_state": {"topic": "GOAP for LangGraph"}}
 
         def finish(state: QuickstartParentState) -> dict[str, Any]:
-            url = state.get("plan_result", {}).get("world_state", {}).get("url", "<none>")
+            url = (
+                state.get("plan_result", {}).get("world_state", {}).get("url", "<none>")
+            )
             return {
                 "final_message": (
                     f"hi {state.get('user_id', 'anon')} - published at {url}"

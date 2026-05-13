@@ -176,9 +176,7 @@ def _quickstart_writers(fail_fast_n_times: int) -> tuple[BaseTool, BaseTool]:
         """Quickly draft an article from a brief. Cheaper, occasionally flaky."""
         state["fast_calls"] += 1
         if state["fast_calls"] <= fail_fast_n_times:
-            raise RuntimeError(
-                f"upstream rate limit (attempt {state['fast_calls']})"
-            )
+            raise RuntimeError(f"upstream rate limit (attempt {state['fast_calls']})")
         return f"Fast draft: {brief}"
 
     @tool
@@ -214,25 +212,25 @@ def _build_quickstart_agent(llm: Any, fail_fast_n_times: int) -> CompiledStateGr
         goal="Publish an article about GOAP for LangGraph",
         llm=llm,
         preconditions={
-            "write_article_fast":    {"have_brief": True},
+            "write_article_fast": {"have_brief": True},
             "write_article_premium": {"have_brief": True},
-            "publish_article":       {"have_draft": True},
+            "publish_article": {"have_draft": True},
         },
         effects={
-            "research_topic":        {"have_brief": True},
-            "write_article_fast":    {"have_draft": True},
+            "research_topic": {"have_brief": True},
+            "write_article_fast": {"have_draft": True},
             "write_article_premium": {"have_draft": True},
-            "publish_article":       {"published":  True},
+            "publish_article": {"published": True},
         },
         costs={
-            "research_topic":        1.0,
-            "write_article_fast":    1.0,
+            "research_topic": 1.0,
+            "write_article_fast": 1.0,
             "write_article_premium": 5.0,
-            "publish_article":       1.0,
+            "publish_article": 1.0,
         },
         result_keys={
-            "research_topic":        "brief",
-            "write_article_fast":    "draft",
+            "research_topic": "brief",
+            "write_article_fast": "draft",
             "write_article_premium": "draft",
         },
     )
