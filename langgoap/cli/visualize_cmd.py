@@ -49,7 +49,7 @@ def visualize(
 
     output = _render(plan_obj, fmt)
     if output_path:
-        with open(output_path, "w") as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             f.write(output)
         click.echo(f"Visualization written to {output_path}")
     else:

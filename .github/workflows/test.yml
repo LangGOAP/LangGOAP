@@ -49,13 +49,14 @@ jobs:
         if: matrix.os == 'macos-latest'
         run: brew install bc
 
-      # Windows GH runners have no Docker daemon, so testcontainers-based
-      # tests are excluded there. macOS/Linux runners include them.
+      # GitHub-hosted Windows and macOS runners have no Docker daemon,
+      # so testcontainers-based tests are excluded there. Only Linux
+      # runners exercise the Postgres/Redis checkpointing suite.
       - name: Run tests with coverage
         shell: bash
         run: |
           IGNORE_ARGS=""
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+          if [ "${{ matrix.os }}" != "ubuntu-latest" ]; then
             IGNORE_ARGS="--ignore=tests/integration/test_checkpointing.py"
           fi
           uv run python -m pytest -m "not api" \
@@ -155,8 +156,8 @@ jobs:
             COVERAGE="0"
           fi
 
-          # Bandit security issues
-          SECURITY_ISSUES=$(uv run bandit -r langgoap/ -f json 2>/dev/null | python -c "import sys, json; data=json.load(sys.stdin); print(len(data.get('results', [])))" || echo "0")
+          # Bandit security issues (config in pyproject.toml skips B101/B311 by design)
+          SECURITY_ISSUES=$(uv run bandit -r langgoap/ -c pyproject.toml -f json 2>/dev/null | python -c "import sys, json; data=json.load(sys.stdin); print(len(data.get('results', [])))" || echo "0")
 
           {
             echo "mfcqi_score=$MFCQI_SCORE"

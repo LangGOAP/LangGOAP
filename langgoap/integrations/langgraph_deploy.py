@@ -99,7 +99,7 @@ def scaffold_deployment(
             raise FileExistsError(
                 f"{path} already exists; pass force=True to overwrite"
             )
-        path.write_text(content)
+        path.write_text(content, encoding="utf-8")
 
     return out
 

@@ -116,7 +116,7 @@ def load_world_state(ref: str | None) -> dict[str, Any]:
     # Try JSON file first.
     path = Path(ref)
     if path.suffix == ".json" and path.exists():
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
         if not isinstance(data, dict):
             raise TypeError(
