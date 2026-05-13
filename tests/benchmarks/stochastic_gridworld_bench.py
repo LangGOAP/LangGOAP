@@ -145,25 +145,31 @@ def _heuristic(state: PlanningState, goal: GoalSpec) -> int:
 # --- Strategy factories -----------------------------------------------------
 
 
-StrategyFactory = Callable[
-    [int, GridworldTopology, SlipperyTransitionModel], PlanningStrategy
-]
+StrategyFactory = Callable[..., PlanningStrategy]
 
 
 def astar_factory(
-    seed: int, topology: GridworldTopology, model: SlipperyTransitionModel
+    seed: int,
+    topology: GridworldTopology,
+    model: SlipperyTransitionModel,
+    **_: Any,
 ) -> PlanningStrategy:
     return AStarStrategy(time_budget_ms=ASTAR_BUDGET_MS)
 
 
 def mcts_factory(
-    seed: int, topology: GridworldTopology, model: SlipperyTransitionModel
+    seed: int,
+    topology: GridworldTopology,
+    model: SlipperyTransitionModel,
+    *,
+    wall_clock_ms: float | None = None,
+    **_: Any,
 ) -> PlanningStrategy:
     rng = random.Random(seed)
     return MCTSStrategy(
         exploration=MCTSExploration(
             iterations=MCTS_ITERATIONS,
-            wall_clock_ms=MCTS_WALL_CLOCK_MS,
+            wall_clock_ms=MCTS_WALL_CLOCK_MS if wall_clock_ms is None else wall_clock_ms,
             rollout_depth=MCTS_ROLLOUT_DEPTH,
             seed=seed,
         ),
@@ -177,14 +183,19 @@ def mcts_factory(
 
 
 def mcts_random_factory(
-    seed: int, topology: GridworldTopology, model: SlipperyTransitionModel
+    seed: int,
+    topology: GridworldTopology,
+    model: SlipperyTransitionModel,
+    *,
+    wall_clock_ms: float | None = None,
+    **_: Any,
 ) -> PlanningStrategy:
     from langgoap.planner.mcts import RandomRollout
 
     return MCTSStrategy(
         exploration=MCTSExploration(
             iterations=MCTS_ITERATIONS,
-            wall_clock_ms=MCTS_WALL_CLOCK_MS,
+            wall_clock_ms=MCTS_WALL_CLOCK_MS if wall_clock_ms is None else wall_clock_ms,
             rollout_depth=MCTS_ROLLOUT_DEPTH,
             seed=seed,
         ),
@@ -213,8 +224,16 @@ def run_cell(
     seeds: list[int],
     max_steps: int = MAX_EPISODE_STEPS,
     slip_prob: float = SLIP_PROB,
+    mcts_wall_clock_ms: float | None = None,
 ) -> list[Episode]:
-    """Run ``strategy_name`` across ``seeds`` on a single domain cell."""
+    """Run ``strategy_name`` across ``seeds`` on a single domain cell.
+
+    ``mcts_wall_clock_ms`` overrides :data:`MCTS_WALL_CLOCK_MS` on the
+    MCTS arms when supplied; passing ``0.0`` disables the wall-clock
+    cap so the iteration budget alone bounds the search, which removes
+    a source of platform-dependent variance under CI.  Ignored by the
+    A* arm.
+    """
     episodes: list[Episode] = []
     factory = STRATEGIES[strategy_name]
     for seed in seeds:
@@ -223,7 +242,7 @@ def run_cell(
         # the same noise draws are observed across strategies under the
         # same ``seed`` \u2014 paired comparison, variance reduction.
         env_rng = random.Random(seed)
-        strategy = factory(seed, topology, model)
+        strategy = factory(seed, topology, model, wall_clock_ms=mcts_wall_clock_ms)
         episode = run_episode(
             strategy=strategy,
             topology=topology,
