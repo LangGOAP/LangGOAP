@@ -29,9 +29,9 @@ LangGOAP:
 
 This module ships two serializer subclasses:
 
-- :class:`LangGoapSerializer` — for ``MemorySaver`` and ``PostgresSaver``
+- :class:`LangGOAPSerializer` — for ``MemorySaver`` and ``PostgresSaver``
   (msgpack-only checkpointers).
-- :class:`LangGoapRedisSerializer` — for ``RedisSaver`` /
+- :class:`LangGOAPRedisSerializer` — for ``RedisSaver`` /
   ``AsyncRedisSaver``.  The Redis checkpointer stores metadata as
   RedisJSON, requiring JSON-serializable bytes from ``dumps_typed``.
   This subclass preserves the JSON-first encoding from
@@ -88,8 +88,8 @@ from langgoap.types import ObjectiveDirection, ReplanStrategy
 
 __all__ = [
     "LANGGOAP_ALLOWED_MSGPACK_TYPES",
-    "LangGoapSerializer",
-    "LangGoapRedisSerializer",
+    "LangGOAPSerializer",
+    "LangGOAPRedisSerializer",
     "install_langgoap_serde",
 ]
 
@@ -99,7 +99,7 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 # Every LangGOAP dataclass that routinely flows through a checkpoint.
-# ``LangGoapSerializer`` seeds ``allowed_msgpack_modules`` with these by
+# ``LangGOAPSerializer`` seeds ``allowed_msgpack_modules`` with these by
 # default so users never hit LangGraph's "Deserializing unregistered
 # type …" deprecation warning for first-party types.  Users extending
 # the allowlist via the constructor or :meth:`with_msgpack_allowlist`
@@ -327,7 +327,7 @@ def _langgoap_unpack_ext_hook(code: int, data: bytes, fallback: Any) -> Any:
     return fallback(code, data)
 
 
-class LangGoapSerializer(JsonPlusSerializer):
+class LangGOAPSerializer(JsonPlusSerializer):
     """``JsonPlusSerializer`` subclass that supports LangGOAP state.
 
     Overrides ``dumps_typed`` to route msgpack encoding through
@@ -407,7 +407,7 @@ def _get_redis_serializer_base() -> type:
 
 
 def _make_langgoap_redis_serializer_cls() -> type:
-    """Build the LangGoapRedisSerializer class at first use.
+    """Build the LangGOAPRedisSerializer class at first use.
 
     We can't define it at module level because
     ``langgraph-checkpoint-redis`` is an optional dependency —
@@ -416,7 +416,7 @@ def _make_langgoap_redis_serializer_cls() -> type:
     """
     base = _get_redis_serializer_base()
 
-    class LangGoapRedisSerializer(base):  # type: ignore[valid-type,misc]
+    class LangGOAPRedisSerializer(base):  # type: ignore[valid-type,misc]
         """``JsonPlusRedisSerializer`` subclass that supports LangGOAP state.
 
         The Redis checkpointer stores checkpoint data as RedisJSON, which
@@ -434,7 +434,7 @@ def _make_langgoap_redis_serializer_cls() -> type:
         This subclass adds those branches so the JSON encoding path
         succeeds for the full checkpoint, and overrides the msgpack
         fallback to use :func:`_langgoap_msgpack_enc`.  Like
-        :class:`LangGoapSerializer`, it seeds
+        :class:`LangGOAPSerializer`, it seeds
         ``allowed_msgpack_modules`` with
         :data:`LANGGOAP_ALLOWED_MSGPACK_TYPES` by default.
         """
@@ -602,27 +602,27 @@ def _make_langgoap_redis_serializer_cls() -> type:
                             return "pickle", pickle.dumps(obj)
                         raise exc
 
-    return LangGoapRedisSerializer
+    return LangGOAPRedisSerializer
 
 
 # Module-level cache for the dynamically-built class.
-_LangGoapRedisSerializer: type | None = None
+_LangGOAPRedisSerializer: type | None = None
 
 
 def _get_langgoap_redis_serializer_cls() -> type:
-    global _LangGoapRedisSerializer
-    if _LangGoapRedisSerializer is None:
-        _LangGoapRedisSerializer = _make_langgoap_redis_serializer_cls()
-    return _LangGoapRedisSerializer
+    global _LangGOAPRedisSerializer
+    if _LangGOAPRedisSerializer is None:
+        _LangGOAPRedisSerializer = _make_langgoap_redis_serializer_cls()
+    return _LangGOAPRedisSerializer
 
 
 # Re-export as a name for isinstance checks and the public API.
 # At runtime this resolves lazily; for type-checking it's ``type``.
-LangGoapRedisSerializer: type  # noqa: N816  (lazy class)
+LangGOAPRedisSerializer: type  # noqa: N816  (lazy class)
 
 
 def __getattr__(name: str) -> Any:  # module-level __getattr__
-    if name == "LangGoapRedisSerializer":
+    if name == "LangGOAPRedisSerializer":
         return _get_langgoap_redis_serializer_cls()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -651,11 +651,11 @@ def install_langgoap_serde(
     Auto-detects the backend:
 
     - **Redis** checkpointers (whose stock serde is
-      ``JsonPlusRedisSerializer``) get a ``LangGoapRedisSerializer``
+      ``JsonPlusRedisSerializer``) get a ``LangGOAPRedisSerializer``
       that preserves the JSON-first encoding required by ``_dump_metadata``
       and falls back to LangGOAP's custom msgpack encoder.
     - **All other** checkpointers (``MemorySaver``, ``PostgresSaver``, …)
-      get a :class:`LangGoapSerializer` (pure msgpack).
+      get a :class:`LangGOAPSerializer` (pure msgpack).
 
     The helper is idempotent and preserves ``pickle_fallback`` /
     ``allowed_*_modules`` configuration from the original serde.
@@ -663,7 +663,7 @@ def install_langgoap_serde(
     current = getattr(checkpointer, "serde", None)
 
     # Already installed — no-op.
-    if isinstance(current, LangGoapSerializer):
+    if isinstance(current, LangGOAPSerializer):
         return checkpointer
     if _is_redis_serde(current):
         redis_cls = _get_langgoap_redis_serializer_cls()
@@ -675,7 +675,7 @@ def install_langgoap_serde(
     # with custom allowlists or pickle_fallback keep their settings.
     # The legacy allow-all value (``True``) is *not* carried over: it is
     # the library-wide default and represents "user didn't specify an
-    # allowlist", so we let LangGoapSerializer apply its strict default.
+    # allowlist", so we let LangGOAPSerializer apply its strict default.
     init_kwargs: dict[str, Any] = {}
     user_allowlist: Any = None
     if current is not None:
@@ -706,7 +706,7 @@ def install_langgoap_serde(
     if _is_redis_serde(current):
         cls = _get_langgoap_redis_serializer_cls()
     else:
-        cls = LangGoapSerializer
+        cls = LangGOAPSerializer
 
     checkpointer.serde = cls(**init_kwargs)
     return checkpointer

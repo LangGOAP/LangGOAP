@@ -25,7 +25,7 @@ from __future__ import annotations
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
 from langgoap.planner.astar import plan
-from langgoap.serde import LangGoapSerializer
+from langgoap.serde import LangGOAPSerializer
 from langgoap.state import PlanningState
 from tests.conftest import make_action as _action
 
@@ -133,7 +133,7 @@ class TestReadOnly:
             cost=1.0,
             read_only=True,
         )
-        serializer = LangGoapSerializer()
+        serializer = LangGOAPSerializer()
 
         kind, payload = serializer.dumps_typed(action)
         restored = serializer.loads_typed((kind, payload))
@@ -190,7 +190,7 @@ class TestBothFlags:
             can_rerun=False,
             read_only=True,
         )
-        serializer = LangGoapSerializer()
+        serializer = LangGOAPSerializer()
         kind, payload = serializer.dumps_typed(action)
         restored = serializer.loads_typed((kind, payload))
         assert restored.can_rerun is False

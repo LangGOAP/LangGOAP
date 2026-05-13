@@ -20,7 +20,7 @@ from langgoap import (
     GoalPolicy,
     GoalSpec,
     HardSoftScore,
-    LangGoapSerializer,
+    LangGOAPSerializer,
     Plan,
     PlanMetadata,
     PlanningState,
@@ -33,7 +33,7 @@ from langgoap import (
 # ---------------------------------------------------------------------------
 
 
-def _round_trip(serde: LangGoapSerializer, obj: Any) -> Any:
+def _round_trip(serde: LangGOAPSerializer, obj: Any) -> Any:
     """Serialize then deserialize *obj* through the given serde."""
     type_tag, payload = serde.dumps_typed(obj)
     return serde.loads_typed((type_tag, payload))
@@ -46,7 +46,7 @@ def _round_trip(serde: LangGoapSerializer, obj: Any) -> Any:
 
 class TestMappingProxyTypeRoundTrip:
     def test_non_empty_mapping_proxy(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = MappingProxyType({"a": True, "b": 42, "c": "hello"})
         restored = _round_trip(serde, original)
         # MappingProxyType decodes as a plain dict because the stock ext
@@ -56,7 +56,7 @@ class TestMappingProxyTypeRoundTrip:
         assert dict(restored) == dict(original)
 
     def test_empty_mapping_proxy(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = MappingProxyType({})
         restored = _round_trip(serde, original)
         assert dict(restored) == {}
@@ -70,21 +70,21 @@ class TestMappingProxyTypeRoundTrip:
 class TestFrozensetTupleRoundTrip:
     def test_frozenset_of_tuples(self) -> None:
         """This is the critical path for PlanningState.conditions."""
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = frozenset({("has_data", True), ("ready", False)})
         restored = _round_trip(serde, original)
         assert isinstance(restored, frozenset)
         assert restored == original
 
     def test_empty_frozenset(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original: frozenset[tuple[str, bool]] = frozenset()
         restored = _round_trip(serde, original)
         assert isinstance(restored, frozenset)
         assert restored == original
 
     def test_frozenset_with_mixed_value_types(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = frozenset({("count", 5), ("flag", True), ("label", "x")})
         restored = _round_trip(serde, original)
         assert isinstance(restored, frozenset)
@@ -110,7 +110,7 @@ def _validator(pre: dict[str, Any], post: dict[str, Any]) -> bool:
 
 class TestActionSpecRoundTrip:
     def test_action_with_callables_serialized_as_none(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = ActionSpec(
             name="test_action",
             preconditions={"a": True},
@@ -134,7 +134,7 @@ class TestActionSpecRoundTrip:
         assert restored.max_retries == 3
 
     def test_action_with_all_none_callables(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = ActionSpec(
             name="minimal",
             preconditions={},
@@ -151,7 +151,7 @@ class TestActionSpecRoundTrip:
         assert restored.effect_validator is None
 
     def test_action_with_resources_and_duration(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = ActionSpec(
             name="resource_action",
             effects={"done": True},
@@ -168,7 +168,7 @@ class TestActionSpecRoundTrip:
 
     def test_action_with_dynamic_cost_function_serialized_as_none(self) -> None:
         """Dynamic cost functions are callables and must serialize as None."""
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
 
         def cost_fn(ws: dict[str, Any]) -> float:
             return ws.get("difficulty", 1.0) * 2.0
@@ -185,7 +185,7 @@ class TestActionSpecRoundTrip:
         callable is lost (callables aren't portable across process
         boundaries), but effect_keys is preserved and a sentinel
         callable is installed so has_dynamic_effects stays True."""
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
 
         def eat_here(state: dict[str, Any]) -> dict[str, Any]:
             return {"food": state["food"] - frozenset({state["location"]})}
@@ -204,7 +204,7 @@ class TestActionSpecRoundTrip:
     def test_restored_callable_effect_raises_on_invocation(self) -> None:
         """The sentinel installed by deserialization must raise a clear
         error if invoked before the caller re-binds the real callable."""
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
 
         def eat_here(state: dict[str, Any]) -> dict[str, Any]:
             return {"food": frozenset()}
@@ -227,7 +227,7 @@ class TestActionSpecRoundTrip:
 
 class TestGoalSpecRoundTrip:
     def test_goal_with_constraints(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         c1 = ConstraintSpec(key="tokens", max=1000.0)
         c2 = ConstraintSpec(key="cost_usd", max=0.10, level="soft", weight=2.0)
         original = GoalSpec(
@@ -247,7 +247,7 @@ class TestGoalSpecRoundTrip:
         assert restored.policy.max_replans == 5
 
     def test_goal_minimal(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = GoalSpec(conditions={"done": True})
         restored = _round_trip(serde, original)
         assert isinstance(restored, GoalSpec)
@@ -262,7 +262,7 @@ class TestGoalSpecRoundTrip:
 
 class TestPlanRoundTrip:
     def test_plan_with_actions_and_expected_states(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         a1 = ActionSpec(name="gather", effects={"has_data": True}, cost=1.0)
         a2 = ActionSpec(
             name="analyze",
@@ -305,7 +305,7 @@ class TestPlanRoundTrip:
         assert restored.total_cost == 3.0
 
     def test_empty_plan(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = Plan.empty()
         restored = _round_trip(serde, original)
         assert isinstance(restored, Plan)
@@ -321,14 +321,14 @@ class TestPlanRoundTrip:
 
 class TestPlanningStateRoundTrip:
     def test_from_dict_round_trip(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = PlanningState.from_dict({"has_data": True, "count": 5, "label": "x"})
         restored = _round_trip(serde, original)
         assert isinstance(restored, PlanningState)
         assert restored.to_dict() == original.to_dict()
 
     def test_empty_planning_state(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = PlanningState.from_dict({})
         restored = _round_trip(serde, original)
         assert isinstance(restored, PlanningState)
@@ -336,7 +336,7 @@ class TestPlanningStateRoundTrip:
 
     def test_conditions_frozenset_preserved(self) -> None:
         """The conditions frozenset[tuple[str, Any]] must survive the round-trip."""
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = PlanningState.from_dict({"a": True, "b": False})
         restored = _round_trip(serde, original)
         assert isinstance(restored.conditions, frozenset)
@@ -353,7 +353,7 @@ class TestPlanningStateRoundTrip:
 class TestTimedeltaRoundTrip:
     def test_timedelta_in_action_spec(self) -> None:
         """timedelta is used in ActionSpec.duration."""
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = ActionSpec(
             name="timed",
             effects={"done": True},
@@ -364,7 +364,7 @@ class TestTimedeltaRoundTrip:
         assert restored.duration == timedelta(minutes=2, seconds=30)
 
     def test_timedelta_standalone(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = timedelta(hours=1, minutes=30)
         restored = _round_trip(serde, original)
         assert restored == original
@@ -377,21 +377,21 @@ class TestTimedeltaRoundTrip:
 
 class TestTuplePreservation:
     def test_plain_tuple_round_trips_as_tuple(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = (1, "two", True, 4.0)
         restored = _round_trip(serde, original)
         assert isinstance(restored, tuple)
         assert restored == original
 
     def test_empty_tuple(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original: tuple[()] = ()
         restored = _round_trip(serde, original)
         assert isinstance(restored, tuple)
         assert restored == ()
 
     def test_nested_tuples(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = ((1, 2), (3, 4))
         restored = _round_trip(serde, original)
         assert isinstance(restored, tuple)
@@ -400,7 +400,7 @@ class TestTuplePreservation:
 
     def test_tuple_of_action_specs(self) -> None:
         """Plan.actions is tuple[ActionSpec, ...]; tuple identity must survive."""
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         a1 = ActionSpec(name="a", effects={"x": True})
         a2 = ActionSpec(name="b", effects={"y": True})
         original = (a1, a2)
@@ -418,21 +418,21 @@ class TestTuplePreservation:
 
 class TestScoreRoundTrip:
     def test_simple_score(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = SimpleScore(scalar=42.0)
         restored = _round_trip(serde, original)
         assert isinstance(restored, SimpleScore)
         assert restored.scalar == 42.0
 
     def test_simple_score_default(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = SimpleScore()
         restored = _round_trip(serde, original)
         assert isinstance(restored, SimpleScore)
         assert restored.scalar == 0.0
 
     def test_hard_soft_score(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = HardSoftScore(hard=-5.0, soft=3.0)
         restored = _round_trip(serde, original)
         assert isinstance(restored, HardSoftScore)
@@ -440,7 +440,7 @@ class TestScoreRoundTrip:
         assert restored.soft == 3.0
 
     def test_hard_soft_score_feasible(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = HardSoftScore(hard=0.0, soft=-2.5)
         restored = _round_trip(serde, original)
         assert isinstance(restored, HardSoftScore)
@@ -448,7 +448,7 @@ class TestScoreRoundTrip:
         assert restored.soft == -2.5
 
     def test_bendable_score(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = BendableScore(
             hard_levels=(0.0, -1.0),
             soft_levels=(-3.0, 2.0, -0.5),
@@ -459,7 +459,7 @@ class TestScoreRoundTrip:
         assert restored.soft_levels == (-3.0, 2.0, -0.5)
 
     def test_bendable_score_empty_levels(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = BendableScore()
         restored = _round_trip(serde, original)
         assert isinstance(restored, BendableScore)
@@ -472,18 +472,18 @@ class TestScoreRoundTrip:
 # ---------------------------------------------------------------------------
 
 
-class TestInstallLangGoapSerde:
+class TestInstallLangGOAPSerde:
     def test_idempotent_on_memory_saver(self) -> None:
         """Calling install_langgoap_serde twice must not error or double-wrap."""
         from langgraph.checkpoint.memory import MemorySaver
 
         cp = MemorySaver()
         result1 = install_langgoap_serde(cp)
-        assert isinstance(result1.serde, LangGoapSerializer)
+        assert isinstance(result1.serde, LangGOAPSerializer)
 
         result2 = install_langgoap_serde(cp)
         assert result2 is cp  # same object returned
-        assert isinstance(result2.serde, LangGoapSerializer)
+        assert isinstance(result2.serde, LangGOAPSerializer)
 
     def test_preserves_pickle_fallback(self) -> None:
         """install_langgoap_serde must carry over pickle_fallback from the original serde."""
@@ -493,7 +493,7 @@ class TestInstallLangGoapSerde:
         cp = MemorySaver()
         cp.serde = JsonPlusSerializer(pickle_fallback=True)
         install_langgoap_serde(cp)
-        assert isinstance(cp.serde, LangGoapSerializer)
+        assert isinstance(cp.serde, LangGOAPSerializer)
         assert cp.serde.pickle_fallback is True
 
 
@@ -503,24 +503,24 @@ class TestInstallLangGoapSerde:
 
 
 class TestAllowedMsgpackModules:
-    """LangGoapSerializer must ship a strict default allowlist covering
-    every LangGoap dataclass that flows through a checkpoint, so users
+    """LangGOAPSerializer must ship a strict default allowlist covering
+    every LangGOAP dataclass that flows through a checkpoint, so users
     never see the LangGraph 'unregistered type' deprecation warning."""
 
     _LANGGOAP_LOGGER = "langgraph.checkpoint.serde.jsonplus"
 
     def test_default_allowlist_is_strict_not_legacy(self) -> None:
         """Default must not be the legacy ``True`` (allow-all)."""
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         assert serde._allowed_msgpack_modules is not True
         assert serde._allowed_msgpack_modules is not None
 
     def test_round_trip_of_core_types_emits_no_warning(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Every LangGoap dataclass routinely checkpointed must round-trip
+        """Every LangGOAP dataclass routinely checkpointed must round-trip
         without an 'unregistered type' log on the langgraph serde logger."""
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         samples: list[Any] = [
             ActionSpec(name="a", effects={"x": True}),
             GoalSpec(conditions={"x": True}),
@@ -537,20 +537,20 @@ class TestAllowedMsgpackModules:
             rec for rec in caplog.records if "unregistered" in rec.message.lower()
         ]
         assert unregistered == [], (
-            "LangGoapSerializer should register every LangGoap dataclass in "
+            "LangGOAPSerializer should register every LangGOAP dataclass in "
             "its default allowed_msgpack_modules. Got warnings: "
             f"{[r.getMessage() for r in unregistered]}"
         )
 
     def test_user_allowlist_is_merged_with_langgoap_defaults(self) -> None:
-        """Users extending the allowlist must still get LangGoap defaults."""
+        """Users extending the allowlist must still get LangGOAP defaults."""
         import dataclasses
 
         @dataclasses.dataclass
         class UserType:
             x: int
 
-        serde = LangGoapSerializer(
+        serde = LangGOAPSerializer(
             allowed_msgpack_modules=[(UserType.__module__, UserType.__name__)]
         )
         allow = serde._allowed_msgpack_modules
@@ -560,17 +560,17 @@ class TestAllowedMsgpackModules:
 
     def test_legacy_true_opt_in_still_works(self) -> None:
         """Users who explicitly pass ``True`` keep legacy allow-all behavior."""
-        serde = LangGoapSerializer(allowed_msgpack_modules=True)
+        serde = LangGOAPSerializer(allowed_msgpack_modules=True)
         assert serde._allowed_msgpack_modules is True
 
     def test_install_langgoap_serde_uses_strict_default(self) -> None:
         """install_langgoap_serde on a bare checkpointer must produce a
-        serde with the strict LangGoap allowlist, not legacy ``True``."""
+        serde with the strict LangGOAP allowlist, not legacy ``True``."""
         from langgraph.checkpoint.memory import MemorySaver
 
         cp = MemorySaver()
         install_langgoap_serde(cp)
-        assert isinstance(cp.serde, LangGoapSerializer)
+        assert isinstance(cp.serde, LangGOAPSerializer)
         assert cp.serde._allowed_msgpack_modules is not True
         assert isinstance(cp.serde._allowed_msgpack_modules, set)
         assert ("langgoap.actions", "ActionSpec") in cp.serde._allowed_msgpack_modules
@@ -583,7 +583,7 @@ class TestAllowedMsgpackModules:
 
 class TestSpecialValues:
     def test_none(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         type_tag, payload = serde.dumps_typed(None)
         assert type_tag == "null"
         assert payload == b""
@@ -591,7 +591,7 @@ class TestSpecialValues:
         assert restored is None
 
     def test_bytes(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = b"hello bytes"
         type_tag, payload = serde.dumps_typed(original)
         assert type_tag == "bytes"
@@ -600,7 +600,7 @@ class TestSpecialValues:
         assert restored == original
 
     def test_bytearray(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = bytearray(b"hello bytearray")
         type_tag, payload = serde.dumps_typed(original)
         assert type_tag == "bytearray"
@@ -616,7 +616,7 @@ class TestSpecialValues:
 class TestNestedDataclasses:
     def test_plan_containing_action_containing_mapping_proxy(self) -> None:
         """End-to-end: Plan -> ActionSpec -> MappingProxyType fields."""
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         action = ActionSpec(
             name="nested_action",
             preconditions={"source_ready": True},
@@ -651,7 +651,7 @@ class TestNestedDataclasses:
         assert restored.expected_states[0].to_dict() == {"output_ready": True}
 
     def test_constraint_spec_round_trip(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = ConstraintSpec(
             key="budget", max=100.0, min=10.0, weight=1.5, level="soft"
         )
@@ -664,7 +664,7 @@ class TestNestedDataclasses:
         assert restored.level == "soft"
 
     def test_plan_metadata_round_trip(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = PlanMetadata(
             nodes_explored=42,
             planning_time_ms=123.456,
@@ -685,14 +685,14 @@ class TestNestedDataclasses:
 
 class TestSetRoundTrip:
     def test_plain_set_round_trips(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = {1, 2, 3}
         restored = _round_trip(serde, original)
         assert isinstance(restored, set)
         assert restored == original
 
     def test_set_of_tuples(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = {("a", 1), ("b", 2)}
         restored = _round_trip(serde, original)
         assert isinstance(restored, set)
@@ -706,37 +706,37 @@ class TestSetRoundTrip:
 
 class TestStockTypesPassThrough:
     def test_plain_dict(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = {"key": "value", "number": 42}
         restored = _round_trip(serde, original)
         assert restored == original
 
     def test_plain_list(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         original = [1, 2, 3, "four"]
         restored = _round_trip(serde, original)
         assert restored == original
 
     def test_scalar_int(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         assert _round_trip(serde, 42) == 42
 
     def test_scalar_float(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         assert _round_trip(serde, 3.14) == pytest.approx(3.14)
 
     def test_scalar_string(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         assert _round_trip(serde, "hello") == "hello"
 
     def test_scalar_bool(self) -> None:
-        serde = LangGoapSerializer()
+        serde = LangGOAPSerializer()
         assert _round_trip(serde, True) is True
         assert _round_trip(serde, False) is False
 
 
 # ---------------------------------------------------------------------------
-# LangGoapRedisSerializer JSON-path round-trips
+# LangGOAPRedisSerializer JSON-path round-trips
 # ---------------------------------------------------------------------------
 #
 # The Redis variant uses a JSON-first path that goes through the base

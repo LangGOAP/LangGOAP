@@ -32,7 +32,7 @@ testing individual LangGraph primitives.
 LangGOAP's frozen dataclasses wrap dict fields in ``MappingProxyType``
 for deep immutability.  LangGraph's stock ``JsonPlusSerializer`` cannot
 encode ``MappingProxyType``, so :class:`GoapGraph` auto-installs
-``LangGoapSerializer`` on every checkpointer that reaches ``compile()``.
+``LangGOAPSerializer`` on every checkpointer that reaches ``compile()``.
 These tests exercise that wiring — a regression in the serde install
 would make every backend test fail with ``TypeError: Type is not
 msgpack serializable: GoalSpec``.
