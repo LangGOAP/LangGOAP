@@ -2192,6 +2192,7 @@ name = "langgoap"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "click" },
     { name = "langgraph" },
     { name = "langgraph-checkpoint" },
     { name = "ortools" },
@@ -2203,9 +2204,6 @@ checkpoint-postgres = [
 ]
 checkpoint-redis = [
     { name = "langgraph-checkpoint-redis" },
-]
-cli = [
-    { name = "click" },
 ]
 deepagents = [
     { name = "deepagents", marker = "python_full_version >= '3.11'" },
@@ -2242,7 +2240,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", marker = "extra == 'cli'", specifier = ">=8.1.7" },
+    { name = "click", specifier = ">=8.1.7" },
     { name = "deepagents", marker = "python_full_version >= '3.11' and extra == 'deepagents'", specifier = ">=0.5.0" },
     { name = "langgraph", specifier = ">=1.0.0,<2.0.0" },
     { name = "langgraph-checkpoint", specifier = ">=4.0.0,<5.0.0" },
@@ -2250,7 +2248,7 @@ requires-dist = [
     { name = "langgraph-checkpoint-redis", marker = "extra == 'checkpoint-redis'", specifier = ">=0.4.0,<1.0.0" },
     { name = "ortools", specifier = ">=9.8" },
 ]
-provides-extras = ["checkpoint-postgres", "checkpoint-redis", "cli", "deepagents"]
+provides-extras = ["checkpoint-postgres", "checkpoint-redis", "deepagents"]
 
 [package.metadata.requires-dev]
 dev = [
