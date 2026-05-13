@@ -36,7 +36,7 @@ pip install -U langgoap
 LangGOAP provides a planning layer for *any* agent that has to choose tools in a particular order under hard constraints:
 
 - **Deterministic planning** — A classical A* search over your action set produces a checked plan before any tool runs; the same inputs always yield the same plan.
-- **Constraint optimization built in** — Hard resource caps, soft objectives, temporal `IntervalVar` scheduling, and multi-plan Pareto selection via OR-Tools CP-SAT, with no extra configuration.
+- **Constraint optimization built in** — Hard resource caps, soft objectives, temporal `IntervalVar` scheduling, and multi-plan Pareto selection via OR-Tools CP-SAT.
 - **The plan _is_ a `StateGraph`** — Every plan compiles to a real LangGraph graph, so checkpointers, stores, streaming, `interrupt()`, and LangSmith all just work.
 - **Replans automatically** — When an action fails, the world drifts, or a sensor invalidates a precondition, the executor blacklists the offender and the planner picks a new path without any routing code.
 - **LLM where it earns its keep** — Natural-language goals are parsed once by `GoalInterpreter`; the loop itself stays symbolic. No ReAct, no agentic reasoning between tool calls.
@@ -182,8 +182,6 @@ execution_history:
 world_state (relevant keys): {'topic': 'GOAP for LangGraph', 'brief': 'Brief on GOAP for LangGraph', 'draft': 'Premium draft: Brief on GOAP for LangGraph'}
 ```
 
-The full transcripts and PNGs above are regenerated end-to-end against the real OpenAI API by the `@pytest.mark.api`-gated test [`tests/integration/test_prebuilt.py::TestReadmeQuickstart`](tests/integration/test_prebuilt.py); the artifacts in [`.github/images/`](.github/images/) are the test's output.
-
 ## Three ways to use it
 
 LangGOAP ships three on-ramps so you can adopt as much or as little as
@@ -200,11 +198,6 @@ you need without rewriting your action definitions.
   existing `StateGraph` as a sealed node. Useful when GOAP is one
   reasoning mode among many. Quickstart:
   [`examples/basics/goap_subgraph.ipynb`](examples/basics/goap_subgraph.ipynb).
-
-Each layer is covered by an integration test:
-[`test_prebuilt.py`](tests/integration/test_prebuilt.py),
-[`test_goapify_tool.py`](tests/integration/test_goapify_tool.py),
-[`test_subgraph.py`](tests/integration/test_subgraph.py).
 
 ## Features
 
@@ -263,9 +256,7 @@ Each layer is covered by an integration test:
 ## Examples
 
 The [`examples/`](examples/) directory holds three flavours of runnable
-documentation. Every featured tutorial has a corresponding integration
-test under [`tests/integration/`](tests/integration/) — the notebook is
-the explanation; the test is the source of truth.
+documentation.
 
 - **[`examples/basics/`](examples/basics/)** — short primers that each
   exercise a single mechanic: quickstart, CLI, plan visualization,
@@ -296,7 +287,7 @@ if you are new to GOAP and want a smaller starting point.
 
 ## LangGraph ecosystem
 
-While LangGOAP can be used wherever LangChain tools are available, it integrates seamlessly with the rest of the LangChain stack:
+LangGOAP integrates with the rest of the LangChain stack:
 
 - **[LangGraph](https://docs.langchain.com/oss/python/langgraph/overview)** — the runtime substrate. Every LangGOAP plan compiles to a real `StateGraph` and works with streaming, checkpointing, and `interrupt()`.
 - **[LangSmith](https://docs.langchain.com/langsmith/home)** — `LangSmithTracer` emits GOAP plan / replan / goal-achieved events to LangSmith alongside LangGraph's automatic node-level traces.
@@ -315,8 +306,6 @@ While LangGOAP can be used wherever LangChain tools are available, it integrates
 - [Changelog](CHANGELOG.md) – Release notes for every public version.
 
 ## Contributing
-
-LangGOAP is developed test-first: every feature starts with a failing integration test that uses real infrastructure via TestContainers, never mocks. Notebooks are runnable documentation of what the tests already verify — never the other way around.
 
 ```bash
 uv sync
