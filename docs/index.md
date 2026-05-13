@@ -4,7 +4,7 @@
 
 LangGOAP turns a goal and a set of LangChain tools into a compiled
 `StateGraph` that plans before it acts, replans on failure, and stays
-deterministic by default. The planner is classical A\* with optional
+deterministic by default. The planner is classical [A\*](https://en.wikipedia.org/wiki/A*_search_algorithm) with optional
 OR-Tools CP-SAT refinement; the runtime is plain LangGraph, so
 checkpointing, streaming, `interrupt()`, and LangSmith all just work.
 
@@ -165,24 +165,45 @@ world_state (relevant keys): {'topic': 'GOAP for LangGraph', 'brief': 'Brief on 
 
 ## What's in the box
 
-- **A\* planner** with customizable cost functions, effect validators,
-  and per-action retry budgets.
-- **Two-phase A\* → CSP pipeline**: A\* produces a candidate plan, then
-  CP-SAT refines or replaces it when the goal has constraints or
-  objectives.
-- **Score hierarchy**: `SimpleScore`, `HardSoftScore`, `BendableScore`
-  with hard/soft sign convention (`hard <= 0` for feasibility).
-- **Fluent `ConstraintBuilder`** for hard/soft resource constraints and
-  weighted objectives.
-- **Temporal scheduling** with CP-SAT `IntervalVar` and Gantt rendering.
-- **Natural-language goal interpreter** backed by any `BaseChatModel`.
-- **Execution history** in `BaseStore` via reverse indexes — no
-  embedder required.
-- **`PlanningTracer` Protocol** with sync + async hooks.
-- **Plan visualization**: Mermaid, DOT, ASCII, Gantt.
-- **`MultiGoal`** for sequential multi-goal decomposition.
-- **Three-layer low-code on-ramp**: `create_goap_agent`,
-  `goapify_tool`, `GoapSubgraph`.
+- **Cost-aware planner** — given your tools and a goal, finds the
+  cheapest sequence of tool calls that reaches it. You supply
+  per-action costs, optional effect validators that double-check
+  what each tool actually changed, and per-action retry budgets.
+- **Constraint-aware refinement** — when your goal carries hard
+  resource caps (budgets, time windows) or objectives to minimize or
+  maximize, the candidate plan is handed to a constraint solver
+  ([OR-Tools CP-SAT](https://developers.google.com/optimization/cp/cp_solver))
+  that refines or replaces it to satisfy them.
+- **Plan scoring** — rank candidate plans by a single number
+  (`SimpleScore`), by feasibility-first hard/soft tradeoffs
+  (`HardSoftScore` — hard violations make a plan infeasible, soft
+  scores rank the survivors), or by weighted priority levels
+  (`BendableScore`).
+- **Declarative constraints** — a fluent `ConstraintBuilder` API for
+  declaring resource limits and optimization objectives without
+  writing solver code.
+- **Temporal scheduling** — when actions have durations and deadlines,
+  LangGOAP solves a scheduling problem alongside the plan and can
+  render the result as a Gantt chart.
+- **Natural-language goals** — describe the goal in plain English and
+  any `BaseChatModel` (OpenAI, Anthropic, local, …) translates it
+  into a symbolic goal exactly once, before any tool runs.
+- **Replanning memory** — each step's outcome is recorded in a
+  LangGraph `BaseStore` keyed by tool name, so on replan the planner
+  can avoid actions that already failed in this run. No vector
+  embeddings or extra infrastructure required.
+- **Pluggable tracing** — a `PlanningTracer` Protocol with sync and
+  async hooks streams planning events to LangSmith, OpenTelemetry,
+  or any logger you wire up.
+- **Plan visualization** — render any plan as a Mermaid diagram,
+  GraphViz DOT graph, ASCII tree, or Gantt chart.
+- **Multi-goal decomposition** — a `MultiGoal` wrapper sequences a
+  list of subgoals into a single executable plan that satisfies
+  them in order.
+- **Progressive API** — three entry points for different needs:
+  `create_goap_agent` (one-liner from a list of LangChain tools),
+  `goapify_tool` (decorate an existing tool with planning metadata),
+  and `GoapSubgraph` (embed planning inside a larger LangGraph).
 
 ## Install
 
@@ -190,7 +211,7 @@ world_state (relevant keys): {'topic': 'GOAP for LangGraph', 'brief': 'Brief on 
 pip install langgoap
 ```
 
-Requires Python 3.10+. OR-Tools CP-SAT is included as a core dependency.
+Requires Python 3.10+.
 
 ## Documentation layout
 
