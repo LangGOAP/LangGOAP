@@ -11,6 +11,7 @@ LangGraph's interrupt()/Command(resume=...) mechanism, including:
 
 from __future__ import annotations
 
+import sys
 import uuid
 
 import pytest
@@ -182,6 +183,16 @@ class TestHumanApprovalSync:
         assert result["status"] == "goal_achieved"
 
 
+@pytest.mark.skipif(
+    sys.version_info < (3, 11),
+    reason=(
+        "LangGraph interrupt() relies on get_config(), which cannot "
+        "propagate RunnableConfig through asyncio tasks on Python 3.10. "
+        "Upstream raises 'Python 3.11 or later required to use this in "
+        "an async context'. Async HITL is therefore supported only on "
+        "Python 3.11+."
+    ),
+)
 class TestHumanApprovalAsync:
     """Async ainvoke tests for require_human_approval."""
 
