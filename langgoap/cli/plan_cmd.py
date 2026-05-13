@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from typing import TYPE_CHECKING, Any
 
@@ -12,6 +13,8 @@ if TYPE_CHECKING:
 import click
 
 from langgoap.cli._loader import load_actions, load_goal, load_world_state
+
+logger = logging.getLogger(__name__)
 
 
 @click.command("plan")
@@ -86,7 +89,7 @@ def plan(
 
     output = _render_plan(result_plan, fmt, dict(result))
     if output_path:
-        with open(output_path, "w") as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             f.write(output)
         click.echo(f"Plan written to {output_path}")
     else:
@@ -156,5 +159,7 @@ def _auto_explain(
             )
         if explanation.suggestion:
             click.echo(f"  Suggestion: {explanation.suggestion}", err=True)
-    except Exception:
-        pass
+    except Exception as exc:
+        # Best-effort explainer — the CLI must keep going if the helper
+        # hits an edge case.  Surface the cause under DEBUG logging.
+        logger.debug("auto-explain failed: %s", exc, exc_info=True)

@@ -178,3 +178,13 @@ sort_by_size = true
 
 [tool.isort]
 profile = "black"
+
+[tool.bandit]
+# Project-wide skips for findings that are non-applicable by design.
+# Per-line `# nosec BXXX - <reason>` markers handle the remaining cases.
+#   B101 (assert_used): every `assert` in langgoap/ is an invariant /
+#     type-narrowing guard, never a security check.
+#   B311 (pseudo-random): the planner is defined by deterministically
+#     seedable stochastic search (MCTS rollouts, QoS jitter, transition
+#     sampling). Cryptographic randomness is inappropriate here.
+skips = ["B101", "B311"]

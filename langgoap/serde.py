@@ -45,7 +45,11 @@ checkpointer uses and installs the correct subclass.
 from __future__ import annotations
 
 import dataclasses
-import pickle
+
+# pickle is used only when callers explicitly enable the opt-in
+# ``pickle_fallback`` mode on the langgoap serializer.  The default
+# code path uses ormsgpack with allowlisted types.
+import pickle  # nosec B403
 from collections.abc import Iterable
 from types import MappingProxyType
 from typing import Any
