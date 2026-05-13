@@ -47,13 +47,14 @@ management and virtual environments.
 ```bash
 git clone https://github.com/LangGOAP/LangGOAP.git
 cd langgoap
-uv sync --extra optimization
+uv sync
 ```
 
-The `optimization` extra installs Google OR-Tools, which the CSP
-integration tests rely on. Every CI job pins the same extra, so a
-fresh clone that omits it will see CSP tests fail locally even when
-`main` is green.
+Google OR-Tools (CP-SAT) is a core dependency, so the CSP integration
+tests run on a fresh clone without any optional extras. Optional
+extras (`checkpoint-postgres`, `checkpoint-redis`, `cli`, `deepagents`)
+are documented in `pyproject.toml` and only needed if you are working
+on those specific integrations.
 
 ## Running the suite
 
@@ -142,8 +143,9 @@ through every downstream consumer and are evaluated carefully.
 
 Please file bugs and feature requests at
 [github.com/LangGOAP/LangGOAP/issues](https://github.com/LangGOAP/LangGOAP/issues).
-Security-sensitive reports should instead follow the process in
-[`SECURITY.md`](SECURITY.md).
+For security-sensitive reports, please use
+[GitHub Security Advisories](https://github.com/LangGOAP/LangGOAP/security/advisories/new)
+rather than a public issue.
 
 ## Code of conduct
 
