@@ -38,7 +38,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv sync --extra optimization --extra checkpoint-postgres --extra checkpoint-redis
+          uv sync --extra checkpoint-postgres --extra checkpoint-redis
           uv pip install -r docs/requirements.txt
 
       - name: Build versioned documentation
