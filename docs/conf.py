@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.abspath(".."))
 
 # -- Project information -----------------------------------------------------
 
-project = "langgoap"
+project = "LangGOAP"
 copyright = "2024, Integrallis Software"
 author = "Integrallis Software"
 
@@ -46,11 +46,11 @@ pygments_dark_style = "monokai"
 
 html_static_path = ["_static"]
 html_css_files = ["css/custom.css"]
-html_title = "langgoap"
+html_title = "LangGOAP"
 
 html_context = {
-    "github_user": "integrallis",
-    "github_repo": "langgoap",
+    "github_user": "LangGOAP",
+    "github_repo": "LangGOAP",
     "github_version": "main",
     "doc_path": "docs",
     "default_mode": "auto",
@@ -74,7 +74,7 @@ html_theme_options = {
     "show_toc_level": 3,
     "home_page_in_toc": True,
     "logo": {
-        "text": "langgoap",
+        "text": "LangGOAP",
         "image_light": "_static/images/logo-light.svg",
         "image_dark": "_static/images/logo-dark.svg",
         "alt_text": "LangGOAP",

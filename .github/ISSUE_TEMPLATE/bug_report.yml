@@ -1,5 +1,5 @@
 name: "\U0001F41B Bug Report"
-description: Report a bug in LangGoap. To report a security issue, please instead use the security advisory option (below). For general questions, please use GitHub Discussions (below).
+description: Report a bug in LangGOAP. To report a security issue, please instead use the security advisory option (below). For general questions, please use GitHub Discussions (below).
 labels: ["bug"]
 body:
   - type: markdown
@@ -15,7 +15,7 @@ body:
 
         Before submitting, please confirm the issue has not already been reported or fixed:
 
-        * [LangGoap documentation](https://integrallis.github.io/langgoap)
+        * [LangGOAP documentation](https://langgoap.github.io/LangGOAP/)
         * [CHANGELOG](https://github.com/LangGOAP/LangGOAP/blob/main/CHANGELOG.md)
         * [GitHub issue search](https://github.com/LangGOAP/LangGOAP/issues?q=is%3Aissue)
   - type: checkboxes
@@ -30,9 +30,9 @@ body:
           required: true
         - label: I used the GitHub issue search to find a similar report and did not find it.
           required: true
-        - label: I am sure that this is a bug in LangGoap rather than in my own code or in an upstream dependency.
+        - label: I am sure that this is a bug in LangGOAP rather than in my own code or in an upstream dependency.
           required: true
-        - label: The bug is not resolved by updating to the latest released version of LangGoap.
+        - label: The bug is not resolved by updating to the latest released version of LangGOAP.
           required: true
         - label: I posted a self-contained, minimal, reproducible example that a maintainer can copy and run as is.
           required: true
@@ -41,7 +41,7 @@ body:
     attributes:
       label: Component (required)
       description: |
-        Which LangGoap subsystem does this bug affect? Select at least one.
+        Which LangGOAP subsystem does this bug affect? Select at least one.
       options:
         - label: A* planner (`langgoap.planner.astar`)
         - label: CSP optimizer / CP-SAT (`langgoap.planner.csp`, `langgoap.planner.pipeline`)
@@ -117,7 +117,7 @@ body:
 
         Write a short description of what you are doing, what you expect to happen, and what is currently happening.
       placeholder: |
-        * I'm trying to use LangGoap to do X.
+        * I'm trying to use LangGOAP to do X.
         * I expect to see Y.
         * Instead, it does Z.
     validations:

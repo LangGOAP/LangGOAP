@@ -44,7 +44,7 @@ deepagents = ["deepagents>=0.5.0; python_version>='3.11'"]
 
 [project.urls]
 Homepage = "https://github.com/LangGOAP/LangGOAP"
-Documentation = "https://integrallis.github.io/langgoap"
+Documentation = "https://langgoap.github.io/LangGOAP/"
 Repository = "https://github.com/LangGOAP/LangGOAP"
 Issues = "https://github.com/LangGOAP/LangGOAP/issues"
 Changelog = "https://github.com/LangGOAP/LangGOAP/blob/main/CHANGELOG.md"

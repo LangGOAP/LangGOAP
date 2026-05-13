@@ -75,7 +75,7 @@ Usually out of scope unless additional, concrete impact is demonstrated:
   host running LangGOAP.
 - General performance regressions in the A*/CSP pipeline that do not
   come from adversarial input.
-- Missing security headers, TLS, or CSP on `integrallis.github.io/langgoap`
+- Missing security headers, TLS, or CSP on `langgoap.github.io/LangGOAP`
   (that's GitHub Pages infrastructure, not LangGOAP code).
 
 ## How to report a vulnerability

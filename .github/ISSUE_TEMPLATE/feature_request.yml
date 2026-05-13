@@ -1,5 +1,5 @@
 name: "✨ Feature Request"
-description: Request a new feature or enhancement for LangGoap. For general questions, please use GitHub Discussions (below).
+description: Request a new feature or enhancement for LangGOAP. For general questions, please use GitHub Discussions (below).
 labels: ["enhancement"]
 body:
   - type: markdown
@@ -9,14 +9,14 @@ body:
 
         Thank you for taking the time to request a new feature.
 
-        Use this template to request **new features or enhancements** in LangGoap. For bug reports,
+        Use this template to request **new features or enhancements** in LangGOAP. For bug reports,
         please use the bug report template instead. For usage questions and design discussions,
         please use [GitHub Discussions](https://github.com/LangGOAP/LangGOAP/discussions) or
         the [LangChain Forum](https://forum.langchain.com/) for LangChain/LangGraph-core questions.
 
         Before filing, please check whether your idea has already been proposed:
 
-        * [LangGoap documentation](https://integrallis.github.io/langgoap)
+        * [LangGOAP documentation](https://langgoap.github.io/LangGOAP/)
         * [GitHub issue search](https://github.com/LangGOAP/LangGOAP/issues?q=is%3Aissue)
         * [GitHub discussion search](https://github.com/LangGOAP/LangGOAP/discussions)
 
@@ -33,14 +33,14 @@ body:
           required: true
         - label: I used the GitHub issue search to find a similar request and did not find it.
           required: true
-        - label: I checked the LangGoap documentation and CHANGELOG to see whether this feature already exists.
+        - label: I checked the LangGOAP documentation and CHANGELOG to see whether this feature already exists.
           required: true
   - type: checkboxes
     id: component
     attributes:
       label: Component (required)
       description: |
-        Which LangGoap subsystem should this feature land in? Select at least one.
+        Which LangGOAP subsystem should this feature land in? Select at least one.
       options:
         - label: A* planner (`langgoap.planner.astar`)
         - label: CSP optimizer / CP-SAT (`langgoap.planner.csp`, `langgoap.planner.pipeline`)
@@ -68,7 +68,7 @@ body:
         call out which public API surface would be affected (new type, new method, new
         integration, new notebook, …).
       placeholder: |
-        I would like LangGoap to support ...
+        I would like LangGOAP to support ...
 
         This would affect the public API by ...
   - type: textarea

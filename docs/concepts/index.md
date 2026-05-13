@@ -1,6 +1,6 @@
 # Concepts
 
-`langgoap` combines four building blocks: **Goal-Oriented Action
+LangGOAP combines four building blocks: **Goal-Oriented Action
 Planning** (GOAP) search, **constraint optimization** with OR-Tools
 CP-SAT, **natural-language goal interpretation**, and **LangGraph-native
 execution**. This page is a top-down tour of how those pieces fit
@@ -29,7 +29,7 @@ planning runs without mutation hazards.
 
 ## The plan *is* a compiled `StateGraph`
 
-`langgoap` does not treat planning and execution as separate systems.
+LangGOAP does not treat planning and execution as separate systems.
 `GoapGraph.compile()` returns a real
 `langgraph.graph.state.CompiledStateGraph` whose nodes are the
 planner, executor, and observer. The plan lives inside the graph

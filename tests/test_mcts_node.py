@@ -7,7 +7,7 @@ UCB1 selection rule are adapted from LATS
 class and its ``uct`` method, which use the canonical c = √2
 exploration constant with a running-mean value estimate.
 
-LangGoap's node model differs from LATS in two ways:
+LangGOAP's node model differs from LATS in two ways:
 
 1. **Action-edge, not state-node**: each child is reached by
    applying a concrete :class:`ActionSpec`, so the node stores the

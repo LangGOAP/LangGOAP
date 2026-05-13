@@ -1,7 +1,7 @@
 """Monte Carlo Tree Search planning strategy.
 
 Adapted from LATS (``research/repos/LATS/hotpot/lats.py``) with
-LangGoap-specific typing: action edges are concrete
+LangGOAP-specific typing: action edges are concrete
 :class:`~langgoap.actions.ActionSpec` instances and each node carries
 a :class:`~langgoap.state.PlanningState` so the compiled graph can
 re-use the standard satisfaction / apply machinery.
@@ -41,7 +41,7 @@ logger = logging.getLogger("langgoap.planner.mcts")
 class MCTSNode:
     """A decision node in the MCTS search tree.
 
-    Mirrors LATS's ``Node`` with two LangGoap adaptations: ``state`` is
+    Mirrors LATS's ``Node`` with two LangGOAP adaptations: ``state`` is
     a :class:`PlanningState` (not a free-text dict) and ``action`` is
     the :class:`~langgoap.actions.ActionSpec` that was applied to the
     parent to reach this state (``None`` at the root).
@@ -647,7 +647,7 @@ class MCTSStrategy:
 
         The MCTS search loop is CPU-bound and synchronous; this entry
         point exists to satisfy the dual sync/async pattern enforced
-        across LangGoap.  When a tracer is attached with async hooks
+        across LangGOAP.  When a tracer is attached with async hooks
         (``aon_search_expand`` / ``aon_search_complete``), the sync
         search runs through a local capture proxy and the recorded
         events are re-fired through the real tracer's async hooks.

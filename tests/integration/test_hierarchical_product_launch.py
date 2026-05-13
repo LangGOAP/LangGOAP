@@ -487,7 +487,7 @@ class TestProductLaunchWithLLM:
         actions = llm_actions(llm)
         result = GoapGraph(actions=actions).invoke(
             goal=llm_goal(),
-            world_state={**llm_start(), "product_name": "LangGoap SaaS"},
+            world_state={**llm_start(), "product_name": "LangGOAP SaaS"},
         )
 
         assert result["status"] == "goal_achieved"

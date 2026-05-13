@@ -3,7 +3,7 @@
 Adapted from ``unified-planning``'s ``PlanQualityMetric`` hierarchy
 (``unified_planning/model/metrics.py``).  The ``unified-planning``
 library separates metric *definition* (declarative) from metric
-*evaluation* (solver-specific); LangGoap keeps the same separation
+*evaluation* (solver-specific); LangGOAP keeps the same separation
 so the :class:`PlanQualityMetric` Protocol is cheap to satisfy and
 easy to extend.
 
