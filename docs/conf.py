@@ -75,8 +75,16 @@ html_theme_options = {
     "home_page_in_toc": True,
     "logo": {
         "text": "langgoap",
+        "image_light": "_static/images/logo-light.svg",
+        "image_dark": "_static/images/logo-dark.svg",
+        "alt_text": "LangGOAP",
     },
 }
+
+# -- Favicon (sphinx-favicon) ------------------------------------------------
+favicons = [
+    {"rel": "icon", "href": "images/icon.svg", "type": "image/svg+xml"},
+]
 
 autoclass_content = "both"
 add_module_names = False
@@ -91,6 +99,9 @@ suppress_warnings = [
     "autodoc",
     "docutils",
     "myst.xref_missing",
+    # Pygments has no built-in mermaid lexer; the plan_visualization
+    # notebook prints rendered ```mermaid``` blocks in its outputs.
+    "misc.highlighting_failure",
 ]
 
 nb_execution_mode = "off"
