@@ -27,6 +27,7 @@ extensions = [
     "_extension.gallery_directive",
     "myst_nb",
     "sphinx_favicon",
+    "sphinxcontrib.mermaid",
 ]
 
 templates_path = ["_templates"]
@@ -58,6 +59,16 @@ html_context = {
 
 myst_enable_extensions = ["colon_fence"]
 myst_heading_anchors = 3
+
+# Promote ```mermaid fenced blocks (emitted by Plan.visualize() inside
+# notebook outputs) to the sphinxcontrib.mermaid directive so they
+# render as real diagrams instead of plain-text Pygments fallbacks.
+# nb_render_markdown_format is required because by default myst-nb
+# parses text/markdown cell outputs as commonmark, which bypasses
+# myst_fence_as_directive.
+myst_fence_as_directive = ["mermaid"]
+nb_render_markdown_format = "myst"
+mermaid_output_format = "raw"
 
 html_theme_options = {
     "repository_url": "https://github.com/LangGOAP/LangGOAP",
@@ -99,9 +110,6 @@ suppress_warnings = [
     "autodoc",
     "docutils",
     "myst.xref_missing",
-    # Pygments has no built-in mermaid lexer; the plan_visualization
-    # notebook prints rendered ```mermaid``` blocks in its outputs.
-    "misc.highlighting_failure",
 ]
 
 nb_execution_mode = "off"
