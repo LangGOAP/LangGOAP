@@ -13,10 +13,13 @@
 </div>
 
 <div align="center">
-  <a href="LICENSE" target="_blank"><img src="https://img.shields.io/pypi/l/langgoap" alt="PyPI - License"></a>
-  <a href="https://pypistats.org/packages/langgoap" target="_blank"><img src="https://img.shields.io/pepy/dt/langgoap" alt="PyPI - Downloads"></a>
-  <a href="https://pypi.org/project/langgoap/" target="_blank"><img src="https://img.shields.io/pypi/v/langgoap.svg?label=%20" alt="Version"></a>
-  <a href="pyproject.toml" target="_blank"><img src="https://img.shields.io/pypi/pyversions/langgoap" alt="Python versions"></a>
+  <a href="https://github.com/LangGOAP/LangGOAP/blob/main/LICENSE" target="_blank"><img src="https://img.shields.io/pypi/l/langgoap" alt="License"></a>
+  <a href="https://pypi.org/project/langgoap/" target="_blank"><img src="https://img.shields.io/pypi/v/langgoap" alt="PyPI version"></a>
+  <a href="https://github.com/LangGOAP/LangGOAP/blob/main/pyproject.toml" target="_blank"><img src="https://img.shields.io/pypi/pyversions/langgoap" alt="Python versions"></a>
+  <a href="https://pepy.tech/projects/langgoap" target="_blank"><img src="https://img.shields.io/pepy/dt/langgoap" alt="Downloads"></a>
+  <a href="https://github.com/LangGOAP/LangGOAP/actions/workflows/test.yml" target="_blank"><img src="https://img.shields.io/github/actions/workflow/status/LangGOAP/LangGOAP/test.yml?branch=main&label=tests" alt="Tests"></a>
+  <a href="https://github.com/LangGOAP/LangGOAP/actions/workflows/docs.yml" target="_blank"><img src="https://img.shields.io/github/actions/workflow/status/LangGOAP/LangGOAP/docs.yml?branch=main&label=docs" alt="Docs"></a>
+  <a href="https://gist.github.com/bsbodden/a3f945dce7217013798b24206fb5cd64" target="_blank"><img src="https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/bsbodden/a3f945dce7217013798b24206fb5cd64/raw/langgoap-coverage.json" alt="Coverage"></a>
   <a href="https://github.com/bsbodden/mfcqi" target="_blank"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/LangGOAP/LangGOAP/main/.github/badges/mfcqi.json" alt="MFCQI Score"></a>
 </div>
 
