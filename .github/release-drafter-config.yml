@@ -17,6 +17,22 @@ version-resolver:
       - 'maintenance'
   default: patch
 autolabeler:
+  - label: 'breakingchange'
+    title:
+      - '/^[a-z]+(\([^)]+\))?!:/i'
+      - '/BREAKING[ -]CHANGE/'
+  - label: 'enhancement'
+    title:
+      - '/^feat(\([^)]+\))?!?:/i'
+  - label: 'bug'
+    title:
+      - '/^fix(\([^)]+\))?!?:/i'
+  - label: 'documentation'
+    title:
+      - '/^docs(\([^)]+\))?!?:/i'
+  - label: 'maintenance'
+    title:
+      - '/^(chore|ci|build|style|refactor|test|perf)(\([^)]+\))?!?:/i'
   - label: 'maintenance'
     files:
       - '*.md'
