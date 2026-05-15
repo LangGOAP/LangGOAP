@@ -16,4 +16,4 @@ class TestPublicAPI:
         """__version__ is a non-empty string."""
         assert isinstance(langgoap.__version__, str)
         assert len(langgoap.__version__) > 0
-        assert langgoap.__version__ == "0.1.1"
+        assert langgoap.__version__ == "0.1.2"
