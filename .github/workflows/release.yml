@@ -203,8 +203,10 @@ jobs:
               match = re.match(r'([a-zA-Z0-9_-]+)>=([0-9.]+)', dep)
               if match:
                   pkg, ver = match.groups()
-                  # Skip packages with complex constraints
-                  if pkg not in ['langgraph']:
+                  # Skip packages with complex constraints, or whose lower bound
+                  # is not a published exact version (e.g. ortools releases as
+                  # 9.X.YYYY, never as plain 9.8).
+                  if pkg not in ['langgraph', 'ortools']:
                       min_versions.append(f'{pkg}=={ver}')
 
           print(' '.join(min_versions))
