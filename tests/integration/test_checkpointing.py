@@ -281,6 +281,22 @@ pytest.importorskip(
 )
 
 
+# Containerized backends below need a reachable docker daemon. macOS GitHub
+# runners ship the ``docker`` Python package (via testcontainers) but not
+# the daemon, so probe at module load time and skip the rest of the module
+# the same way ``importorskip`` would for a missing extra.
+try:
+    import docker as _docker_lib
+
+    _docker_lib.from_env().ping()
+except Exception as _exc:  # pragma: no cover - environmental
+    pytest.skip(
+        f"docker daemon not reachable ({_exc.__class__.__name__}); "
+        "skipping containerized checkpointer tests",
+        allow_module_level=True,
+    )
+
+
 @contextmanager
 def _postgres_url() -> Iterator[str]:
     """Spin up an ephemeral Postgres 16 container and yield its URL.
