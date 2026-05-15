@@ -1,5 +1,21 @@
-name-template: '$NEXT_MINOR_VERSION'
-tag-template: 'v$NEXT_MINOR_VERSION'
+name-template: 'v$RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
+version-resolver:
+  major:
+    labels:
+      - 'breakingchange'
+  minor:
+    labels:
+      - 'feature'
+      - 'enhancement'
+  patch:
+    labels:
+      - 'bug'
+      - 'bugfix'
+      - 'fix'
+      - 'BUG'
+      - 'maintenance'
+  default: patch
 autolabeler:
   - label: 'maintenance'
     files:
