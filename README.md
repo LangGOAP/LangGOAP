@@ -1,9 +1,9 @@
 <div align="center">
   <a href="https://github.com/LangGOAP/LangGOAP">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset=".github/images/logo-dark.svg">
-      <source media="(prefers-color-scheme: light)" srcset=".github/images/logo-light.svg">
-      <img alt="LangGOAP Logo" src=".github/images/logo-light.svg" width="50%">
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/LangGOAP/LangGOAP/main/.github/images/logo-dark.svg">
+      <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/LangGOAP/LangGOAP/main/.github/images/logo-light.svg">
+      <img alt="LangGOAP Logo" src="https://raw.githubusercontent.com/LangGOAP/LangGOAP/main/.github/images/logo-light.svg" width="50%">
     </picture>
   </a>
 </div>
@@ -136,7 +136,7 @@ fixed — every plan flows through the same `planner → executor →
 observer` loop:
 
 <p align="center">
-  <img src=".github/images/quickstart-stategraph.png" alt="Compiled StateGraph: planner → executor → observer" width="120">
+  <img src="https://raw.githubusercontent.com/LangGOAP/LangGOAP/main/.github/images/quickstart-stategraph.png" alt="Compiled StateGraph: planner → executor → observer" width="120">
 </p>
 
 ### Scenario 1 — Happy path (cheap writer wins on cost)
@@ -144,7 +144,7 @@ observer` loop:
 A* sees two paths to `have_draft: True` and picks the cheaper one:
 
 <p align="center">
-  <img src=".github/images/quickstart-plan-happy.png" alt="Plan: research_topic → write_article_fast → publish_article" width="220">
+  <img src="https://raw.githubusercontent.com/LangGOAP/LangGOAP/main/.github/images/quickstart-plan-happy.png" alt="Plan: research_topic → write_article_fast → publish_article" width="220">
 </p>
 
 ```text
@@ -165,7 +165,7 @@ world_state (relevant keys): {'topic': 'GOAP for LangGraph', 'brief': 'Brief on 
 Set `fail_fast_n_times=1` and run again. `write_article_fast` raises on its first call, the executor blacklists it, and the observer hands control back to the planner. A* re-derives a new plan from the current world state (`have_brief` is already `True` because `research_topic` succeeded), so the remaining work is just the premium writer plus publish:
 
 <p align="center">
-  <img src=".github/images/quickstart-plan-replan.png" alt="Replan: write_article_premium → publish_article" width="320">
+  <img src="https://raw.githubusercontent.com/LangGOAP/LangGOAP/main/.github/images/quickstart-plan-replan.png" alt="Replan: write_article_premium → publish_article" width="320">
 </p>
 
 ```text
