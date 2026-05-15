@@ -169,7 +169,9 @@ def mcts_factory(
     return MCTSStrategy(
         exploration=MCTSExploration(
             iterations=MCTS_ITERATIONS,
-            wall_clock_ms=MCTS_WALL_CLOCK_MS if wall_clock_ms is None else wall_clock_ms,
+            wall_clock_ms=(
+                MCTS_WALL_CLOCK_MS if wall_clock_ms is None else wall_clock_ms
+            ),
             rollout_depth=MCTS_ROLLOUT_DEPTH,
             seed=seed,
         ),
@@ -195,7 +197,9 @@ def mcts_random_factory(
     return MCTSStrategy(
         exploration=MCTSExploration(
             iterations=MCTS_ITERATIONS,
-            wall_clock_ms=MCTS_WALL_CLOCK_MS if wall_clock_ms is None else wall_clock_ms,
+            wall_clock_ms=(
+                MCTS_WALL_CLOCK_MS if wall_clock_ms is None else wall_clock_ms
+            ),
             rollout_depth=MCTS_ROLLOUT_DEPTH,
             seed=seed,
         ),
