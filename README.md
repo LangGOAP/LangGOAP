@@ -13,9 +13,9 @@
 </div>
 
 <div align="center">
-  <a href="https://github.com/LangGOAP/LangGOAP/blob/main/LICENSE" target="_blank"><img src="https://img.shields.io/pypi/l/langgoap" alt="License"></a>
-  <a href="https://pypi.org/project/langgoap/" target="_blank"><img src="https://img.shields.io/pypi/v/langgoap" alt="PyPI version"></a>
-  <a href="https://github.com/LangGOAP/LangGOAP/blob/main/pyproject.toml" target="_blank"><img src="https://img.shields.io/pypi/pyversions/langgoap" alt="Python versions"></a>
+  <a href="https://github.com/LangGOAP/LangGOAP/blob/main/LICENSE" target="_blank"><img src="https://img.shields.io/pypi/l/langgoap?cacheSeconds=3600" alt="License"></a>
+  <a href="https://pypi.org/project/langgoap/" target="_blank"><img src="https://img.shields.io/pypi/v/langgoap?cacheSeconds=3600" alt="PyPI version"></a>
+  <a href="https://github.com/LangGOAP/LangGOAP/blob/main/pyproject.toml" target="_blank"><img src="https://img.shields.io/pypi/pyversions/langgoap?cacheSeconds=3600" alt="Python versions"></a>
   <a href="https://pepy.tech/projects/langgoap" target="_blank"><img src="https://img.shields.io/pepy/dt/langgoap" alt="Downloads"></a>
   <a href="https://github.com/LangGOAP/LangGOAP/actions/workflows/test.yml" target="_blank"><img src="https://img.shields.io/github/actions/workflow/status/LangGOAP/LangGOAP/test.yml?branch=main&label=tests" alt="Tests"></a>
   <a href="https://github.com/LangGOAP/LangGOAP/actions/workflows/docs.yml" target="_blank"><img src="https://img.shields.io/github/actions/workflow/status/LangGOAP/LangGOAP/docs.yml?branch=main&label=docs" alt="Docs"></a>
