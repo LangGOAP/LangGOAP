@@ -160,6 +160,7 @@ jobs:
           VERSION: ${{ needs.build.outputs.version }}
         run: |
           uv pip install --system \
+            --index-strategy unsafe-best-match \
             --extra-index-url https://test.pypi.org/simple/ \
             --force-reinstall --no-deps \
             "langgoap==$VERSION"
