@@ -76,7 +76,13 @@ class ActionSpec:
             a checkpointer.  The resume value is interpreted as approval:
             ``None``, ``True``, or ``{"approved": True}`` continue
             execution; ``False`` or ``{"approved": False}`` deny the
-            action and trigger replanning.
+            action and trigger replanning.  A Pydantic ``BaseModel``
+            subclass instead of ``True`` makes the pause a typed form: the
+            interrupt payload carries the model's JSON schema, a resume
+            payload that validates is stored under ``human_input_key``, one
+            that fails validation is asked again with the errors in the next
+            payload, and ``False`` / ``{"approved": False}`` declines the
+            form like a denied boolean gate.
         resources: Estimated resource consumption for this action.
             Used by the CSP optimizer.
             Example: ``{"tokens": 500, "cost_usd": 0.02, "api_calls": 1}``.
