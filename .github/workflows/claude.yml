@@ -28,13 +28,13 @@ jobs:
       issues: read
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
       - name: Run Claude Code
         id: claude
         # Pinned to the commit the ``beta`` tag pointed at on 2026-11-15 (v0.0.63).
-        uses: anthropics/claude-code-action@28f83620103c48a57093dcc2837eec89e036bb9f
+        uses: anthropics/claude-code-action@4fa93a88de49bbef68b10eb15aabedf28ca0e1ed
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
