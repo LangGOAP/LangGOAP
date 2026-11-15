@@ -128,7 +128,8 @@ def run_sensors_sync(
     results: list[tuple[str, dict[str, Any]]] = []
     for sensor in sensors:
         try:
-            if not isinstance(sensor, Sensor):
+            sense = getattr(sensor, "sense", None)  # narrows for mypy 1.20 and 2.4
+            if sense is None:
                 # AsyncSensor-only — skip in sync path with a warning.
                 logger.warning(
                     "Sensor %r is async-only; skipping in sync path. "
@@ -136,9 +137,7 @@ def run_sensors_sync(
                     sensor.name,
                 )
                 continue
-            _record_sensor_result(
-                results, world_state, sensor.name, sensor.sense(world_state)
-            )
+            _record_sensor_result(results, world_state, sensor.name, sense(world_state))
         except Exception as exc:
             logger.warning("Sensor %r raised: %s", sensor.name, exc)
     return results
