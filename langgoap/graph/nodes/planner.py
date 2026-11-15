@@ -69,6 +69,67 @@ def _any_mode_no_plan_dict(
     return payload
 
 
+_DENIAL_PREFIX = "human_approval_denied"
+
+
+def _denial_reasons(state: GoapState, blacklisted: list[str]) -> dict[str, str]:
+    """Map each blacklisted action an operator denied to the stated reason.
+
+    A denial (boolean gate or typed form) is recorded as a failed
+    :class:`ActionResult` whose error starts with ``human_approval_denied``.
+    The most recent such record per action wins.
+    """
+    reasons: dict[str, str] = {}
+    for record in state.get("execution_history", []):
+        if record.success or record.action_name not in blacklisted:
+            continue
+        error = str(record.error or "")
+        if error.startswith(_DENIAL_PREFIX):
+            reasons[record.action_name] = error[len(_DENIAL_PREFIX) :].lstrip(": ")
+    return reasons
+
+
+def _blacklist_suggestion(
+    failed: list[str], spent: list[str], denied: dict[str, str] | None = None
+) -> str:
+    """Explain a goal that is reachable only through blacklisted actions.
+
+    ``failed`` actions were blacklisted after exhausting ``max_retries``;
+    ``spent`` ones are ``can_rerun=False`` actions that already ran once;
+    ``denied`` maps actions an operator declined to the stated reason.
+    The three need different advice: retries and QoS do nothing for an
+    action that succeeded and simply cannot run again (a ``NirvanaGoal``
+    run ends this way by design), and nothing for a deliberate human
+    decision either.
+    """
+    parts: list[str] = []
+    if denied:
+        described = ", ".join(
+            f"{name} ({reason})" if reason else name for name, reason in denied.items()
+        )
+        parts.append(
+            "Every remaining path to the goal needs an action the operator "
+            f"denied: {described}. Retries and ActionQos do not apply to a "
+            "denial: add an alternative action, attach a stuck handler that "
+            "relaxes the goal, or run again once the decision changes."
+        )
+    if failed:
+        parts.append(
+            "Every remaining path to the goal needs a blacklisted action "
+            f"({', '.join(failed)}). Raise ActionSpec.max_retries or attach an "
+            "ActionQos for transient failures, add an alternative action, or set "
+            "GoalPolicy(blacklist_fallback=True) to re-admit blacklisted actions."
+        )
+    if spent:
+        parts.append(
+            "Every remaining path to the goal needs an action that already ran "
+            f"and cannot run again (can_rerun=False): {', '.join(spent)}. Add an "
+            "alternative action, or set can_rerun=True if repeating it is "
+            "acceptable. For a NirvanaGoal this is the normal end of the run."
+        )
+    return " ".join(parts)
+
+
 def _infeasible_no_plan_dict(plan: Plan, goal: GoalSpec) -> dict[str, Any]:
     """Build the ``no_plan_explanation`` payload for a rejected infeasible plan.
 
@@ -747,16 +808,21 @@ class GoapPlanner:
                 if blacklisted:
                     no_plan_dict["blacklisted_actions"] = list(blacklisted)
                     if self._blacklist_is_the_cause(start, effective_goal):
-                        no_plan_dict["suggestion"] = (
-                            "Every remaining path to the goal needs a blacklisted "
-                            f"action ({', '.join(blacklisted)}). Raise "
-                            "ActionSpec.max_retries or attach an ActionQos for "
-                            "transient failures, add an alternative action, or "
-                            "set GoalPolicy(blacklist_fallback=True) to re-admit "
-                            "blacklisted actions."
+                        counts = state.get("action_failure_counts", {}) or {}
+                        denied = _denial_reasons(state, blacklisted)
+                        failed = [
+                            a for a in blacklisted if counts.get(a) and a not in denied
+                        ]
+                        spent = [a for a in blacklisted if not counts.get(a)]
+                        if denied:
+                            no_plan_dict["denied_actions"] = list(denied)
+                        if spent:
+                            no_plan_dict["spent_actions"] = spent
+                        no_plan_dict["suggestion"] = _blacklist_suggestion(
+                            failed, spent, denied
                         )
                 logger.warning(
-                    "A* found no plan for goal %s \u2014 %s",
+                    "No plan for goal %s: %s",
                     dict(effective_goal.conditions),
                     no_plan_dict["suggestion"],
                 )

@@ -19,6 +19,7 @@ tests pin:
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import logging
 from datetime import timedelta
 from typing import Any
@@ -643,6 +644,20 @@ class TestDeprecatedSerdeShims:
             assert install_langgoap_serde(saver) is saver
         assert saver.serde is stock
         assert LANGGOAP_ALLOWED_MSGPACK_TYPES == ()
+
+    def test_allowed_types_constant_is_a_silent_empty_tuple(self) -> None:
+        """A module constant cannot warn on access; the CHANGELOG says so too."""
+        import warnings
+
+        import langgoap
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            assert langgoap.LANGGOAP_ALLOWED_MSGPACK_TYPES == ()
+        changelog = (Path(__file__).resolve().parents[1] / "CHANGELOG.md").read_text(
+            encoding="utf-8"
+        )
+        assert "kept for import compatibility" in " ".join(changelog.split())
 
     def test_langgoap_serializer_is_a_warning_shim(self) -> None:
         from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer

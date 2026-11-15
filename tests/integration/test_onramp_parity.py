@@ -342,6 +342,32 @@ class TestSubgraphGraphOptions:
         with pytest.raises(TypeError, match="bogus"):
             GoapSubgraph(actions=_chain_actions(), goal=GoalSpec(conditions={"done": True}), bogus=1)  # type: ignore[call-arg]
 
+    def test_compile_rejects_unknown_kwargs_with_the_option_lists(self) -> None:
+        sub = GoapSubgraph(
+            actions=_chain_actions(), goal=GoalSpec(conditions={"done": True})
+        )
+        with pytest.raises(TypeError, match="bogus") as excinfo:
+            sub.compile(bogus=1)
+        assert "Compile options" in str(excinfo.value)
+        assert "GoapGraph options" in str(excinfo.value)
+
+    def test_add_goap_subgraph_rejects_unknown_compile_kwargs(self) -> None:
+        class _Parent(TypedDict, total=False):
+            world: dict[str, Any]
+            plan_result: dict[str, Any]
+
+        builder = StateGraph(_Parent)
+        with pytest.raises(TypeError, match="bogus") as excinfo:
+            add_goap_subgraph(
+                builder,
+                name="goap",
+                actions=_chain_actions(),
+                goal=GoalSpec(conditions={"done": True}),
+                input_key="world",
+                compile_kwargs={"bogus": 1},
+            )
+        assert "Compile options" in str(excinfo.value)
+
 
 # ---------------------------------------------------------------------------
 # add_goap_subgraph: config propagation and async (issue #20)

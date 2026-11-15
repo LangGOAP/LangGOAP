@@ -92,7 +92,7 @@ class TestChangelog:
         changelog = _read("CHANGELOG.md")
         assert "## [0.1.2] — 2026-05-15" in changelog
         assert "## [0.1.1] — 2026-05-15" in changelog
-        assert changelog.count("Unreleased") == 1
+        assert changelog.count("Unreleased") <= 1  # at most the in-progress section
 
 
 class TestStaleText:

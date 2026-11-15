@@ -235,3 +235,61 @@ class TestNoPlanIsNotMisreported:
 
         assert cmd.goto == END
         assert cmd.update["status"] == "no_plan"
+
+
+class TestSpentActionsAreExplainedAsSpent:
+    """A ``can_rerun=False`` action that already ran is not a transient failure."""
+
+    @staticmethod
+    def _state(**extra: Any) -> dict[str, Any]:
+        return {
+            "world_state": {},
+            "goal": GoalSpec(conditions={"bought": True}),
+            "blacklisted_actions": ["buy"],
+            **extra,
+        }
+
+    def test_spent_action_gets_its_own_suggestion(self) -> None:
+        buy = replace(make_action("buy", eff={"bought": True}), can_rerun=False)
+        updates = GoapPlanner([buy])(self._state(action_failure_counts={}))
+
+        assert updates["status"] == "no_plan"
+        explanation = updates["no_plan_explanation"]
+        assert explanation["spent_actions"] == ["buy"]
+        assert "already ran" in explanation["suggestion"]
+        assert "can_rerun" in explanation["suggestion"]
+        assert "transient" not in explanation["suggestion"]
+
+    def test_failed_action_keeps_the_retry_suggestion(self) -> None:
+        buy = make_action("buy", eff={"bought": True})
+        updates = GoapPlanner([buy])(self._state(action_failure_counts={"buy": 1}))
+
+        explanation = updates["no_plan_explanation"]
+        assert "spent_actions" not in explanation
+        assert "denied_actions" not in explanation
+        assert "max_retries" in explanation["suggestion"]
+
+    def test_denied_action_is_explained_as_a_decision(self) -> None:
+        """An operator's denial is not a transient failure: retries and QoS
+        are the wrong advice, and the explanation must name the denial."""
+        buy = make_action("buy", eff={"bought": True})
+        denial = ActionResult(
+            action_name="buy",
+            success=False,
+            error="human_approval_denied: budget frozen",
+            state_before={},
+            state_after={},
+        )
+        updates = GoapPlanner([buy])(
+            self._state(action_failure_counts={"buy": 1}, execution_history=[denial])
+        )
+
+        explanation = updates["no_plan_explanation"]
+        assert explanation["denied_actions"] == ["buy"]
+        assert "spent_actions" not in explanation
+        suggestion = explanation["suggestion"]
+        assert "denied" in suggestion and "buy" in suggestion
+        assert "budget frozen" in suggestion
+        assert "stuck handler" in suggestion
+        assert "max_retries" not in suggestion
+        assert "transient" not in suggestion
