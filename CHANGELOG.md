@@ -314,6 +314,12 @@ default behaviours change; each has an explicit opt-in that restores the
   `id-token: write` instead of `write-all`; the PR quality report updates
   one sticky comment; the scheduled full matrix runs weekly; the coverage
   badge uses the same 80% floor as the quality gate.
+- The README's MFCQI badge shows a measured number. The badge workflow
+  (now `Update Badges`) runs `mfcqi badge langgoap` on every push to
+  `main`, before the test suite so a red test never leaves a stale
+  value, and publishes the result to the gist that serves the coverage
+  badge. The hand-maintained `.github/badges/mfcqi.json`, which had read
+  0.90 since April 2026 while CI measured 0.81, is removed.
 - `@pytest.mark.api` tests skip when `OPENAI_API_KEY` is unset instead of
   erroring, the `MemorySaver` checkpoint tests live in their own module
   so a missing Docker daemon no longer hides them, the Docker probe times

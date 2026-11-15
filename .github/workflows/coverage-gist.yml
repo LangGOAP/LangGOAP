@@ -1,4 +1,4 @@
-name: Update Coverage Badge
+name: Update Badges
 
 on:
   push:
@@ -25,6 +25,31 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --extra checkpoint-postgres --extra checkpoint-redis
+
+      # MFCQI runs before the test suite so a failing test never leaves a
+      # stale quality number on the README. The message and colour are taken
+      # from mfcqi's own badge generator, so the README shows exactly what
+      # ``mfcqi badge langgoap`` prints locally.
+      - name: Compute MFCQI badge
+        id: mfcqi
+        run: |
+          uv run python -m mfcqi badge langgoap -f json -o mfcqi-badge.json
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          badge = json.load(open("mfcqi-badge.json"))
+          print(f"message={badge['message']}")
+          print(f"color={badge['color']}")
+          PY
+
+      - name: Create MFCQI Badge
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_TOKEN }}
+          gistID: ${{ secrets.GIST_ID }}
+          filename: langgoap-mfcqi.json
+          label: MFCQI
+          message: ${{ steps.mfcqi.outputs.message }}
+          color: ${{ steps.mfcqi.outputs.color }}
 
       - name: Run tests with coverage
         run: |
