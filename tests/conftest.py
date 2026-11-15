@@ -2,12 +2,28 @@
 
 from __future__ import annotations
 
+import os
 from datetime import timedelta
 from typing import Any
 
+import pytest
 from dotenv import load_dotenv
 
 load_dotenv()  # Load .env file for API keys (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)
+
+
+@pytest.fixture(autouse=True)
+def _skip_api_tests_without_key(request: pytest.FixtureRequest) -> None:
+    """Skip ``@pytest.mark.api`` tests when no OpenAI key is configured.
+
+    CONTRIBUTING promises live tests self-skip without keys; several
+    api-marked classes construct ``ChatOpenAI`` in a fixture, which raises
+    without ``OPENAI_API_KEY`` (issue #43).  A bare ``pytest`` therefore
+    skips them instead of erroring; ``-m "not api"`` still deselects them.
+    """
+    if request.node.get_closest_marker("api") and not os.environ.get("OPENAI_API_KEY"):
+        pytest.skip("OPENAI_API_KEY not set; skipping live-API test")
+
 
 from langgoap.actions import ActionSpec
 from langgoap.planner.types import Plan

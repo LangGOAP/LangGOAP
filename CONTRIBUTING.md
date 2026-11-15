@@ -52,7 +52,8 @@ uv sync
 
 Google OR-Tools (CP-SAT) is a core dependency, so the CSP integration
 tests run on a fresh clone without any optional extras. Optional
-extras (`checkpoint-postgres`, `checkpoint-redis`, `cli`, `deepagents`)
+extras (`checkpoint-postgres`, `checkpoint-redis`, `deepagents`; the CLI
+is part of the core install)
 are documented in `pyproject.toml` and only needed if you are working
 on those specific integrations.
 

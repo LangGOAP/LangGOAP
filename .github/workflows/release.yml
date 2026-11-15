@@ -103,25 +103,30 @@ jobs:
               "langgoap==$VERSION" \
           )
 
-      - name: Install test dependencies
-        run: uv sync --dev --extra checkpoint-postgres --extra checkpoint-redis
-
-      - name: Reinstall package from Test PyPI
-        env:
-          VERSION: ${{ needs.test-release.outputs.version }}
-        run: |
-          uv pip install --system \
-            --index-strategy unsafe-best-match \
-            --extra-index-url https://test.pypi.org/simple/ \
-            --force-reinstall --no-deps \
-            "langgoap==$VERSION"
-
-      - name: Run full test suite
+      - name: Run the test suite against the published wheel
         env:
           OPENAI_API_KEY: ""
+          VERSION: ${{ needs.test-release.outputs.version }}
         run: |
-          uv run python -m pytest -vv --log-level=CRITICAL -m "not api"
-          echo "✅ All tests passed on Python ${{ matrix.python-version }}"
+          # A throwaway venv holds ONLY the published wheel plus the test
+          # tooling.  ``uv sync`` would install the checkout as editable and
+          # ``uv run`` would test that instead of the artifact.
+          uv venv /tmp/wheel-venv --python ${{ matrix.python-version }}
+          uv export --only-group dev --no-hashes --no-emit-project --no-emit-workspace \
+            -o /tmp/dev-requirements.txt
+          uv pip install --python /tmp/wheel-venv/bin/python -r /tmp/dev-requirements.txt
+          uv pip install --python /tmp/wheel-venv/bin/python \
+            --index-strategy unsafe-best-match \
+            --extra-index-url https://test.pypi.org/simple/ \
+            "langgoap[checkpoint-postgres,checkpoint-redis]==$VERSION"
+          # The checkout's own package directory must not shadow the wheel.
+          mv langgoap /tmp/langgoap-source-moved-aside
+          /tmp/wheel-venv/bin/python -c "import langgoap, pathlib; p = pathlib.Path(langgoap.__file__); assert 'site-packages' in p.parts, p; print('testing', p)"
+          /tmp/wheel-venv/bin/python -m pytest tests -vv --log-level=CRITICAL -m "not api" --ignore=tests/integration/test_checkpointing.py -p no:cacheprovider
+          mv /tmp/langgoap-source-moved-aside langgoap
+
+      - name: Install dev tooling for static checks
+        run: uv sync --dev --extra checkpoint-postgres --extra checkpoint-redis
 
       - name: Run type checking
         run: |
@@ -217,24 +222,18 @@ jobs:
           echo "min-versions=$MIN_VERSIONS" >> "$GITHUB_OUTPUT"
           echo "Minimum versions: $MIN_VERSIONS"
 
-      - name: Install test dependencies
-        run: uv sync --dev --extra checkpoint-postgres --extra checkpoint-redis
-
-      - name: Install minimum dependency versions
-        if: steps.min-versions.outputs.min-versions != ''
-        env:
-          MIN_VERSIONS: ${{ steps.min-versions.outputs.min-versions }}
+      - name: Install the lowest allowed version of every direct dependency
+        # ``--resolution lowest-direct`` resolves each declared dependency to
+        # the minimum its range admits (transitive dependencies stay at their
+        # best versions), so the suite runs against the floors in
+        # pyproject.toml rather than against whatever ``uv pip install``
+        # happened to pick (the old job only pinned two packages).
         run: |
-          if [ -n "$MIN_VERSIONS" ]; then
-            # Intentional word-splitting on $MIN_VERSIONS: each space-separated
-            # entry is a distinct pip requirement spec.
-            # shellcheck disable=SC2086
-            uv pip install --system $MIN_VERSIONS
-            echo "✅ Installed minimum versions"
-          fi
+          uv sync --dev --extra checkpoint-postgres --extra checkpoint-redis \
+            --resolution lowest-direct --upgrade
+          uv pip list | grep -i -E "^(langgraph|langchain|pydantic|click|ortools|typing)"
 
       - name: Run tests with minimum versions
-        if: steps.min-versions.outputs.min-versions != ''
         env:
           OPENAI_API_KEY: ""
         run: |

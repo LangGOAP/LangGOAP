@@ -39,7 +39,8 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --extra checkpoint-postgres --extra checkpoint-redis
+        # ``deepagents`` carries a Python>=3.11 marker and is skipped on 3.10.
+        run: uv sync --extra checkpoint-postgres --extra checkpoint-redis --extra deepagents
 
       - name: Install bc (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
@@ -105,6 +106,41 @@ jobs:
               echo "✅ MFCQI score meets quality threshold"
             fi
           fi
+
+
+  # Nightly only: resolve every dependency to its newest allowed release
+  # and run the suite against that, so ecosystem drift (LangGraph,
+  # langgraph-checkpoint, langchain-core, ...) is caught before a user
+  # hits it with a fresh ``pip install langgoap``.  The lock file in the
+  # repository is not modified.
+  test-latest-dependencies:
+    name: Latest resolvable dependencies (nightly)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Upgrade the lock to the newest allowed releases
+        run: uv lock --upgrade
+
+      - name: Install dependencies
+        run: uv sync --extra checkpoint-postgres --extra checkpoint-redis
+
+      - name: Show resolved versions
+        run: uv pip list | grep -i -E "langgraph|langchain|langsmith|ormsgpack|pydantic|ortools"
+
+      - name: Run tests
+        run: uv run python -m pytest -m "not api" --log-level=CRITICAL
 
 
   quality-gate:
