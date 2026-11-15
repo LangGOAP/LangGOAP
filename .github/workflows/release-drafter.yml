@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - main
+  # The autolabeler only sees pull requests; pull_request_target keeps the
+  # write token for forks while running the action from the base branch.
+  pull_request_target:
+    types: [opened, reopened, synchronize, edited]
 
 permissions: {}
 jobs:

@@ -27,7 +27,7 @@ cost stays constant and their write cost is a single ``get`` + single
 ``put``.  Older IDs drop off the index but the underlying records are
 left in the primary namespace, reachable via direct UUID lookup.
 
-Trade-offs accepted for v0.1.0:
+Trade-offs accepted in this design:
 
 * **Read amplification** — two ``get()`` calls per returned record.
   Execution history is diagnostic, not a hot path.
@@ -36,7 +36,7 @@ Trade-offs accepted for v0.1.0:
 * **Race conditions** — concurrent writers to the same ``goal_hash``
   can lose an ID if they read-modify-write the index simultaneously.
   ``GoapObserver`` records exactly once at the end of the loop so the
-  race window is small; a transactional index is post-v0.1.0.
+  race window is small; a transactional index is future work.
 """
 
 from __future__ import annotations

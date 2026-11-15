@@ -58,6 +58,28 @@ class TestCloudBalancingFeasible:
         }
         assert assigned_processes == {p.name for p in PROCESSES}
 
+    def test_objective_picks_the_cheapest_feasible_assignment(self) -> None:
+        """``minimize cost_usd`` must find the two-on-``server_small`` placement.
+
+        The 16 assignments all cost the same to A* (one unit per action), so
+        the objective alone decides.  ``p1`` needs ``server_big`` (memory);
+        ``server_small`` can take two of the three remaining processes
+        (network 6 bounds the pair), giving ``480 * 2 + 66 * 2 = 1092``.
+        Single-exclusion alternatives only ever reached ``1506``.
+        """
+        plan_obj = pipeline_plan(
+            PlanningState.from_dict(cloud_balancing_start()),
+            cloud_balancing_goal(),
+            cloud_balancing_actions(),
+        )
+
+        assert plan_obj is not None and plan_obj.metadata.csp is not None
+        usage = {u.key: u.total for u in plan_obj.metadata.csp.resource_usage}
+        assert usage["cost_usd"] == pytest.approx(1092.0)
+        on_small = [a.name for a in plan_obj.actions if a.name.endswith("server_small")]
+        assert len(on_small) == 2
+        assert "assign_p1_to_server_small" not in on_small
+
     def test_all_capacities_respected(self) -> None:
         """No server exceeds its cpu/mem/net capacity."""
         actions = cloud_balancing_actions()

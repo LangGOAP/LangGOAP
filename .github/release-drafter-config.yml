@@ -1,11 +1,11 @@
 name-template: 'v$RESOLVED_VERSION'
 tag-template: 'v$RESOLVED_VERSION'
+# Pre-1.0 policy: a breaking change bumps the minor version, features too;
+# everything else is a patch.  Revisit when 1.0 ships.
 version-resolver:
-  major:
-    labels:
-      - 'breakingchange'
   minor:
     labels:
+      - 'breakingchange'
       - 'feature'
       - 'enhancement'
   patch:
@@ -63,6 +63,8 @@ categories:
       - 'bugfix'
       - 'bug'
       - 'BUG'
+  - title: '📚 Documentation'
+    label: 'documentation'
   - title: '🧰 Maintenance'
     label: 'maintenance'
 change-template: '- $TITLE (#$NUMBER)'

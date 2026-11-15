@@ -7,8 +7,10 @@ against a small, deterministic flexible job shop instance:
 - CSP validation: primary plan feasible under no cap, infeasible under
   a ``cost_usd=130`` hard cap.
 - CSP enumeration + multi-plan optimization: with the hard cap the
-  pipeline blacklists each action in the rejected plan and picks the
-  single-blacklist alternative with the lowest ``cost_usd``.
+  pipeline enumerates alternatives breadth-first over excluded actions
+  (up to ``max_alternatives``, 8 by default) and picks the candidate with
+  the lowest ``cost_usd``; the global minimum lies beyond that budget and
+  is reached by encoding the objective as the A* cost.
 - CSP temporal scheduling: 7-hour critical-path makespan for the
   greedy plan (three jobs run in parallel; ``gamma`` is the bottleneck).
 - Hard / soft / infeasible score decomposition.
@@ -32,6 +34,9 @@ from datetime import timedelta
 import pytest
 from langgraph.store.memory import InMemoryStore
 from tutorial_examples.data.flexible_job_shop_instance import (
+    ALL_STANDARD_COST_USD,
+    ALL_STANDARD_MAKESPAN_HOURS,
+    ALL_STANDARD_TOTAL_COST,
     ALT_PLAN_COST,
     ALT_PLAN_COST_USD,
     ALT_PLAN_DURATION_HOURS,
@@ -83,12 +88,17 @@ GREEDY_ACTION_NAMES = {
     "finalize_gamma_express",
 }
 ALT_ACTION_NAMES = {
-    "prepare_alpha_express",
+    "prepare_alpha_standard",
     "finalize_alpha_express",
-    "prepare_beta_express",
+    "prepare_beta_standard",
     "finalize_beta_express",
-    "prepare_gamma_standard",
+    "prepare_gamma_express",
     "finalize_gamma_express",
+}
+ALL_STANDARD_ACTION_NAMES = {
+    f"{op}_{job}_standard"
+    for op in ("prepare", "finalize")
+    for job in ("alpha", "beta", "gamma")
 }
 EXPECTED_ACTION_COUNT = 12  # 3 jobs x 2 ops x 2 modes
 EXPECTED_STATE_FLAG_COUNT = 6  # 3 jobs x 2 ops
@@ -290,10 +300,15 @@ class TestGreedyPlan:
 
 class TestMinimizeObjectiveSelection:
     """The default goal declares ``cost_usd -> MINIMIZE``.  The pipeline
-    compares the greedy plan against its single-blacklist alternatives and
-    CP-SAT picks the lowest ``cost_usd`` among them: ``prepare_gamma_standard``
-    saves $25 for two extra hours.  Before issue #12 the objective was
-    silently ignored whenever the greedy plan passed the hard checks."""
+    compares the greedy plan against alternatives enumerated breadth-first
+    over excluded actions and CP-SAT picks the lowest ``cost_usd`` among
+    them.  With the default budget of 8 the search reaches two swaps away,
+    and the cheapest such plan takes the standard mode for the alpha and
+    beta prepares: $120 for four extra duration hours and no extra makespan.
+    Before issue #12 the objective was silently ignored whenever the greedy
+    plan passed the hard checks.  The enumeration is a bounded refinement,
+    not a global optimiser: the all-standard plan costs $57 but lies six
+    swaps away; encoding ``cost_usd`` as the A* cost reaches it directly."""
 
     def _plan(self):
         return pipeline_plan(
@@ -302,7 +317,7 @@ class TestMinimizeObjectiveSelection:
             flexible_job_shop_actions(),
         )
 
-    def test_minimize_picks_prepare_gamma_standard_without_any_cap(self) -> None:
+    def test_minimize_picks_the_two_standard_prepares_without_any_cap(self) -> None:
         plan_obj = self._plan()
         assert plan_obj is not None
         assert set(plan_obj.action_names) == ALT_ACTION_NAMES
@@ -334,24 +349,65 @@ class TestMinimizeObjectiveSelection:
         assert len(csp.schedule) == len(ALT_ACTION_NAMES)
         assert csp.makespan == timedelta(hours=ALT_PLAN_MAKESPAN_HOURS)
 
+    def test_default_budget_stays_within_two_swaps_of_the_greedy_plan(self) -> None:
+        """Breadth-first enumeration with eight alternatives covers the six
+        single swaps and the first two double swaps, no further."""
+        plan_obj = self._plan()
+        assert plan_obj is not None
+        assert len(set(plan_obj.action_names) - GREEDY_ACTION_NAMES) == 2
+
+    def test_wider_budget_reaches_the_all_standard_minimum(self) -> None:
+        plan_obj = pipeline_plan(
+            PlanningState.from_dict(flexible_job_shop_start()),
+            flexible_job_shop_goal(),
+            flexible_job_shop_actions(),
+            max_alternatives=63,  # every other mode combination
+        )
+        assert plan_obj is not None and plan_obj.metadata.csp is not None
+        assert set(plan_obj.action_names) == ALL_STANDARD_ACTION_NAMES
+        assert plan_obj.total_cost == ALL_STANDARD_TOTAL_COST
+        assert plan_obj.score.soft == -ALL_STANDARD_COST_USD
+        assert plan_obj.metadata.csp.makespan == timedelta(
+            hours=ALL_STANDARD_MAKESPAN_HOURS
+        )
+
+    def test_objective_encoded_as_astar_cost_reaches_the_global_minimum(self) -> None:
+        """When an objective should dominate, make it the action cost: A*
+        then finds the global minimum without any alternative enumeration."""
+        from dataclasses import replace
+
+        usd_actions = [
+            replace(a, cost=float(a.resources["cost_usd"]))
+            for a in flexible_job_shop_actions()
+        ]
+        plan_obj = pipeline_plan(
+            PlanningState.from_dict(flexible_job_shop_start()),
+            flexible_job_shop_goal(),
+            usd_actions,
+        )
+        assert plan_obj is not None and plan_obj.metadata.csp is not None
+        assert set(plan_obj.action_names) == ALL_STANDARD_ACTION_NAMES
+        assert plan_obj.total_cost == ALL_STANDARD_COST_USD
+        assert plan_obj.score.soft == -ALL_STANDARD_COST_USD
+
 
 # ---------------------------------------------------------------------------
-# Hard cap → enumeration selects prepare_gamma_standard alternative
+# Hard cap → enumeration selects the two-standard-prepares alternative
 # ---------------------------------------------------------------------------
 
 
 class TestHardCapEnumeration:
-    """The ``HARD_COST_CAP`` is tuned so the greedy plan fails CSP
-    validation and the pipeline's single-blacklist enumeration finds
-    exactly one unambiguous best alternative: blacklist
-    ``prepare_gamma_express`` → use ``prepare_gamma_standard``.
+    """The ``HARD_COST_CAP`` makes the greedy plan fail CSP validation; the
+    pipeline's breadth-first enumeration then offers the candidates within
+    two swaps and CP-SAT picks the cheapest that meets the cap:
+    ``prepare_alpha_standard`` + ``prepare_beta_standard`` ($120).
 
     This is the cleanest demonstration in the tutorial catalog of the
     ``planner/pipeline.py::enumerate_alternatives`` → ``optimize_plans``
     path running together.
     """
 
-    def test_hard_cap_picks_prepare_gamma_standard_alternative(self) -> None:
+    def test_hard_cap_picks_the_two_standard_prepares(self) -> None:
         goal = flexible_job_shop_goal(max_cost_usd=HARD_COST_CAP, max_cost_level="hard")
         plan_obj = pipeline_plan(
             PlanningState.from_dict(flexible_job_shop_start()),
@@ -408,24 +464,25 @@ class TestHardCapEnumeration:
         assert plan_obj.score.soft == -ALT_PLAN_COST_USD
         assert plan_obj.score.is_feasible() is True
 
-    def test_alternative_plan_makespan_matches_gamma_critical_path(self) -> None:
-        """The alternative plan's critical path is ``gamma_standard``.
+    def test_alternative_plan_makespan_stays_at_seven_hours(self) -> None:
+        """The alternative's standard prepares stretch alpha and beta, but
+        neither passes gamma's seven-hour chain.
 
-        Re-plan with ``prepare_gamma_express`` blacklisted and the
-        hard-only goal so the alternative is the primary plan and
-        ``validate_plan()`` runs CP-SAT temporal scheduling on it:
+        Re-plan with the two express prepares blacklisted and the hard-only
+        goal so the alternative is the primary plan and ``validate_plan()``
+        runs CP-SAT temporal scheduling on it:
 
-        - alpha: 2+1 = 3h
-        - beta:  3+2 = 5h
-        - gamma: 6+3 = 9h  ← new critical path (prepare_gamma_standard)
+        - alpha: 4+1 = 5h
+        - beta:  5+2 = 7h
+        - gamma: 4+3 = 7h
 
-        Three parallel pipelines → makespan = max() = 9h.
+        Three parallel pipelines → makespan = max() = 7h.
         """
         plan_obj = pipeline_plan(
             PlanningState.from_dict(flexible_job_shop_start()),
             _greedy_goal(),
             flexible_job_shop_actions(),
-            blacklisted_actions=["prepare_gamma_express"],
+            blacklisted_actions=["prepare_alpha_express", "prepare_beta_express"],
         )
         assert plan_obj is not None
         assert set(plan_obj.action_names) == ALT_ACTION_NAMES
@@ -514,8 +571,9 @@ class TestSoftCap:
     """
 
     def test_soft_cap_below_every_alternative_penalizes_soft_score(self) -> None:
-        # SOFT_CAP (100) is below every single-blacklist alternative, so
-        # the cheapest-USD plan ($125) is selected and penalized by $25.
+        # SOFT_CAP (100) is below every alternative within the default
+        # budget, so the cheapest-USD candidate ($120) is selected and
+        # penalized by its $20 overflow.
         goal = flexible_job_shop_goal(max_cost_usd=SOFT_CAP, max_cost_level="soft")
         plan_obj = pipeline_plan(
             PlanningState.from_dict(flexible_job_shop_start()),
@@ -541,7 +599,7 @@ class TestSoftCap:
 
     def test_soft_cap_met_by_an_alternative_is_not_violated(self) -> None:
         # The greedy plan ($150) breaks a soft cap at HARD_COST_CAP (130);
-        # the $125 alternative honours it, so selection avoids the penalty.
+        # the $120 alternative honours it, so selection avoids the penalty.
         goal = flexible_job_shop_goal(max_cost_usd=HARD_COST_CAP, max_cost_level="soft")
         plan_obj = pipeline_plan(
             PlanningState.from_dict(flexible_job_shop_start()),
@@ -676,11 +734,11 @@ class TestEndToEndExecution:
         )
         assert result["status"] == "goal_achieved"
         executed = [r.action_name for r in result["execution_history"]]
-        # The alternative plan swaps in prepare_gamma_standard and
-        # therefore prepare_gamma_express must NOT appear in the
-        # executed history.
-        assert "prepare_gamma_standard" in executed
-        assert "prepare_gamma_express" not in executed
+        # The alternative plan swaps in the standard alpha and beta prepares,
+        # so their express modes must NOT appear in the executed history.
+        assert {"prepare_alpha_standard", "prepare_beta_standard"} <= set(executed)
+        assert "prepare_alpha_express" not in executed
+        assert "prepare_beta_express" not in executed
 
     def test_graph_invoke_with_tracer_and_history_records_one_execution(
         self,
@@ -716,7 +774,7 @@ class TestEndToEndExecution:
         record = records[0]
         assert record.outcome == "success"
         # The default goal minimizes cost_usd, so the executed plan is the
-        # prepare_gamma_standard alternative (see TestMinimizeObjectiveSelection).
+        # two-standard-prepares alternative (see TestMinimizeObjectiveSelection).
         assert set(record.plan_actions) == ALT_ACTION_NAMES
         # Expected cost is the A* total cost; actual matches because
         # every action in this tutorial is deterministic and succeeds
@@ -799,5 +857,5 @@ class TestNaturalLanguageIntake:
         assert result["status"] == "goal_achieved"
         executed = [r.action_name for r in result["execution_history"]]
         assert set(executed) == ALT_ACTION_NAMES
-        assert "prepare_gamma_standard" in executed
-        assert "prepare_gamma_express" not in executed
+        assert "prepare_alpha_standard" in executed
+        assert "prepare_alpha_express" not in executed

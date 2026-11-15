@@ -238,21 +238,22 @@ class TestProjectJobSchedulingSoftBudget:
         budget_usage = usage["budget"]
         assert budget_usage.level == "soft"
         # A soft cap is a preference (issue #12): the pipeline compares the
-        # primary plan against its single-blacklist alternatives and picks
-        # the best trade-off between the MINIMIZE duration objective and
-        # the weighted budget overflow.  No alternative meets the cap of
-        # 20, so the chosen plan is still in violation, but by less than
-        # the primary's 32.
-        assert budget_usage.satisfied is False
+        # primary plan against alternatives enumerated breadth-first (one
+        # mode swap away, then two) and picks the best trade-off between the
+        # MINIMIZE duration objective and the weighted budget overflow.  A
+        # single swap cannot meet the cap of 20 (best soft score -20); the
+        # two-swap plan frontend_slow + backend_slow meets it exactly with
+        # soft score -18, so it wins and the overflow term vanishes.
+        assert budget_usage.satisfied is True
+        assert budget_usage.total == pytest.approx(20.0)
         assert budget_usage.total < PRIMARY_BUDGET
-        assert budget_usage.total > 20.0
 
-        # soft = -duration_total - overflow(budget_total - 20)
+        # soft = -duration_total - overflow, and the overflow is zero here
         duration_total = usage["duration_hours"].total
-        overflow = budget_usage.total - 20.0
         assert isinstance(plan_obj.score, HardSoftScore)
         assert plan_obj.score.hard == 0.0
-        assert plan_obj.score.soft == pytest.approx(-(duration_total + overflow))
+        assert plan_obj.score.soft == pytest.approx(-duration_total)
+        assert plan_obj.score.soft > -20.0  # better than the best single swap
 
     def test_soft_budget_primary_plan_alone_would_be_penalized(self) -> None:
         """Scoring semantics independent of selection: validating the

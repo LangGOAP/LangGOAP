@@ -150,20 +150,32 @@ GREEDY_DURATION_HOURS = 15.0  # 2+1+3+2+4+3
 # CP-SAT runs the three chains in parallel, so makespan is max() = 7h.
 GREEDY_MAKESPAN_HOURS = 7.0
 
-# Alternative chosen when the pipeline enumerates after blacklisting
-# ``prepare_gamma_express``:
-#   every *_express except prepare_gamma, which becomes _standard.
-ALT_PLAN_COST = 16.0  # 2+1+3+2+5+3
-ALT_PLAN_COST_USD = 125.0  # 20+10+30+20+15+30
-ALT_PLAN_DURATION_HOURS = 17.0  # 2+1+3+2+6+3
-# alpha still 3h, beta still 5h, gamma prepare 6h + finalize 3h = 9h.
-ALT_PLAN_MAKESPAN_HOURS = 9.0
+# Alternative the pipeline selects for ``cost_usd -> MINIMIZE`` with the
+# default ``max_alternatives`` (8): alternatives are enumerated breadth-first
+# over excluded actions, so the search reaches plans two swaps away from
+# the greedy plan.  The cheapest of those swaps the two prepares whose
+# standard mode saves the most without stretching the critical path:
+#   prepare_alpha_standard + prepare_beta_standard, everything else express.
+ALT_PLAN_COST = 17.0  # 3+1+4+2+4+3
+ALT_PLAN_COST_USD = 120.0  # 8+10+12+20+40+30
+ALT_PLAN_DURATION_HOURS = 19.0  # 4+1+5+2+4+3
+# alpha 4h + 1h = 5h, beta 5h + 2h = 7h, gamma still 4h + 3h = 7h.
+ALT_PLAN_MAKESPAN_HOURS = 7.0
 
-# Hard cap tuned so exactly one single-blacklist alternative passes.
+# The global minimum of ``cost_usd`` is every mode standard.  It lies six
+# swaps away from the greedy plan, beyond the default enumeration budget;
+# the notebook reaches it by widening ``max_alternatives`` or by encoding
+# ``cost_usd`` as the A* cost (see ``TestMinimizeObjectiveSelection``).
+ALL_STANDARD_TOTAL_COST = 21.0  # 3+2+4+3+5+4
+ALL_STANDARD_COST_USD = 57.0  # 8+4+12+8+15+10
+ALL_STANDARD_MAKESPAN_HOURS = 10.0  # gamma: 6h + 4h
+
+# Hard cap the greedy plan ($150) breaks; several enumerated alternatives
+# pass it and selection picks the cheapest (``ALT_PLAN_COST_USD``).
 HARD_COST_CAP = 130.0
 
-# Cap strictly below every single-blacklist alternative's ``cost_usd``.
-# No alternative can rescue the plan → pipeline returns INFEASIBLE.
+# Cap strictly below every one of the 64 mode combinations (the cheapest
+# costs $57).  No alternative can rescue the plan → pipeline returns INFEASIBLE.
 IMPOSSIBLE_HARD_CAP = 50.0
 
 # Cap below the greedy aggregate but declared ``soft``.  The plan stays
@@ -180,6 +192,9 @@ __all__ = [
     "GREEDY_COST_USD",
     "GREEDY_DURATION_HOURS",
     "GREEDY_MAKESPAN_HOURS",
+    "ALL_STANDARD_COST_USD",
+    "ALL_STANDARD_MAKESPAN_HOURS",
+    "ALL_STANDARD_TOTAL_COST",
     "ALT_PLAN_COST",
     "ALT_PLAN_COST_USD",
     "ALT_PLAN_DURATION_HOURS",
