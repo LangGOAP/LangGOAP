@@ -24,7 +24,7 @@ EXAMPLES = ROOT / "examples"
 
 
 def _read(rel: str) -> str:
-    return (ROOT / rel).read_text()
+    return (ROOT / rel).read_text(encoding="utf-8")
 
 
 def _text_files(*roots: str) -> list[Path]:
@@ -78,7 +78,9 @@ class TestNotebookCatalog:
         for path in EXAMPLES.rglob("*.ipynb"):
             if ".ipynb_checkpoints" in path.parts:
                 continue
-            kernel = json.loads(path.read_text())["metadata"].get("kernelspec", {})
+            kernel = json.loads(path.read_text(encoding="utf-8"))["metadata"].get(
+                "kernelspec", {}
+            )
             assert kernel.get("name") == "python3", path
 
     def test_catalog_docstring_is_version_neutral(self) -> None:
@@ -98,7 +100,7 @@ class TestStaleText:
         offenders = [
             str(path.relative_to(ROOT))
             for path in _text_files("langgoap", "tests", "examples")
-            if _PRIVATE_TREE.search(path.read_text(errors="ignore"))
+            if _PRIVATE_TREE.search(path.read_text(encoding="utf-8", errors="ignore"))
         ]
         assert offenders == []
 
@@ -107,7 +109,8 @@ class TestStaleText:
             str(path.relative_to(ROOT))
             for path in _text_files("tests", "examples")
             if path != Path(__file__)
-            and "LANGGOAP_RUN_LIVE_DEMO" in path.read_text(errors="ignore")
+            and "LANGGOAP_RUN_LIVE_DEMO"
+            in path.read_text(encoding="utf-8", errors="ignore")
         ]
         assert offenders == []
 
@@ -134,6 +137,6 @@ class TestStaleText:
     def test_bench_marker_is_gone(self) -> None:
         assert "bench:" not in _read("pyproject.toml")
         assert not any(
-            "pytest.mark.bench" in p.read_text()
+            "pytest.mark.bench" in p.read_text(encoding="utf-8")
             for p in (ROOT / "tests/benchmarks").glob("*.py")
         )

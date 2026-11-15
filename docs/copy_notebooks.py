@@ -123,7 +123,7 @@ def rewrite_relative_links(markdown: str, notebook_dir: Path) -> str:
 
 def _copy_notebook(src_file: Path, dst_file: Path) -> None:
     """Copy one notebook, rewriting the links in its Markdown cells."""
-    notebook = json.loads(src_file.read_text())
+    notebook = json.loads(src_file.read_text(encoding="utf-8"))
     for cell in notebook.get("cells", []):
         if cell.get("cell_type") != "markdown":
             continue
@@ -131,7 +131,9 @@ def _copy_notebook(src_file: Path, dst_file: Path) -> None:
         cell["source"] = rewrite_relative_links(text, src_file.parent).splitlines(
             keepends=True
         )
-    dst_file.write_text(json.dumps(notebook, indent=1, ensure_ascii=False) + "\n")
+    dst_file.write_text(
+        json.dumps(notebook, indent=1, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
 
 
 def copy_notebooks() -> None:
