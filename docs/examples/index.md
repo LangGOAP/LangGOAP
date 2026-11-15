@@ -7,6 +7,16 @@ repository under `examples/`.
 
 - `screencast/research_agent/screencast.ipynb` — four-way head-to-head (`create_react_agent` baseline vs. hand-wired `StateGraph` vs. LangGOAP vs. LangGOAP-under-disruption) with real OpenAI + Tavily costs and Tavily-key revocation as the climax.
 
+## LangGraph tutorial refactors
+
+Official LangGraph tutorials rewritten as GOAP. Each notebook runs the
+condensed hand-wired original, the GOAP version and the GOAP version under
+disruption, hermetically, backed by an integration test.
+
+- `screencast/llm_compiler/llm_compiler_screencast.ipynb` — LLMCompiler: `$N` dependency references, a hand-written scheduler and a joiner that emits `Replan` become preconditions, `executor="parallel"` and the observer's blacklist-and-replan loop.
+- `screencast/email_assistant/email_assistant_screencast.ipynb` — executive-ai-assistant: three message-shape routers with `ValueError` fall-throughs and four Agent Inbox handlers become triage facts as preconditions, `require_human_approval=True` and a Pydantic form; a denied send is re-planned around, and a new process resumes a paused thread.
+- `screencast/weather_alert/weather_alert_screencast.ipynb` — GenAI_Agents weather disaster management: a router with an unreachable branch, an `input()` approval node and a swallowed SMTP failure become a sensor's facts as preconditions, `require_human_approval=True` on `approve_alert`, an `ActionQos` retry with an SMS fallback, and a stuck handler that relaxes the goal when the operator says no.
+
 ## Basics
 
 Short primers — each notebook exercises a single mechanic.
@@ -65,6 +75,16 @@ Complete end-to-end walkthroughs across three tiers of complexity.
 :caption: Flagship screencast
 
 screencast/research_agent/screencast
+```
+
+```{toctree}
+:hidden:
+:maxdepth: 1
+:caption: LangGraph tutorial refactors
+
+screencast/llm_compiler/llm_compiler_screencast
+screencast/email_assistant/email_assistant_screencast
+screencast/weather_alert/weather_alert_screencast
 ```
 
 ```{toctree}

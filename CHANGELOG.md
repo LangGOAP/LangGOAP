@@ -461,6 +461,26 @@ useful.
 
 ### Documentation
 
+- **LangGraph tutorial refactors.** `examples/screencast/llm_compiler/`
+  rewrites the LLMCompiler tutorial as GOAP: `$N` dependency references,
+  the hand-written scheduler and the `Replan`-emitting joiner become
+  preconditions, `executor="parallel"` and the observer's
+  blacklist-and-replan loop. `examples/screencast/email_assistant/`
+  rewrites `executive-ai-assistant`: three message-shape routers with
+  `ValueError` fall-throughs and four Agent Inbox handlers become triage
+  facts as preconditions, `require_human_approval=True` and a Pydantic
+  form; a denied send or an invalid form is blacklisted and re-planned
+  around, and a new process resumes a paused thread from the
+  checkpointer. `examples/screencast/weather_alert/` rewrites the
+  GenAI_Agents weather-disaster notebook: a router with an unreachable
+  branch, an `input()` approval node and a swallowed SMTP failure become a
+  sensor's facts as preconditions, `require_human_approval=True` on
+  `approve_alert`, an `ActionQos` retry with an SMS fallback, and a
+  `FunctionalStuckHandler` that relaxes the goal to "log the decision"
+  when the operator denies the alert. Each refactor ships a condensed hermetic `before.py`,
+  `after.py`, `after_disrupted.py`, a generated and executed notebook
+  rendered in the docs, and an integration test that pins the paths, the
+  gates, the disruptions and the async path.
 - The API reference is generated from `langgoap.__all__` by
   `docs/generate_api_index.py`, grouped by the comment headers in
   `langgoap/__init__.py`, and a test fails when the page is stale; it
