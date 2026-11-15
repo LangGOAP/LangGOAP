@@ -50,7 +50,7 @@ class GoapSubgraph:
             NL interpretation must happen before this class is built.
         strategy, tracer, history, sensors, guards, resolvers,
         record_expansions, transition_model, rng, stuck_handlers,
-        max_stuck_iterations, termination_policies, executor: Forwarded verbatim to
+        max_stuck_iterations, termination_policies, executor, history_state: Forwarded verbatim to
             :class:`~langgoap.graph.builder.GoapGraph`; see its docstring.
 
     Example::
@@ -86,6 +86,7 @@ class GoapSubgraph:
         max_stuck_iterations: int = 3,
         termination_policies: list[TerminationPolicy] | None = None,
         executor: Literal["sequential", "parallel"] = "sequential",
+        history_state: Literal["full", "delta", "planning"] = "full",
     ) -> None:
         self.actions = actions
         self.goal = goal
@@ -104,6 +105,7 @@ class GoapSubgraph:
             max_stuck_iterations=max_stuck_iterations,
             termination_policies=termination_policies,
             executor=executor,
+            history_state=history_state,
         )
 
     def compile(self, **compile_kwargs: Any) -> CompiledStateGraph:
@@ -144,6 +146,7 @@ def add_goap_subgraph(
     max_stuck_iterations: int = 3,
     termination_policies: list[TerminationPolicy] | None = None,
     executor: Literal["sequential", "parallel"] = "sequential",
+    history_state: Literal["full", "delta", "planning"] = "full",
 ) -> None:
     """Attach a GOAP sub-graph as a node inside a parent ``StateGraph``.
 
@@ -183,7 +186,7 @@ def add_goap_subgraph(
             checkpointer is normally inherited from the parent).
         strategy, tracer, history, sensors, guards, resolvers,
         record_expansions, transition_model, rng, stuck_handlers,
-        max_stuck_iterations, termination_policies, executor: Forwarded verbatim to
+        max_stuck_iterations, termination_policies, executor, history_state: Forwarded verbatim to
             :class:`~langgoap.graph.builder.GoapGraph`; see its docstring.
     """
     sub = GoapSubgraph(
@@ -202,6 +205,7 @@ def add_goap_subgraph(
         max_stuck_iterations=max_stuck_iterations,
         termination_policies=termination_policies,
         executor=executor,
+        history_state=history_state,
     )
     compiled_sub = sub.compile(**(compile_kwargs or {}))
 

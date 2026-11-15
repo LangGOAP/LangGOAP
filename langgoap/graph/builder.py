@@ -25,6 +25,7 @@ from langgoap.graph.nodes import (
     GoapPlanner,
     ParallelGoapExecutor,
 )
+from langgoap.graph.nodes._execution import _validate_history_state
 from langgoap.graph.state import (
     GoapState,
     GoapStateChannels,
@@ -111,6 +112,15 @@ class GoapGraph:
             ``"parallel"`` wires :class:`ParallelGoapExecutor`, which runs
             every independent action of the next wave in one invocation
             (actions requiring human approval always run alone).
+        history_state: What each ``ActionResult`` in ``execution_history``
+            keeps of the world state.  ``"full"`` (default) stores complete
+            before/after snapshots; ``"delta"`` stores only the keys an action
+            changed, with their prior values; ``"planning"`` stores only the
+            keys preconditions, effects and the goal read.  Use a compact mode
+            when the world state carries large non-planning data (documents,
+            LLM output), so checkpoints stop growing with every step
+            (issue #74).  Realised costs are recorded per action and do not
+            depend on the snapshots.
     """
 
     def __init__(
@@ -130,8 +140,10 @@ class GoapGraph:
         max_stuck_iterations: int = 3,
         termination_policies: "list[TerminationPolicy] | None" = None,
         executor: Literal["sequential", "parallel"] = "sequential",
+        history_state: Literal["full", "delta", "planning"] = "full",
     ) -> None:
         ensure_unique_action_names(actions)
+        self._history_state = _validate_history_state(history_state)
         if executor not in ("sequential", "parallel"):
             raise ValueError(
                 f"executor must be 'sequential' or 'parallel', got {executor!r}"
@@ -207,6 +219,7 @@ class GoapGraph:
             transition_model=self._transition_model,
             rng=self._rng,
             actions=self.actions,
+            history_state=self._history_state,
         )
         observer = GoapObserver(
             self.actions,

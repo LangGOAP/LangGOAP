@@ -10,12 +10,16 @@ from typing import Any
 
 from langgoap.actions import ActionSpec, ensure_unique_action_names
 from langgoap.graph.nodes._execution import (
+    HistoryState,
     _apply_result,
     _build_failure,
     _build_guard_block,
     _build_success,
     _check_human_approval,
+    _compact_history,
+    _planning_keys_for,
     _prepare_execution,
+    _validate_history_state,
 )
 from langgoap.graph.nodes._helpers import logger
 from langgoap.graph.state import GoapState, rehydrate_state, serialize_updates
@@ -64,6 +68,12 @@ class GoapExecutor:
             reproducibility should pass a seeded instance.  QoS back-off
             jitter uses a separate, unseeded stream, so retries never
             perturb the sampled effects.
+        history_state: What each ``ActionResult`` keeps of the world state:
+            ``"full"`` (default) both complete snapshots, ``"delta"`` only
+            the keys the action changed with their prior values, or
+            ``"planning"`` only planning-relevant keys.  Bounds checkpoint
+            growth with rich world states (issue #74); the realised cost is
+            recorded separately, so accounting is unaffected.
     """
 
     def __init__(
@@ -74,7 +84,9 @@ class GoapExecutor:
         transition_model: TransitionModel | None = None,
         rng: random.Random | None = None,
         actions: list[ActionSpec] | None = None,
+        history_state: HistoryState = "full",
     ) -> None:
+        self._history_state = _validate_history_state(history_state)
         # Wrap the tracer in SafeTracerProxy at construction so call
         # sites can invoke hooks directly (``self._tracer.on_X(...)``)
         # without per-call try/except scaffolding.  Idempotent if the
@@ -114,7 +126,21 @@ class GoapExecutor:
             self._call_typed(rehydrate_state(state, self._actions))
         )
 
+    def _compact(self, result: dict[str, Any], state: GoapState) -> dict[str, Any]:
+        """Apply ``history_state`` to the history entries of an update."""
+        if self._history_state == "full":
+            return result
+        keys = (
+            _planning_keys_for(state, state.get("plan"), self._actions.values())
+            if self._history_state == "planning"
+            else None
+        )
+        return _compact_history(result, self._history_state, keys)
+
     def _call_typed(self, state: GoapState) -> dict[str, Any]:
+        return self._compact(self._run_sync(state), state)
+
+    def _run_sync(self, state: GoapState) -> dict[str, Any]:
         prep = _prepare_execution(state)
         if isinstance(prep, dict):
             return prep
@@ -198,6 +224,9 @@ class GoapExecutor:
         )
 
     async def _acall_typed(self, state: GoapState) -> dict[str, Any]:
+        return self._compact(await self._run_async(state), state)
+
+    async def _run_async(self, state: GoapState) -> dict[str, Any]:
         prep = _prepare_execution(state)
         if isinstance(prep, dict):
             return prep
