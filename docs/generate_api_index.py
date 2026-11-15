@@ -117,15 +117,15 @@ def render(groups: list[tuple[str, list[str]]]) -> str:
 
 
 def main(argv: list[str]) -> int:
-    content = render(parse_groups(INIT_FILE.read_text()))
+    content = render(parse_groups(INIT_FILE.read_text(encoding="utf-8")))
     if "--check" in argv:
-        if TARGET.read_text() != content:
+        if TARGET.read_text(encoding="utf-8") != content:
             print(
                 f"{TARGET} is stale; run python {Path(__file__).name}", file=sys.stderr
             )
             return 1
         return 0
-    TARGET.write_text(content)
+    TARGET.write_text(content, encoding="utf-8")
     print(f"wrote {TARGET.relative_to(DOCS_DIR.parent)}")
     return 0
 
