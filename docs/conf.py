@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.abspath(".."))
 # -- Project information -----------------------------------------------------
 
 project = "LangGOAP"
-copyright = "2024, Integrallis Software"
+copyright = "2026, Integrallis Software"
 author = "Integrallis Software"
 
 # -- General configuration ---------------------------------------------------
@@ -109,13 +109,16 @@ add_module_names = False
 suppress_warnings = [
     "autodoc",
     "docutils",
-    "myst.xref_missing",
 ]
 
 nb_execution_mode = "off"
 
 # -- Options for autosummary/autodoc output ------------------------------------
 autosummary_generate = True
+# ``langgoap.plan`` (the A* function) and ``langgoap.Plan`` (the class) would
+# share one stub file on a case-insensitive filesystem (macOS, Windows), so
+# the function's stub gets a distinct name.
+autosummary_filename_map = {"langgoap.plan": "langgoap.plan-function"}
 autodoc_typehints = "description"
 autodoc_member_order = "groupwise"
 

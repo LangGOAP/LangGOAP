@@ -362,6 +362,26 @@ default behaviours change; each has an explicit opt-in that restores the
 
 ### Documentation
 
+- The API reference is generated from `langgoap.__all__` by
+  `docs/generate_api_index.py`, grouped by the comment headers in
+  `langgoap/__init__.py`, and a test fails when the page is stale; it
+  documented 63 of the public names before (#66).
+- The concepts page gains sections for pluggable strategies and MCTS,
+  multi-goal decomposition, retries and QoS, human-in-the-loop and typed
+  forms, stuck handlers, early termination, sensors / guards / resolvers,
+  checkpointing, plan explanations, visualization, the CLI and
+  deployment, and Deep Agents / tool interop; `myst.xref_missing` is no
+  longer suppressed (#66).
+- Catalog and stale-text sweep (#67): every basics notebook is rendered
+  in the docs and listed in `examples/README.md`; the notebook counts on
+  the docs landing page match the catalog; the incident screencast
+  notebook is linked; the research-agent screencast uses the standard
+  `python3` kernel; the CHANGELOG dates 0.1.1 and 0.1.2; the removed
+  `LANGGOAP_RUN_LIVE_DEMO` gate, the deleted `SECURITY.md` link and the
+  `cd langgoap` clone step are corrected; docstrings cite upstream
+  repositories instead of the maintainer's private `research/` tree; the
+  copyright year is 2026; the Jupyter image no longer installs the unused
+  `langchain` package; the unused `bench` pytest marker is gone.
 - **Versioned docs document their own release (#60).** The docs workflow
   builds each tag from its own git worktree and virtualenv instead of
   main's checkout, the version switcher's `populate` receives the URL it

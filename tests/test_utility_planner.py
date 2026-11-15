@@ -1,6 +1,6 @@
 """Unit tests for ``langgoap.planner.utility``.
 
-Reference: research/repos/embabel-agent/embabel-agent-api/src/main/
+Reference: https://github.com/embabel/embabel-agent/blob/HEAD/embabel-agent-api/src/main/
   kotlin/com/embabel/plan/utility/UtilityPlanner.kt
 """
 

@@ -1,7 +1,7 @@
 """Integration tests for ``MultiGoal(mode="best_value")`` and ``GoalSpec.value``.
 
 Mirrors Embabel's "best value plan to any goal" semantics on
-``research/repos/embabel-agent/embabel-agent-api/src/test/kotlin/
+``https://github.com/embabel/embabel-agent/blob/HEAD/embabel-agent-api/src/test/kotlin/
 com/embabel/plan/goap/OptimizingGoapPlannerTest.kt``: when several
 goals are simultaneously achievable, the planner selects the goal
 whose **net value** (``value - plan.total_cost``) is highest, not the

@@ -12,7 +12,7 @@ Key advantages over the original:
 - Automatic replanning via observer (not LLM re-prompting)
 - Cost optimization: A* minimizes total action cost
 
-Reference: research/repos/langgraph/docs/docs/tutorials/plan-and-execute/plan-and-execute.ipynb
+Reference: https://github.com/langchain-ai/langgraph/blob/HEAD/docs/docs/tutorials/plan-and-execute/plan-and-execute.ipynb
 """
 
 from __future__ import annotations

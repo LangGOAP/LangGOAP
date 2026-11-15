@@ -1,6 +1,6 @@
 r"""Robot Navigation — Tier 1 primer adapted from unified-planning.
 
-Reference: ``research/repos/unified-planning/docs/notebooks/01-basic-example.ipynb``
+Reference: ``https://github.com/aiplan4eu/unified-planning/blob/HEAD/docs/notebooks/01-basic-example.ipynb``
 where a robot moves between ``NLOC`` locations connected in a chain,
 starting at ``l0`` and seeking ``l9``.
 

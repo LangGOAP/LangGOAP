@@ -98,7 +98,6 @@ def _csp_metadata() -> CSPMetadata:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.bench
 class TestMemoryFootprint:
     """Benchmark per-instance ``sys.getsizeof`` for core dataclasses."""
 
@@ -151,7 +150,6 @@ class TestMemoryFootprint:
         benchmark.extra_info["bytes"] = result
 
 
-@pytest.mark.bench
 class TestSlotsRegression:
     """Assert every core frozen dataclass has ``__slots__`` and lacks ``__dict__``."""
 
@@ -208,7 +206,6 @@ class TestSlotsRegression:
         ), f"{type(obj).__name__} has __dict__ — slots may be missing"
 
 
-@pytest.mark.bench
 class TestAllocationThroughput:
     """Benchmark allocation speed for hot-path objects."""
 

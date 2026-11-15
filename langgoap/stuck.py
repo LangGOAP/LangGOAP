@@ -9,7 +9,7 @@ state / goal) or ``NO_RESOLUTION`` (the next handler is consulted; the
 planner emits ``no_plan`` if no handler resolves).
 
 API mirrors Embabel's StuckHandler contract
-(``research/repos/embabel-agent/embabel-agent-api/src/main/kotlin/
+(``https://github.com/embabel/embabel-agent/blob/HEAD/embabel-agent-api/src/main/kotlin/
 com/embabel/agent/api/common/StuckHandler.kt`` and
 ``MulticastStuckHandlerTest.kt``) with two LangGOAP-specific
 extensions:
@@ -184,7 +184,7 @@ class MulticastStuckHandler:
     aggregated ``NO_RESOLUTION`` whose message lists every handler tried.
 
     Mirrors
-    ``research/repos/embabel-agent/embabel-agent-api/src/main/kotlin/
+    ``https://github.com/embabel/embabel-agent/blob/HEAD/embabel-agent-api/src/main/kotlin/
     com/embabel/agent/api/common/MulticastStuckHandler.kt``.
     """
 

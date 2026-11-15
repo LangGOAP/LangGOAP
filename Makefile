@@ -57,11 +57,12 @@ check: lint find-dead-code test
 
 docs:
 	uv run --group docs python docs/copy_notebooks.py
+	uv run --group docs python docs/generate_api_index.py
 	uv run --group docs sphinx-build -b html docs docs/_build/html
 
 docs-clean:
-	rm -rf docs/_build
-	rm -rf docs/examples/basics docs/examples/tutorials
+	rm -rf docs/_build docs/api/generated
+	rm -rf docs/examples/basics docs/examples/tutorials docs/examples/screencast
 
 docs-serve: docs
 	python -m http.server 8085 --directory docs/_build/html

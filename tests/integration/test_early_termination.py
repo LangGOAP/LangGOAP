@@ -1,9 +1,9 @@
 """Integration tests for ``TerminationPolicy`` in the observer.
 
 Mirrors Embabel's contract on
-``research/repos/embabel-agent/embabel-agent-api/src/test/kotlin/
+``https://github.com/embabel/embabel-agent/blob/HEAD/embabel-agent-api/src/test/kotlin/
 com/embabel/agent/core/EarlyTerminationPolicyTest.kt`` and
-``research/repos/embabel-agent/embabel-agent-api/src/main/kotlin/
+``https://github.com/embabel/embabel-agent/blob/HEAD/embabel-agent-api/src/main/kotlin/
 com/embabel/agent/core/EarlyTerminationPolicy.kt``:
 
 * ``shouldTerminate(agentProcess) -> EarlyTermination | None`` —

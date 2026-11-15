@@ -2,11 +2,11 @@
 
 Reference: Soemers et al., "Enhancements for Real-Time Monte-Carlo
 Tree Search in General Video Game Playing" (CIG 2016), section IV-B
-(``research/papers/tree-reuse-soemers-cig2016.txt:200-224``).
+(Soemers et al., "Enhancements for Real-Time Monte-Carlo Tree Search in General Video Game Playing", CIG 2016).
 Algorithm: between consecutive planning ticks, retain the subtree
 rooted in the child corresponding to the action just played, and
 multiply every stored visit count and score by gamma in [0, 1].
-See ``research/plans/tree-reuse-and-junction-graph.md`` for the
+See the internal "tree-reuse-and-junction-graph" design note (not in the repository) for the
 full design.
 
 Backward-compatibility contract: ``reuse_tree=False`` (the default)

@@ -3,7 +3,7 @@
 Phase 4 of the advanced-planning research track lands an MCTS
 planning strategy as an alternative to A* + CSP.  The node model and
 UCB1 selection rule are adapted from LATS
-(``research/repos/LATS/hotpot/lats.py``) — specifically the ``Node``
+(``https://github.com/lapisrocks/LanguageAgentTreeSearch/blob/HEAD/hotpot/lats.py``) — specifically the ``Node``
 class and its ``uct`` method, which use the canonical c = √2
 exploration constant with a running-mean value estimate.
 
@@ -18,7 +18,7 @@ LangGOAP's node model differs from LATS in two ways:
    re-use the same satisfaction / apply machinery.
 
 Pre-registered experiment:
-``research/experiments/2026-04-20-mcts-vs-astar.md``.
+the internal "2026-04-20-mcts-vs-astar" design note (not in the repository).
 """
 
 from __future__ import annotations
