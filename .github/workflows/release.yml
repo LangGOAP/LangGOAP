@@ -57,7 +57,9 @@ jobs:
   test-release:
     needs: verify-version
     uses: ./.github/workflows/test-release.yml
-    permissions: write-all
+    permissions:
+      contents: read
+      id-token: write  # trusted publishing to Test PyPI
     secrets: inherit
 
   # Run comprehensive pre-release validation

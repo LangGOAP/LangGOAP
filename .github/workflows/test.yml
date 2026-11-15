@@ -8,7 +8,9 @@ on:
       - main
 
   schedule:
-    - cron: "0 2 * * *"
+    # Weekly: the full 15-job matrix nightly on an idle repository is
+    # noise; pushes and pull requests still run it on every change.
+    - cron: "0 2 * * 1"
 
   workflow_dispatch:
 
@@ -248,9 +250,19 @@ jobs:
             </details>
             `;
 
-            github.rest.issues.createComment({
+            // Sticky comment: update the previous quality report instead of
+            // posting a new one per run (issue #61).
+            const marker = '<!-- langgoap-quality-report -->';
+            const { data: comments } = await github.rest.issues.listComments({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: body
+              per_page: 100,
             });
+            const previous = comments.find(c => c.body && c.body.includes(marker));
+            const payload = { owner: context.repo.owner, repo: context.repo.repo, body: `${marker}\n${body}` };
+            if (previous) {
+              await github.rest.issues.updateComment({ ...payload, comment_id: previous.id });
+            } else {
+              await github.rest.issues.createComment({ ...payload, issue_number: context.issue.number });
+            }

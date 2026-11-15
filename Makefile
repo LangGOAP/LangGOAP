@@ -56,8 +56,8 @@ benchmark-compare:
 check: lint find-dead-code test
 
 docs:
-	uv run python docs/copy_notebooks.py
-	uv run sphinx-build -b html docs docs/_build/html
+	uv run --group docs python docs/copy_notebooks.py
+	uv run --group docs sphinx-build -b html docs docs/_build/html
 
 docs-clean:
 	rm -rf docs/_build

@@ -1,8 +1,0 @@
-sphinx>=7.0
-sphinx-book-theme>=1.1.0
-myst-nb>=1.0
-sphinx-design>=0.5
-sphinx-copybutton>=0.5
-sphinx-favicon>=1.0
-sphinxcontrib-mermaid>=1.0
-pyyaml>=6.0

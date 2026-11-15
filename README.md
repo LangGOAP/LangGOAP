@@ -39,7 +39,7 @@ pip install -U langgoap
 LangGOAP provides a planning layer for *any* agent that has to choose tools in a particular order under hard constraints:
 
 - **Deterministic planning** — A classical A* search over your action set produces a checked plan before any tool runs; the same inputs always yield the same plan.
-- **Constraint optimization built in** — Hard resource caps, soft objectives, temporal `IntervalVar` scheduling, and multi-plan Pareto selection via OR-Tools CP-SAT.
+- **Constraint optimization built in** — Hard resource caps, soft objectives, temporal `IntervalVar` scheduling, and multi-plan selection via OR-Tools CP-SAT, plus a standalone `pareto_plans` helper for Pareto filtering of candidate plans.
 - **The plan _is_ a `StateGraph`** — Every plan compiles to a real LangGraph graph, so checkpointers, stores, streaming, `interrupt()`, and LangSmith all just work.
 - **Replans automatically** — When an action fails, the world drifts, or a sensor invalidates a precondition, the executor blacklists the offender and the planner picks a new path without any routing code.
 - **LLM where it earns its keep** — Natural-language goals are parsed once by `GoalInterpreter`; the loop itself stays symbolic. No ReAct, no agentic reasoning between tool calls.
@@ -49,7 +49,7 @@ LangGOAP provides a planning layer for *any* agent that has to choose tools in a
 You hand LangGOAP a goal in plain English and a bag of tools, and an LLM reads the goal exactly once to turn it into a symbolic target — that's the only place a model gets to make decisions. From there, a classical A* search picks the shortest sequence of tool calls that reaches the goal, and because the search is deterministic, the same goal and the same tools always produce the same plan. If you've declared resource caps, scheduling windows, or objectives to optimize, those are handed to OR-Tools CP-SAT to refine the plan against real constraints, all without extra wiring. The plan then compiles down to an ordinary LangGraph `StateGraph`, so checkpointing, streaming, `interrupt()`, LangSmith tracing, and everything else in the LangGraph ecosystem work the way you'd expect. When execution hits the real world and something breaks — a tool errors out, a precondition no longer holds, an external sensor disagrees — the executor blacklists the offending action and asks the planner for a new path, so recovery happens automatically rather than through hand-written routing code.
 
 > [!TIP]
-> See [`examples/screencast/research_agent/`](examples/screencast/research_agent/) for a head-to-head comparison of `create_react_agent`, a hand-wired `StateGraph`, and LangGOAP — same brief, same tools, real OpenAI + Tavily costs, a revoked API key as the climax.
+> See [`examples/screencast/research_agent/`](examples/screencast/research_agent/) for a head-to-head comparison of three agent shapes — `create_react_agent`, a hand-wired `StateGraph`, and LangGOAP — plus a fourth run that puts all three under a revoked API key; same brief, same tools, real OpenAI + Tavily costs.
 
 ## Quickstart
 
@@ -238,7 +238,7 @@ human-approval interrupts work inside the sub-graph.
 ### LangGraph-native execution
 
 - **The plan _is_ a `StateGraph`** — `GoapGraph` compiles a real LangGraph graph with planner / executor / observer nodes. Each node has sync and async variants so tracer hooks fire from both `.invoke()` and `.ainvoke()`.
-- **Replanning memory** — `StoreExecutionHistory` persists each step's outcome in any LangGraph `BaseStore` (`InMemoryStore`, `AsyncPostgresStore`, your own). Keyed by tool name, so the planner can avoid actions that already failed in this run. No vector embeddings required.
+- **Replanning memory** — `StoreExecutionHistory` persists each run's `ExecutionRecord` through the LangGraph `BaseStore` interface using only `get`/`put` (tested with `InMemoryStore`; any `BaseStore` implementation with those two methods should work). No vector embeddings required.
 - **Multi-goal decomposition** — `MultiGoal` sequences a list of subgoals into a single executable plan, in `sequential` order (strict: an unreachable stage ends the run with `no_plan`; opt into `on_infeasible="skip"` to continue and finish `partial`), `any`-of mode (succeed when any subgoal is satisfied), or `best_value` mode.
 - **Plan visualization** — render any plan as a Mermaid diagram (`render_mermaid`), Gantt chart (`render_mermaid_gantt`, `render_ascii_gantt`), GraphViz DOT graph (`render_dot`), or ASCII tree (`render_ascii`); `visualize` is the top-level dispatcher. Pure Python — no binary dependencies for Mermaid or ASCII output.
 
