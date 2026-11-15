@@ -31,6 +31,7 @@ from langgoap.goals import GoalSpec
 from langgoap.graph.builder import GoapGraph
 from langgoap.guards import ActionGuard, AsyncActionGuard
 from langgoap.history import StoreExecutionHistory
+from langgoap.integrations._compile_options import _check_compile_kwargs
 from langgoap.planner.transitions import TransitionModel
 from langgoap.sensors import AsyncSensor, Sensor
 from langgoap.tracing import PlanningTracer
@@ -114,13 +115,15 @@ class GoapSubgraph:
         Args:
             **compile_kwargs: Forwarded to :meth:`GoapGraph.compile`
                 (``checkpointer``, ``store``, ``interrupt_before``,
-                ``interrupt_after``).
+                ``interrupt_after``).  Any other name raises ``TypeError``
+                naming the compile options and the ``GoapGraph`` options.
 
         Returns:
             A compiled :class:`CompiledStateGraph` using the
             :class:`~langgoap.graph.state.GoapStateChannels` schema
             internally.
         """
+        _check_compile_kwargs("GoapSubgraph.compile", compile_kwargs)
         return self.graph.compile(**compile_kwargs)
 
 
@@ -207,6 +210,7 @@ def add_goap_subgraph(
         executor=executor,
         history_state=history_state,
     )
+    _check_compile_kwargs("add_goap_subgraph", dict(compile_kwargs or {}))
     compiled_sub = sub.compile(**(compile_kwargs or {}))
 
     def _sub_input(parent_state: dict[str, Any]) -> dict[str, Any]:
