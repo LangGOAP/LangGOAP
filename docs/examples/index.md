@@ -7,6 +7,14 @@ repository under `examples/`.
 
 - `screencast/research_agent/screencast.ipynb` — four-way head-to-head (`create_react_agent` baseline vs. hand-wired `StateGraph` vs. LangGOAP vs. LangGOAP-under-disruption) with real OpenAI + Tavily costs and Tavily-key revocation as the climax.
 
+## LangGraph tutorial refactors
+
+Official LangGraph tutorials rewritten as GOAP. Each notebook runs the
+condensed hand-wired original, the GOAP version and the GOAP version under
+disruption, hermetically, backed by an integration test.
+
+- `screencast/llm_compiler/llm_compiler_screencast.ipynb` — LLMCompiler: `$N` dependency references, a hand-written scheduler and a joiner that emits `Replan` become preconditions, `executor="parallel"` and the observer's blacklist-and-replan loop.
+
 ## Basics
 
 Short primers — each notebook exercises a single mechanic.
@@ -65,6 +73,14 @@ Complete end-to-end walkthroughs across three tiers of complexity.
 :caption: Flagship screencast
 
 screencast/research_agent/screencast
+```
+
+```{toctree}
+:hidden:
+:maxdepth: 1
+:caption: LangGraph tutorial refactors
+
+screencast/llm_compiler/llm_compiler_screencast
 ```
 
 ```{toctree}

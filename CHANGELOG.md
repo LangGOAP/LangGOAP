@@ -380,6 +380,14 @@ default behaviours change; each has an explicit opt-in that restores the
 
 ### Documentation
 
+- **LangGraph tutorial refactors.** `examples/screencast/llm_compiler/`
+  rewrites the LLMCompiler tutorial as GOAP: `$N` dependency references,
+  the hand-written scheduler and the `Replan`-emitting joiner become
+  preconditions, `executor="parallel"` and the observer's
+  blacklist-and-replan loop. Each refactor ships a condensed hermetic
+  `before.py`, `after.py`, `after_disrupted.py`, a generated and executed
+  notebook rendered in the docs, and an integration test that pins the
+  wave count, the answer, the replan behaviour and the async path.
 - The API reference is generated from `langgoap.__all__` by
   `docs/generate_api_index.py`, grouped by the comment headers in
   `langgoap/__init__.py`, and a test fails when the page is stale; it

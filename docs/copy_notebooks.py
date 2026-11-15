@@ -78,6 +78,9 @@ CATALOG: dict[str, list[str]] = {
     "screencast/research_agent": [
         "screencast.ipynb",
     ],
+    "screencast/llm_compiler": [
+        "llm_compiler_screencast.ipynb",
+    ],
 }
 
 

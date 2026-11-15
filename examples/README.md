@@ -49,6 +49,10 @@ See [`tutorials/README.md`](tutorials/README.md) for the 22 featured tutorials a
 - [`screencast/supply_chain/`](screencast/supply_chain/) — Supply-chain disruption. Backed by [`test_screencast_supply_chain.py`](../tests/integration/test_screencast_supply_chain.py).
 - [`screencast/travel/`](screencast/travel/) — Travel rebooking. Backed by [`test_screencast_travel.py`](../tests/integration/test_screencast_travel.py).
 
+**LangGraph tutorial refactors** — official LangGraph tutorials rewritten as GOAP, each with a narrated notebook that runs the condensed hand-wired original, the GOAP version and the GOAP version under disruption (no API keys):
+
+- [`screencast/llm_compiler/`](screencast/llm_compiler/) — LLMCompiler: `$N` dependency references, a hand-written scheduler and a `Replan`-emitting joiner become preconditions, `executor="parallel"` and blacklist-and-replan. Notebook: [`llm_compiler_screencast.ipynb`](screencast/llm_compiler/llm_compiler_screencast.ipynb). Backed by [`test_screencast_llm_compiler.py`](../tests/integration/test_screencast_llm_compiler.py).
+
 ## Running notebooks
 
 ```bash
