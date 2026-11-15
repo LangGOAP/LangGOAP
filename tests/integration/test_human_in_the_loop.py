@@ -259,3 +259,58 @@ class TestHumanApprovalNoApprovalNeeded:
         # Plan should complete in a single invoke — no interrupt
         assert result["world_state"]["c_done"] is True
         assert result["status"] == "goal_achieved"
+
+
+# ---------------------------------------------------------------------------
+# Ambiguous answers are asked again, never read as approval
+# ---------------------------------------------------------------------------
+
+
+class TestAmbiguousResumeIsAskedAgain:
+    """A boolean gate asks a yes/no question.  A string, a number, or a dict
+    without a boolean ``approved`` is not an answer: the interrupt is raised
+    again with the reason, and nothing runs or is blacklisted.
+    (``Command(resume=None)`` never reaches the gate: LangGraph itself
+    rejects it.)"""
+
+    @pytest.mark.parametrize(
+        "value",
+        ["yes", "no", 1, {"reason": "go ahead"}, {"approved": "no"}],
+    )
+    def test_ambiguous_value_is_asked_again(self, value: object) -> None:
+        graph = GoapGraph(_make_actions())
+        compiled = graph.compile(checkpointer=MemorySaver())
+        config = _thread_config()
+        first = compiled.invoke(graph.initial_state(_make_goal()), config=config)
+        assert first["__interrupt__"][0].value["attempt"] == 1
+
+        again = compiled.invoke(Command(resume=value), config=config)
+        payload = again["__interrupt__"][0].value
+        assert payload["type"] == "goap_action_approval"
+        assert payload["action"] == "step_b"
+        assert payload["attempt"] == 2
+        assert payload["rejected_payload"] == value
+        assert payload["validation_errors"][0]["type"] == "wrong_shape"
+        assert again["blacklisted_actions"] == []
+        assert [h["action_name"] for h in again["execution_history"]] == ["step_a"]
+
+        result = compiled.invoke(Command(resume=True), config=config)
+        assert result["status"] == "goal_achieved"
+        assert [h["action_name"] for h in result["execution_history"]] == [
+            "step_a",
+            "step_b",
+            "step_c",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_async_ambiguous_value_is_asked_again(self) -> None:
+        graph = GoapGraph(_make_actions())
+        compiled = graph.compile(checkpointer=MemorySaver())
+        config = _thread_config()
+        await compiled.ainvoke(graph.initial_state(_make_goal()), config=config)
+        again = await compiled.ainvoke(Command(resume="approve"), config=config)
+        assert again["__interrupt__"][0].value["attempt"] == 2
+        result = await compiled.ainvoke(
+            Command(resume={"approved": True}), config=config
+        )
+        assert result["status"] == "goal_achieved"

@@ -14,8 +14,8 @@ from langgoap.graph.nodes import (
     GoapObserver,
     GoapPlanner,
     ParallelGoapExecutor,
+    _approval_decision,
     _find_parallel_group,
-    _is_approved,
     _is_better_plan,
 )
 from langgoap.graph.state import (
@@ -735,43 +735,50 @@ class TestGoapObserverRichState:
 
 
 # ---------------------------------------------------------------------------
-# _is_approved helper
+# _approval_decision helper
 # ---------------------------------------------------------------------------
 
 
-class TestIsApproved:
-    """Unit tests for the ``_is_approved`` resume-value interpreter."""
+class TestApprovalDecision:
+    """``Command(resume=...)`` for a boolean gate is a yes/no question.
 
-    def test_none_is_approved(self) -> None:
-        assert _is_approved(None) is True
+    Only an explicit boolean answer is a decision.  Anything else is
+    ``"invalid"`` and the operator is asked again: ``None``, a string
+    (``"no"`` used to approve), a number, a dict without ``approved`` or
+    with a non-boolean ``approved``.
+    """
 
     def test_true_is_approved(self) -> None:
-        assert _is_approved(True) is True
+        assert _approval_decision(True) == "approved"
 
     def test_false_is_denied(self) -> None:
-        assert _is_approved(False) is False
+        assert _approval_decision(False) == "denied"
 
     def test_dict_approved_true(self) -> None:
-        assert _is_approved({"approved": True}) is True
+        assert _approval_decision({"approved": True}) == "approved"
 
-    def test_dict_approved_false(self) -> None:
-        assert _is_approved({"approved": False}) is False
+    def test_dict_approved_false_with_reason(self) -> None:
+        assert _approval_decision({"approved": False, "reason": "budget"}) == "denied"
 
-    def test_dict_missing_approved_defaults_true(self) -> None:
-        """A dict without 'approved' key defaults to approval."""
-        assert _is_approved({"reason": "let's go"}) is True
-
-    def test_truthy_string_is_approved(self) -> None:
-        assert _is_approved("yes") is True
-
-    def test_empty_string_is_denied(self) -> None:
-        assert _is_approved("") is False
-
-    def test_zero_is_denied(self) -> None:
-        assert _is_approved(0) is False
-
-    def test_positive_int_is_approved(self) -> None:
-        assert _is_approved(1) is True
+    @pytest.mark.parametrize(
+        "value",
+        [
+            None,
+            "yes",
+            "no",
+            "",
+            0,
+            1,
+            [],
+            [True],
+            {"reason": "let's go"},
+            {"approved": "no"},
+            {"approved": 1},
+            {"approved": None},
+        ],
+    )
+    def test_everything_else_is_invalid(self, value: object) -> None:
+        assert _approval_decision(value) == "invalid"
 
 
 # ---------------------------------------------------------------------------
