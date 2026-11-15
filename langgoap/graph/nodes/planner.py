@@ -64,6 +64,33 @@ def _any_mode_no_plan_dict(
     return payload
 
 
+def _blacklist_suggestion(failed: list[str], spent: list[str]) -> str:
+    """Explain a goal that is reachable only through blacklisted actions.
+
+    ``failed`` actions were blacklisted after exhausting ``max_retries``;
+    ``spent`` ones are ``can_rerun=False`` actions that already ran once.
+    The two need different advice: retries and QoS do nothing for an
+    action that succeeded and simply cannot run again (a ``NirvanaGoal``
+    run ends this way by design).
+    """
+    parts: list[str] = []
+    if failed:
+        parts.append(
+            "Every remaining path to the goal needs a blacklisted action "
+            f"({', '.join(failed)}). Raise ActionSpec.max_retries or attach an "
+            "ActionQos for transient failures, add an alternative action, or set "
+            "GoalPolicy(blacklist_fallback=True) to re-admit blacklisted actions."
+        )
+    if spent:
+        parts.append(
+            "Every remaining path to the goal needs an action that already ran "
+            f"and cannot run again (can_rerun=False): {', '.join(spent)}. Add an "
+            "alternative action, or set can_rerun=True if repeating it is "
+            "acceptable. For a NirvanaGoal this is the normal end of the run."
+        )
+    return " ".join(parts)
+
+
 def _infeasible_no_plan_dict(plan: Plan, goal: GoalSpec) -> dict[str, Any]:
     """Build the ``no_plan_explanation`` payload for a rejected infeasible plan.
 
@@ -742,16 +769,16 @@ class GoapPlanner:
                 if blacklisted:
                     no_plan_dict["blacklisted_actions"] = list(blacklisted)
                     if self._blacklist_is_the_cause(start, effective_goal):
-                        no_plan_dict["suggestion"] = (
-                            "Every remaining path to the goal needs a blacklisted "
-                            f"action ({', '.join(blacklisted)}). Raise "
-                            "ActionSpec.max_retries or attach an ActionQos for "
-                            "transient failures, add an alternative action, or "
-                            "set GoalPolicy(blacklist_fallback=True) to re-admit "
-                            "blacklisted actions."
+                        counts = state.get("action_failure_counts", {}) or {}
+                        failed = [a for a in blacklisted if counts.get(a)]
+                        spent = [a for a in blacklisted if not counts.get(a)]
+                        if spent:
+                            no_plan_dict["spent_actions"] = spent
+                        no_plan_dict["suggestion"] = _blacklist_suggestion(
+                            failed, spent
                         )
                 logger.warning(
-                    "A* found no plan for goal %s \u2014 %s",
+                    "No plan for goal %s: %s",
                     dict(effective_goal.conditions),
                     no_plan_dict["suggestion"],
                 )
