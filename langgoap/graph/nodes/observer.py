@@ -159,7 +159,10 @@ class GoapObserver:
             appearing in action preconditions/effects and goal
             conditions) rather than the entire world state.  This
             prevents non-planning data (document lists, LLM responses)
-            from triggering spurious replanning.
+            from triggering spurious replanning.  ``max_retries`` for
+            blacklisting is read from these specs first and from the specs
+            carried by the plan otherwise, so a manual graph built without
+            ``actions`` keeps its retry budgets.
         tracer: Optional :class:`PlanningTracer` invoked on terminal
             states (``on_goal_achieved`` / ``on_plan_failed``).
             **Known limitation (v0.1.0):** mid-run ``MultiGoal``
@@ -366,12 +369,14 @@ class GoapObserver:
             # still open, so the cap check above applied first).
             return multi_cmd
 
+        if status == "no_plan":
+            # Reported before the replan budget: a final ``no_plan`` is a
+            # planning outcome, not a ``max_replans_exceeded`` failure (#64).
+            return Command(goto=END, update={"status": "no_plan"})
+
         limit_cmd = _route_replan_limit(goal, state)
         if limit_cmd is not None:
             return limit_cmd
-
-        if status == "no_plan":
-            return Command(goto=END, update={"status": "no_plan"})
 
         never = goal.policy.replan_strategy == ReplanStrategy.NEVER
 
@@ -427,7 +432,13 @@ class GoapObserver:
         counts = dict(state.get("action_failure_counts", {}))
         counts[failed_name] = counts.get(failed_name, 0) + 1
         blacklist = list(state.get("blacklisted_actions", []))
-        max_retries = _get_max_retries(failed_name, self._actions)
+        # Specs given to the observer win; a manual graph that passed none
+        # still gets the ``max_retries`` the plan's specs carry (#64).
+        plan_obj = state.get("plan")
+        known = list(self._actions) + (
+            list(plan_obj.actions) if plan_obj is not None else []
+        )
+        max_retries = _get_max_retries(failed_name, known)
         if counts[failed_name] > max_retries and failed_name not in blacklist:
             blacklist.append(failed_name)
         return Command(

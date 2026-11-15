@@ -5,8 +5,9 @@ When a LangGraph deployment is brought up (``langgraph dev <dir>`` for
 local, ``langgraph deploy`` for LangGraph Platform), ``/mcp`` routes
 are enabled by default — the deployment is automatically callable as
 an MCP server.  See the ``disable_mcp`` field in
-``research/repos/langgraph/libs/cli/schemas/schema.json`` (defaults to
-``False``).
+the langgraph-cli configuration schema
+(https://github.com/langchain-ai/langgraph/blob/main/libs/cli/schemas/schema.json),
+which defaults to ``False``.
 
 This module provides :func:`scaffold_deployment`, a thin code-generator
 that emits a complete deployable directory for a user-supplied
@@ -29,7 +30,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-DEFAULT_DEPENDENCIES: tuple[str, ...] = ("langgoap",)
+# "." ships the scaffold directory itself (graph.py and any factory
+# package placed beside it); without it a LangGraph Platform build has
+# nothing to import the user's factory from (#65).
+DEFAULT_DEPENDENCIES: tuple[str, ...] = (".", "langgoap")
 
 
 def scaffold_deployment(
@@ -144,8 +148,9 @@ def _render_graph_py(*, graph_factory_module: str, graph_factory_attr: str) -> s
         "\n"
         f"from {graph_factory_module} import {graph_factory_attr}\n"
         "\n"
-        "# Build + compile.  Add ``checkpointer=...`` to .compile() if your\n"
-        "# agent needs persistence across requests.\n"
+        "# Build + compile.  LangGraph Platform and ``langgraph dev`` provide\n"
+        "# persistence (checkpointer and store) themselves and ignore a\n"
+        "# checkpointer passed to .compile(); configure it on the platform.\n"
         f"_goap_graph = {graph_factory_attr}()\n"
         "graph = _goap_graph.compile()\n"
     )
@@ -159,9 +164,9 @@ def _render_env_example() -> str:
         "OPENAI_API_KEY=\n"
         "\n"
         "# Optional: enable LangSmith tracing for the deployed agent.\n"
-        "LANGCHAIN_API_KEY=\n"
-        "LANGCHAIN_TRACING_V2=true\n"
-        "LANGCHAIN_PROJECT=langgoap-deployment\n"
+        "LANGSMITH_API_KEY=\n"
+        "LANGSMITH_TRACING=true\n"
+        "LANGSMITH_PROJECT=langgoap-deployment\n"
     )
 
 
@@ -181,7 +186,7 @@ def _render_readme(*, agent_name: str, agent_description: str) -> str:
         "## 1. Install\n"
         "\n"
         "```bash\n"
-        "uv pip install langgraph-cli langgoap\n"
+        'uv pip install "langgraph-cli[inmem]" langgoap\n'
         "cp .env.example .env  # fill in OPENAI_API_KEY, etc.\n"
         "```\n"
         "\n"
@@ -213,7 +218,7 @@ def _render_readme(*, agent_name: str, agent_description: str) -> str:
         "}\n"
         "```\n"
         "\n"
-        "Restart Claude Desktop. The `langgoap-built` agent appears as "
+        f"Restart Claude Desktop. The `{agent_name}` agent appears as "
         "a tool. Ask Claude to use it.\n"
         "\n"
         "### Other MCP clients\n"

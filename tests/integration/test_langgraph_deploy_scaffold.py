@@ -4,7 +4,7 @@ The scaffolder generates the four files needed to deploy a LangGOAP-built
 graph via ``langgraph dev`` / ``langgraph deploy``.  Once deployed, the
 graph is automatically callable as an MCP tool — ``/mcp`` routes are
 enabled by default in every LangGraph deployment (see
-``research/repos/langgraph/libs/cli/schemas/schema.json`` — the
+``https://github.com/langchain-ai/langgraph/blob/HEAD/libs/cli/schemas/schema.json`` — the
 ``disable_mcp`` field defaults to ``False``).
 
 These tests verify the scaffolder produces the right shape; the actual
@@ -71,6 +71,9 @@ class TestScaffoldOutput:
         assert config["env"] == ".env"
         assert "langgoap" in config.get("dependencies", [])
         assert "langchain-openai>=0.3" in config["dependencies"]
+        # "." ships the scaffold directory itself, so the factory module the
+        # entrypoint imports is part of a Platform build (#65).
+        assert config["dependencies"][0] == "."
 
     def test_entrypoint_is_importable_python(self, tmp_path: Path) -> None:
         """The generated graph.py must be syntactically valid Python and
@@ -90,19 +93,31 @@ class TestScaffoldOutput:
         assert "from my_agent.graph import build_graph" in source
         assert "build_graph" in source
         assert "graph =" in source
+        # LangGraph Platform supplies persistence and ignores a user
+        # checkpointer; the template must not tell users to pass one (#65).
+        assert "checkpointer=" not in source
+        assert "persistence" in source.lower()
 
     def test_env_example_lists_recommended_vars(self, tmp_path: Path) -> None:
         out = _scaffold_minimal(tmp_path / "deploy")
         env_example = (out / ".env.example").read_text()
         # OpenAI is the canonical LLM provider used in LangGOAP tutorials.
         assert "OPENAI_API_KEY" in env_example
-        assert "LANGCHAIN_API_KEY" in env_example  # for LangSmith tracing
+        # Current LangSmith variable names, not the legacy LANGCHAIN_* ones (#65).
+        assert "LANGSMITH_API_KEY" in env_example
+        assert "LANGSMITH_TRACING=true" in env_example
+        assert "LANGCHAIN_TRACING_V2" not in env_example
 
     def test_readme_documents_the_three_step_workflow(self, tmp_path: Path) -> None:
         out = _scaffold_minimal(tmp_path / "deploy")
         readme = (out / "README.md").read_text().lower()
         for keyword in ("langgraph dev", "mcp", "claude desktop"):
             assert keyword.lower() in readme, f"missing keyword {keyword!r}"
+        # ``langgraph dev`` needs the in-memory server extra, and the README
+        # names the generated agent rather than a placeholder (#65).
+        assert "langgraph-cli[inmem]" in readme
+        assert "langgoap-built" not in readme
+        assert "the `my_agent` agent appears" in readme
 
     def test_returns_output_directory_path(self, tmp_path: Path) -> None:
         out = scaffold_deployment(

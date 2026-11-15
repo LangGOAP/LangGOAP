@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -302,9 +303,16 @@ class ActionSpec:
     def is_async_execute(self) -> bool:
         """Return True if this action has an async execute path.
 
-        Checks ``aexecute`` first, then falls back to inspecting
-        ``execute`` for coroutine functions.
+        .. deprecated:: 0.2.0
+            Nothing in the runtime consults this; the executors resolve
+            the async path themselves.  Removed in 0.3.0 (#64).
         """
+        warnings.warn(
+            "ActionSpec.is_async_execute() is deprecated and will be removed "
+            "in 0.3.0; the executors pick the async path themselves.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if self.aexecute is not None:
             return True
         if self.execute is not None:
