@@ -72,6 +72,11 @@ class ActionResult:
         state_before: World state before execution.
         state_after: World state after execution.
         error: Error message if the action failed.
+        cost: The action's cost evaluated on the full pre-state at execution
+            time (``None`` for failures and for records written before
+            0.2.0).  Recorded by the executor so realised-cost accounting
+            does not depend on the stored snapshots, which
+            ``GoapGraph(history_state="delta")`` compacts (issue #74).
     """
 
     action_name: str
@@ -79,6 +84,7 @@ class ActionResult:
     state_before: dict[str, Any] = field(default_factory=dict)
     state_after: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
+    cost: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to the JSON-native form stored in ``execution_history``."""
@@ -88,6 +94,7 @@ class ActionResult:
             "state_before": dict(self.state_before),
             "state_after": dict(self.state_after),
             "error": self.error,
+            "cost": self.cost,
         }
 
     @classmethod
@@ -99,6 +106,7 @@ class ActionResult:
             state_before=dict(data.get("state_before") or {}),
             state_after=dict(data.get("state_after") or {}),
             error=data.get("error"),
+            cost=data.get("cost"),
         )
 
 

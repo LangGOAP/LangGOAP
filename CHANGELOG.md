@@ -13,6 +13,16 @@ default behaviours change; each has an explicit opt-in that restores the
 
 ### Added
 
+- `GoapGraph(history_state="delta" | "planning")` (also on `GoapExecutor`,
+  `ParallelGoapExecutor`, `create_goap_agent`, `GoapSubgraph` and
+  `add_goap_subgraph`) compacts the world-state snapshots stored in every
+  `ActionResult`: `"delta"` keeps only the keys an action changed, with
+  their prior values, and `"planning"` keeps only planning-relevant keys,
+  so checkpoints stop growing with every step when the world state carries
+  large non-planning data. `"full"` stays the default. Each `ActionResult`
+  now records `cost`, the action's cost on the full pre-state, and
+  `ExecutionRecord.actual_cost` uses it, so cost accounting no longer
+  depends on the snapshots (#74).
 - **Low-code on-ramps reach the full API (#19).** `create_goap_agent`,
   `GoapSubgraph` and `add_goap_subgraph` accept every `GoapGraph` option
   (`strategy`, `tracer`, `history`, `sensors`, `guards`, `resolvers`,

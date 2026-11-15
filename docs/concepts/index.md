@@ -406,6 +406,14 @@ human-in-the-loop pause, resumes from the last checkpoint with its plan,
 history and failure counts intact; `rehydrate_state` turns a checkpointed
 state back into typed objects.
 
+Every `ActionResult` in `execution_history` stores the world state before
+and after its action, so with large non-planning values a checkpoint grows
+with every step. `GoapGraph(history_state="delta")` keeps only the keys an
+action changed (with their prior values) and `"planning"` keeps only the
+keys preconditions, effects and the goal read; `"full"` is the default. The
+realised cost of a run does not depend on these snapshots, because each
+result records its cost at execution time.
+
 ## Plan explanations
 
 A failed planning pass explains itself. `explain_no_plan` performs a

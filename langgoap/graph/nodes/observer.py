@@ -289,6 +289,10 @@ class GoapObserver:
         failures = [h for h in history if not h.success]
         actual_cost = 0.0
         for entry in successes:
+            if entry.cost is not None:
+                # Recorded by the executor on the full pre-state (#74).
+                actual_cost += entry.cost
+                continue
             spec = self._actions_by_name.get(entry.action_name)
             if spec is not None:
                 actual_cost += float(spec.get_cost(entry.state_before))

@@ -14,12 +14,16 @@ from typing import Any
 
 from langgoap.actions import ActionSpec, ensure_unique_action_names
 from langgoap.graph.nodes._execution import (
+    HistoryState,
     _apply_result,
     _build_failure,
     _build_guard_block,
     _build_success,
     _check_human_approval,
+    _compact_history,
+    _planning_keys_for,
     _prepare_execution,
+    _validate_history_state,
 )
 from langgoap.graph.nodes._helpers import logger
 from langgoap.graph.nodes.executor import (
@@ -149,6 +153,8 @@ class ParallelGoapExecutor:
             ``transition_model.sample``.  When omitted, a single
             ``random.Random()`` is created at construction time and
             reused across waves.  Back-off jitter uses a separate stream.
+        history_state: See :class:`GoapExecutor`; applied to every record of
+            a wave.
     """
 
     def __init__(
@@ -159,7 +165,9 @@ class ParallelGoapExecutor:
         transition_model: TransitionModel | None = None,
         rng: random.Random | None = None,
         actions: list[ActionSpec] | None = None,
+        history_state: HistoryState = "full",
     ) -> None:
+        self._history_state = _validate_history_state(history_state)
         # See ``GoapExecutor.__init__`` for the SafeTracerProxy rationale.
         self._tracer: PlanningTracer = SafeTracerProxy(tracer or NullTracer())
         self._guards: list[ActionGuard | AsyncActionGuard] = guards or []
@@ -208,7 +216,21 @@ class ParallelGoapExecutor:
             self._call_typed(rehydrate_state(state, self._actions))
         )
 
+    def _compact(self, result: dict[str, Any], state: GoapState) -> dict[str, Any]:
+        """Apply ``history_state`` to the history entries of an update."""
+        if self._history_state == "full":
+            return result
+        keys = (
+            _planning_keys_for(state, state.get("plan"), self._actions.values())
+            if self._history_state == "planning"
+            else None
+        )
+        return _compact_history(result, self._history_state, keys)
+
     def _call_typed(self, state: GoapState) -> dict[str, Any]:
+        return self._compact(self._run_wave_sync(state), state)
+
+    def _run_wave_sync(self, state: GoapState) -> dict[str, Any]:
         prep = _prepare_execution(state)
         if isinstance(prep, dict):
             return prep
@@ -306,6 +328,9 @@ class ParallelGoapExecutor:
         )
 
     async def _acall_typed(self, state: GoapState) -> dict[str, Any]:
+        return self._compact(await self._run_wave_async(state), state)
+
+    async def _run_wave_async(self, state: GoapState) -> dict[str, Any]:
         """Async variant \u2014 executes the wave actions concurrently via asyncio.gather."""
         prep = _prepare_execution(state)
         if isinstance(prep, dict):

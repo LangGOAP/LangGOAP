@@ -9,12 +9,14 @@ validation.  Kept module-private so the ``executor.py`` and
 from __future__ import annotations
 
 import random
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Iterable, Mapping
+from dataclasses import replace
+from typing import Any, Literal
 
 from langgraph.types import interrupt
 
 from langgoap.actions import ActionSpec
+from langgoap.goals import GoalSpec, MultiGoal
 from langgoap.graph.nodes._helpers import logger
 from langgoap.graph.state import ActionResult, GoapState
 from langgoap.guards import GuardResult
@@ -141,9 +143,79 @@ def _build_success(
                 success=True,
                 state_before=state_before,
                 state_after=state_after,
+                cost=_realised_cost(action, state_before),
             )
         ],
     }
+
+
+def _realised_cost(action: ActionSpec, state_before: Mapping[str, Any]) -> float | None:
+    """The action's cost on the full pre-state, or ``None`` if it cannot be evaluated."""
+    try:
+        return float(action.get_cost(dict(state_before)))
+    except Exception:  # a dynamic cost that needs keys this state lacks
+        return None
+
+
+HistoryState = Literal["full", "delta", "planning"]
+HISTORY_STATES: tuple[str, ...] = ("full", "delta", "planning")
+
+
+def _validate_history_state(value: str) -> HistoryState:
+    if value not in HISTORY_STATES:
+        raise ValueError(
+            f"history_state must be one of {HISTORY_STATES}, got {value!r}"
+        )
+    return value  # type: ignore[return-value]
+
+
+def _planning_keys_for(
+    state: Mapping[str, Any], plan: Plan | None, known: Iterable[ActionSpec]
+) -> set[str]:
+    """Keys that preconditions, effects or the goal read: the ``"planning"`` subset."""
+    actions = list(known) or (list(plan.actions) if plan is not None else [])
+    keys: set[str] = set()
+    for action in actions:
+        keys.update(str(k) for k in action.preconditions)
+        keys.update(str(k) for k in action.effect_key_set())
+    goal = state.get("goal")
+    goals = goal.goals if isinstance(goal, MultiGoal) else [goal]
+    for g in goals:
+        if isinstance(g, GoalSpec):
+            keys.update(str(k) for k in g.conditions)
+    return keys
+
+
+def _compact_entry(
+    entry: ActionResult, mode: HistoryState, planning_keys: set[str] | None
+) -> ActionResult:
+    before, after = entry.state_before, entry.state_after
+    if mode == "delta":
+        changed = {k: v for k, v in after.items() if k not in before or before[k] != v}
+        prior = {k: before[k] for k in changed if k in before}
+    else:  # "planning"
+        keys = planning_keys or set()
+        changed = {k: v for k, v in after.items() if k in keys}
+        prior = {k: v for k, v in before.items() if k in keys}
+    return replace(entry, state_before=prior, state_after=changed)
+
+
+def _compact_history(
+    result: dict[str, Any], mode: HistoryState, planning_keys: set[str] | None
+) -> dict[str, Any]:
+    """Shrink the ``ActionResult`` snapshots in an executor update (issue #74).
+
+    ``"full"`` returns ``result`` unchanged.  ``"delta"`` keeps the keys an
+    action changed, with their prior values in ``state_before``;
+    ``"planning"`` keeps the planning-relevant keys of both snapshots.  Only
+    the history entries shrink; the ``world_state`` channel is untouched.
+    """
+    if mode == "full" or "execution_history" not in result:
+        return result
+    compacted = [
+        _compact_entry(e, mode, planning_keys) for e in result["execution_history"]
+    ]
+    return {**result, "execution_history": compacted}
 
 
 def _build_failure(
