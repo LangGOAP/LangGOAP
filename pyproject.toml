@@ -1,6 +1,6 @@
 [project]
 name = "langgoap"
-version = "0.1.2"
+dynamic = ["version"]
 description = "Goal-Oriented Action Planning framework for LangGraph with constraint optimization."
 readme = "README.md"
 license = "MIT"
@@ -32,9 +32,12 @@ classifiers = [
 
 dependencies = [
     "click>=8.1.7",
+    "langchain-core>=1.0.0,<2.0.0",
     "langgraph>=1.0.0,<2.0.0",
     "langgraph-checkpoint>=4.0.0,<5.0.0",
     "ortools>=9.8",
+    "pydantic>=2.0,<3.0",
+    "typing-extensions>=4.5",
 ]
 
 [project.optional-dependencies]
@@ -56,8 +59,16 @@ langgoap = "langgoap.cli.main:cli"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.version]
+path = "langgoap/_version.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["langgoap"]
+
+[tool.hatch.build.targets.sdist]
+# Ship the package and its top-level docs only; tests, notebooks, docs
+# sources and CI assets live in the repository, not in the archive.
+only-include = ["langgoap", "README.md", "LICENSE", "CHANGELOG.md", "pyproject.toml"]
 
 [dependency-groups]
 dev = [
@@ -99,6 +110,7 @@ testpaths = ["tests"]
 pythonpath = [".", "examples/tutorials"]
 addopts = "--strict-markers --strict-config --durations=5 -vv --ignore=tests/benchmarks"
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 markers = [
     "api: marks tests that call real LLM APIs (deselect with '-m not api')",
     "bench: marks benchmark tests — run with 'make benchmark' (ignored by default test suite)",

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib.metadata
+
 import langgoap
 
 
@@ -16,4 +18,6 @@ class TestPublicAPI:
         """__version__ is a non-empty string."""
         assert isinstance(langgoap.__version__, str)
         assert len(langgoap.__version__) > 0
-        assert langgoap.__version__ == "0.1.2"
+        # Single source of truth is ``langgoap/_version.py`` (hatch reads it);
+        # the installed distribution metadata must agree with it.
+        assert langgoap.__version__ == importlib.metadata.version("langgoap")
