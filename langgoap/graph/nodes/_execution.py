@@ -288,25 +288,36 @@ def _build_guard_block(
     return result
 
 
-def _is_approved(resume_value: Any) -> bool:
-    """Interpret a ``Command(resume=...)`` value as an approval decision.
+def _approval_decision(resume_value: Any) -> str:
+    """Interpret a ``Command(resume=...)`` value for a boolean gate.
 
-    The resume value sent by the human client is interpreted generously:
+    A boolean gate asks a yes/no question, so only an explicit boolean is a
+    decision:
 
-    - ``None`` \u2192 approved (implicit: resume with no payload = continue)
-    - ``True`` \u2192 approved
-    - ``False`` \u2192 denied
-    - ``{"approved": True}`` \u2192 approved
-    - ``{"approved": False}`` \u2192 denied
-    - Any other truthy value \u2192 approved
+    * ``True`` or ``{"approved": True, ...}`` -> ``"approved"``
+    * ``False`` or ``{"approved": False, "reason": ...}`` -> ``"denied"``
+    * anything else -> ``"invalid"``: ``None``, a string (``"no"`` used to
+      count as approval), a number, a list, a dict without ``approved`` or
+      with a non-boolean ``approved``.  The caller asks again.
     """
-    if resume_value is None or resume_value is True:
-        return True
+    if resume_value is True:
+        return "approved"
     if resume_value is False:
-        return False
+        return "denied"
     if isinstance(resume_value, dict):
-        return bool(resume_value.get("approved", True))
-    return bool(resume_value)
+        approved = resume_value.get("approved")
+        if approved is True:
+            return "approved"
+        if approved is False:
+            return "denied"
+    return "invalid"
+
+
+_APPROVAL_SHAPE_ERROR = {
+    "loc": [],
+    "msg": "resume with True or False, or {'approved': bool, 'reason': str}",
+    "type": "wrong_shape",
+}
 
 
 def _is_form_model(value: Any) -> bool:
@@ -346,20 +357,39 @@ def _check_human_approval(
             action, world_state, state_before, failure_counts=failure_counts
         )
 
-    resume_value = interrupt(
-        {
-            "type": "goap_action_approval",
-            "action": action.name,
-            "preconditions": dict(action.preconditions),
-            "effects": dict(action.get_effects(world_state)),
-            "world_state": dict(world_state),
+    payload: dict[str, Any] = {
+        "type": "goap_action_approval",
+        "action": action.name,
+        "preconditions": dict(action.preconditions),
+        "effects": dict(action.get_effects(world_state)),
+        "world_state": dict(world_state),
+        "attempt": 1,
+    }
+    while True:
+        resume_value = interrupt(payload)
+        decision = _approval_decision(resume_value)
+        if decision != "invalid":
+            break
+        # Not an answer to a yes/no question: ask again and say why, rather
+        # than guess.  Each round needs a human resume, so nothing loops on
+        # its own.
+        logger.info(
+            "Action %r: approval answer %d not understood (%r); asking again",
+            action.name,
+            payload["attempt"],
+            resume_value,
+        )
+        payload = {
+            **payload,
+            "attempt": payload["attempt"] + 1,
+            "validation_errors": [dict(_APPROVAL_SHAPE_ERROR)],
+            "rejected_payload": resume_value,
         }
-    )
 
-    if _is_approved(resume_value):
+    if decision == "approved":
         return None
 
-    # Denied \u2014 build a failure result.  Pre-set the failure count to
+    # Denied: build a failure result.  Pre-set the failure count to
     # max_retries + 1 so the observer's blacklist threshold trips on the
     # first denial regardless of max_retries (a human denial is a
     # deliberate decision, not a transient flake).
@@ -383,7 +413,21 @@ def _check_form_approval(
     *,
     failure_counts: Mapping[str, int] | None = None,
 ) -> dict[str, Any] | None:
-    """Typed-form HITL gate.  See :func:`_check_human_approval`."""
+    """Typed-form HITL gate.  See :func:`_check_human_approval`.
+
+    The resume value is interpreted as follows:
+
+    * ``False`` or ``{"approved": False, "reason": ...}`` (when the model has
+      no ``approved`` field) declines the form.  That is a decision, so it
+      is recorded and blacklisted exactly like a denied boolean gate.
+    * A dict (or model instance) that validates is the answer; it is stored
+      under ``human_input_key`` and the action runs.
+    * Anything else is an input error, not a decision: the operator is
+      asked again and the new interrupt payload carries ``attempt``,
+      ``validation_errors`` (``loc`` / ``msg`` / ``type`` per error) and
+      ``rejected_payload``.  Each round needs a human resume, so nothing
+      loops on its own.
+    """
     from pydantic import BaseModel, ValidationError
 
     model_cls: type[BaseModel] = action.require_human_approval  # type: ignore[assignment]
@@ -405,41 +449,67 @@ def _check_form_approval(
         else:
             logger.info("Action %r: reusing the operator's %r answer", action.name, key)
             return None
-    schema = model_cls.model_json_schema()
-    resume_value = interrupt(
-        {
-            "type": "goap_action_form",
-            "action": action.name,
-            "form_schema": schema,
-            "model_name": model_cls.__name__,
-            "preconditions": dict(action.preconditions),
-            "world_state": dict(world_state),
-        }
-    )
-
-    if resume_value is None or not isinstance(resume_value, (dict, BaseModel)):
-        return _build_form_invalid_failure(
-            action,
-            "form payload missing or wrong shape",
-            state_before,
-            world_state,
-            failure_counts=failure_counts,
-        )
-    try:
+    payload: dict[str, Any] = {
+        "type": "goap_action_form",
+        "action": action.name,
+        "form_schema": model_cls.model_json_schema(),
+        "model_name": model_cls.__name__,
+        "preconditions": dict(action.preconditions),
+        "effects": dict(action.get_effects(world_state)),
+        "world_state": dict(world_state),
+        "attempt": 1,
+    }
+    parsed: BaseModel
+    while True:
+        resume_value = interrupt(payload)
+        if _is_form_denial(resume_value, model_cls):
+            reason = "denied by operator"
+            if isinstance(resume_value, dict):
+                reason = resume_value.get("reason", reason)
+            result = _build_failure(
+                action,
+                RuntimeError(f"human_approval_denied: {reason}"),
+                state_before,
+                world_state,
+            )
+            result["action_failure_counts"] = _blacklisting_counts(
+                action, failure_counts
+            )
+            return result
         if isinstance(resume_value, BaseModel):
             parsed = resume_value
+            break
+        if isinstance(resume_value, dict):
+            try:
+                parsed = model_cls.model_validate(resume_value)
+                break
+            except ValidationError as exc:
+                errors = [
+                    {"loc": list(e["loc"]), "msg": e["msg"], "type": e["type"]}
+                    for e in exc.errors()
+                ]
         else:
-            parsed = model_cls.model_validate(resume_value)
-    except ValidationError as exc:
-        return _build_form_invalid_failure(
-            action,
-            f"form payload failed validation: {exc.errors()!r}",
-            state_before,
-            world_state,
-            failure_counts=failure_counts,
+            errors = [
+                {
+                    "loc": [],
+                    "msg": "form payload must be an object matching the schema",
+                    "type": "wrong_shape",
+                }
+            ]
+        logger.info(
+            "Action %r: form submission %d rejected (%d error(s)); asking again",
+            action.name,
+            payload["attempt"],
+            len(errors),
         )
+        payload = {
+            **payload,
+            "attempt": payload["attempt"] + 1,
+            "validation_errors": errors,
+            "rejected_payload": resume_value,
+        }
 
-    # Approved \u2014 merge the validated form (as JSON-friendly dict) into
+    # Approved: merge the validated form (as a JSON-friendly dict) into
     # world_state under human_input_key (default: action name).  Storing
     # the dict rather than the Pydantic instance keeps the value
     # round-trippable through any checkpointer serializer without
@@ -448,23 +518,15 @@ def _check_form_approval(
     return None
 
 
-def _build_form_invalid_failure(
-    action: ActionSpec,
-    reason: str,
-    state_before: dict[str, Any],
-    world_state: dict[str, Any],
-    *,
-    failure_counts: Mapping[str, int] | None = None,
-) -> dict[str, Any]:
-    """Build a failure result for a rejected typed-form HITL submission."""
-    result = _build_failure(
-        action,
-        RuntimeError(f"human_form_invalid: {reason}"),
-        state_before,
-        world_state,
+def _is_form_denial(resume_value: Any, model_cls: Any) -> bool:
+    """``False``, or ``{"approved": False}`` when the form has no such field."""
+    if resume_value is False:
+        return True
+    return (
+        isinstance(resume_value, dict)
+        and resume_value.get("approved") is False
+        and "approved" not in getattr(model_cls, "model_fields", {})
     )
-    result["action_failure_counts"] = _blacklisting_counts(action, failure_counts)
-    return result
 
 
 def _prepare_execution(
@@ -515,7 +577,7 @@ __all__ = [
     "_build_success",
     "_build_failure",
     "_build_guard_block",
-    "_is_approved",
+    "_approval_decision",
     "_check_human_approval",
     "_prepare_execution",
 ]

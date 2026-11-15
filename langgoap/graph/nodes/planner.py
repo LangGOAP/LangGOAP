@@ -21,7 +21,12 @@ from langgoap.graph.nodes._helpers import (
     logger,
 )
 from langgoap.graph.nodes.observer import _is_goal_satisfied
-from langgoap.graph.state import GoapState, rehydrate_state, serialize_updates
+from langgoap.graph.state import (
+    GoapState,
+    rehydrate_state,
+    serialize_updates,
+    state_defaults,
+)
 from langgoap.planner.astar import plan as astar_plan
 from langgoap.planner.csp import CSPStatus
 from langgoap.planner.explain import explain_no_plan
@@ -899,6 +904,7 @@ class GoapPlanner:
     def __call__(self, state: GoapState) -> dict[str, Any]:
         # Channel values are JSON-native: work with typed objects inside
         # the node and serialise the update on the way out.
+        raw_keys = set(state)
         state = rehydrate_state(state, self._actions_by_name)
         # Anchor the wall-clock budget on the first planner invocation
         # so MaxWallClockPolicy has a stable start time.  Epoch seconds, not
@@ -952,10 +958,12 @@ class GoapPlanner:
             updates["world_state"] = observed_ws
         if new_wall_clock_anchor is not None:
             updates.setdefault("wall_clock_started_at", new_wall_clock_anchor)
+        _fill_missing_defaults(raw_keys, updates)
         return serialize_updates(updates)
 
     async def acall(self, state: GoapState) -> dict[str, Any]:
         """Async entry point \u2014 fires async tracer hooks."""
+        raw_keys = set(state)
         state = rehydrate_state(state, self._actions_by_name)
         new_wall_clock_anchor: float | None = None
         if state.get("wall_clock_started_at") is None:
@@ -999,7 +1007,21 @@ class GoapPlanner:
             updates["world_state"] = observed_ws
         if new_wall_clock_anchor is not None:
             updates.setdefault("wall_clock_started_at", new_wall_clock_anchor)
+        _fill_missing_defaults(raw_keys, updates)
         return serialize_updates(updates)
+
+
+def _fill_missing_defaults(raw_keys: set[str], updates: dict[str, Any]) -> None:
+    """Write defaults for bookkeeping channels the input never set.
+
+    ``GoapGraph.initial_state`` seeds them; a caller who builds the input
+    dict by hand (``{"goal": ..., "world_state": ...}``) does not.  LangGraph
+    returns only written channels, so without this the result of such a run
+    had no ``blacklisted_actions`` key when nothing had been blacklisted.
+    """
+    for key, default in state_defaults().items():
+        if key not in raw_keys:
+            updates.setdefault(key, default)
 
 
 __all__ = ["GoapPlanner"]

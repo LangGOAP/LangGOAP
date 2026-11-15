@@ -921,7 +921,7 @@ def _build_usage_list(
 def _dominates(
     a_obj: dict[str, float],
     b_obj: dict[str, float],
-    objectives: "MappingProxyType[str, Any]",
+    objectives: Mapping[str, Any],
 ) -> bool:
     """Return True if plan-A dominates plan-B on all objectives.
 
@@ -1053,7 +1053,7 @@ def _collect_objective_values(
 def _pareto_frontier(
     feasible: list[tuple["Plan", CSPMetadata]],
     plan_obj_values: list[dict[str, float]],
-    objectives: "MappingProxyType[str, Any]",
+    objectives: Mapping[str, Any],
 ) -> list[tuple[tuple["Plan", CSPMetadata], dict[str, float]]]:
     """Return the non-dominated ``(item, objective_values)`` pairs."""
     n = len(feasible)
@@ -1070,7 +1070,7 @@ def _pareto_frontier(
 
 def _sort_by_primary_objective(
     frontier_items: list[tuple[tuple["Plan", CSPMetadata], dict[str, float]]],
-    objectives: "MappingProxyType[str, Any]",
+    objectives: Mapping[str, Any],
 ) -> list[tuple["Plan", CSPMetadata]]:
     """Sort frontier items by the first declared objective, honoring its direction."""
     from langgoap.types import ObjectiveDirection

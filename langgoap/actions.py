@@ -73,10 +73,17 @@ class ActionSpec:
         require_human_approval: When ``True``, the executor calls
             ``interrupt()`` before running this action, pausing the graph
             until a human resumes via ``Command(resume=...)``.  Requires
-            a checkpointer.  The resume value is interpreted as approval:
-            ``None``, ``True``, or ``{"approved": True}`` continue
-            execution; ``False`` or ``{"approved": False}`` deny the
-            action and trigger replanning.
+            a checkpointer.  ``True`` or ``{"approved": True}`` continues
+            execution; ``False`` or ``{"approved": False, "reason": ...}``
+            denies the action and triggers replanning; any other resume
+            value (a string, a number, a dict without a boolean
+            ``approved``) is not an answer and is asked again.  A Pydantic ``BaseModel``
+            subclass instead of ``True`` makes the pause a typed form: the
+            interrupt payload carries the model's JSON schema, a resume
+            payload that validates is stored under ``human_input_key``, one
+            that fails validation is asked again with the errors in the next
+            payload, and ``False`` / ``{"approved": False}`` declines the
+            form like a denied boolean gate.
         resources: Estimated resource consumption for this action.
             Used by the CSP optimizer.
             Example: ``{"tokens": 500, "cost_usd": 0.02, "api_calls": 1}``.

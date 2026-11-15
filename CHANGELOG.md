@@ -67,6 +67,14 @@ useful.
 
 ### Changed
 
+- **The boolean approval gate asks again instead of guessing.** Any
+  non-empty string, any non-zero number, a dict without `approved` or
+  with a non-boolean `approved` all used to count as approval, so
+  `Command(resume="no")` approved the action. Only `True` / `False` and
+  `{"approved": <bool>, "reason": ...}` are decisions now; any other
+  resume value re-raises the interrupt with `attempt`, `validation_errors`
+  and `rejected_payload`, exactly like the typed-form gate. Both gate
+  payloads carry `attempt` and `effects`.
 - Planner hygiene (#63): `assert_expected_matches_declared` raises
   `ValueError` instead of relying on `assert`; `explain_no_plan` compares
   `(key, value)` pairs, so a goal wanting `x=False` is unreachable when
@@ -186,6 +194,35 @@ useful.
 
 ### Fixed
 
+- **A typed form that fails validation is asked again, not blacklisted.**
+  A resume payload rejected by the Pydantic model (or one of the wrong
+  shape, such as `True`) was recorded as a `human_form_invalid` failure
+  with the failure count pre-set past `max_retries`, so a typo in a form
+  blacklisted the action and, with no alternative, ended the run in
+  `no_plan`. It is an input error, not a decision: the executor now raises
+  the interrupt again with `attempt`, `validation_errors` (`loc` / `msg` /
+  `type` per error) and `rejected_payload` in the payload, and the
+  corrected submission goes through. A form can now be declined
+  explicitly: `False`, or `{"approved": False, "reason": ...}` when the
+  model has no `approved` field, is recorded and blacklisted exactly like
+  a denied boolean gate (`human_approval_denied`), which the form gate
+  previously had no way to express.
+- `GoalSpec(conditions={...})`, `SoftGoal(conditions={...})` and
+  `objectives={...}` type-check: the fields are annotated as `Mapping`
+  (what a caller writes) and still converted to an immutable
+  `MappingProxyType` at construction. They were annotated as
+  `MappingProxyType`, so every dict literal in user code was a mypy error.
+- **Every bookkeeping key is present in every result.** LangGraph returns
+  only the channels a run wrote to, so `result["blacklisted_actions"]`
+  and `result["action_failure_counts"]` raised `KeyError` precisely when
+  nothing had gone wrong (and `replan_reason`, `skipped_subgoals`,
+  `reflection_context`, `current_subgoal_index`, `no_plan_explanation`
+  likewise). The defaults now live in one table,
+  `langgoap.graph.state.STATE_DEFAULTS`: `GoapGraph.initial_state` seeds
+  them, the planner fills any that an input built by hand
+  (`{"goal": ..., "world_state": ...}`) left out, and `rehydrate_state`
+  fills them on the way out, so typed access is total in sync and async
+  runs and after a resume in a new process.
 - **An operator's denial is explained as a denial.** When every remaining
   path to the goal needs an action a human declined, the no-plan
   explanation advised raising `max_retries` or attaching an `ActionQos`
