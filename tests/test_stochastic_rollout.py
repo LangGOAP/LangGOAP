@@ -1,7 +1,7 @@
 """Failing unit tests for :class:`StochasticRollout` and the
 ``TransitionModel`` integration into :class:`MCTSStrategy`.
 
-Scope (from ``research/experiments/2026-04-20-mcts-on-stochastic.md``
+Scope (from the internal "2026-04-20-mcts-on-stochastic" design note (not in the repository)
 §8.1 wiring commitments):
 
 - ``StochasticRollout`` mandates a ``TransitionModel`` and advances

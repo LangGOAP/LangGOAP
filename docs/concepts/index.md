@@ -273,6 +273,183 @@ No embedder is required.
 that implement the protocol. Tracer exceptions never propagate into
 the planner — observability is a hard invariant.
 
+`LangSmithTracer` ships the same hooks to LangSmith. A tracer that
+implements only some hooks is fine: the nodes wrap every tracer in
+`SafeTracerProxy`, which turns missing hooks into no-ops. Pass
+`record_expansions=True` to receive `on_search_expand` for every A*
+node; explicit `AStarStrategy()` / `TwoPhasePipelineStrategy()`
+instances inherit the planner's tracer, so tracing does not disappear
+when you name the default strategy. `CostAccumulator` is a LangChain
+callback that totals tokens and USD per run from a bundled price
+snapshot, warns once per unknown model, and raises instead when
+`require_known_pricing=True`. `ReflexionTracer` turns action failures
+into `Reflection`s and persists them in the history's store so later
+runs can read them back.
+
+## Pluggable strategies
+
+`GoapGraph(strategy=...)` accepts any object implementing the
+`PlanningStrategy` protocol: `plan(start, goal, actions, *,
+blacklisted_actions, prior_plan, current_step)`. The built-in strategies
+cover the common shapes:
+
+- `AStarStrategy` is plain A*; `TwoPhasePipelineStrategy` runs A* and then
+  CSP validation and selection, which is what the planner does by default
+  when the goal carries constraints or objectives.
+- `MCTSStrategy` searches stochastic domains with Monte-Carlo tree search
+  over a `TransitionModel`. `MCTSExploration`, `MCTSReuseConfig` and
+  `MCTSTracingConfig` tune exploration, tree reuse between episodes and
+  per-node tracing; the rollout policies (`RandomRollout`,
+  `HeuristicRollout`, `StochasticRollout`) and `ScalarHeuristic` shape the
+  value estimate.
+- `AnytimePlanningStrategy(time_budget_ms)` runs weighted A* with a
+  tightening weight schedule and returns the best complete plan found
+  within the budget.
+- `LazyDecompositionStrategy(lookahead=...)` plans only the next few steps
+  and re-plans as it goes; the truncated plan is re-validated against the
+  goal's constraints.
+- `RepairStrategy` patches the in-flight plan after a failure (see
+  *Replanning, retries and blacklisting*).
+- `UtilityStrategy` ranks applicable actions by expected value instead of
+  planning toward a fixed goal. Pair it with `NirvanaGoal`, a goal that is
+  never satisfied, for always-on agents that stop only when no action
+  applies or a termination policy fires.
+- `refine_with_csp(plan, goal)` validates an existing plan against a goal's
+  constraints and attaches CSP scoring without searching.
+
+`StrategyRouter` picks among these automatically (see *Strategy routing*).
+
+## Multi-goal decomposition
+
+`MultiGoal` composes several `GoalSpec`s. In `sequential` mode the planner
+works through them in order and tracks `current_subgoal_index`; a sub-goal
+the world already satisfies is skipped, and one that cannot be planned
+ends the run with `status="no_plan"` unless `on_infeasible="skip"`, which
+records it in `skipped_subgoals` and finishes with `status="partial"`. In
+`any` mode every sub-goal is planned and the cheapest feasible plan runs;
+`best_value` picks the sub-goal whose `GoalSpec.value` net of plan cost is
+highest. When no sub-goal can be planned, `no_plan_explanation` carries
+each sub-goal's own explanation.
+
+## Reliability and recovery
+
+### Retries and `ActionQos`
+
+`ActionSpec.max_retries` is the observer's budget: a failed action is
+re-planned up to that many times and then blacklisted. `ActionQos` adds
+in-executor retries without a replan: `max_attempts`, exponential back-off
+(`backoff_initial_ms`, `backoff_multiplier`, `backoff_max_ms`, `jitter`)
+and the exceptions that count as transient (`retryable_exceptions`, or
+every exception when `idempotent=True`). `DEFAULT_RETRY_POLICY` and
+`FIRE_ONCE` are ready-made policies. Back-off jitter never draws from the
+`rng` you pass for stochastic sampling, so retries keep seeded runs
+reproducible.
+
+### Human-in-the-loop and typed forms
+
+`ActionSpec(require_human_approval=True)` makes the executor call
+LangGraph's `interrupt()` before the action runs. Resume with
+`Command(resume=True)` (or `{"approved": True}`) to approve and `False` to
+deny; a denial is a failure that counts toward the action's retry budget.
+Passing a Pydantic model class instead of `True` turns the pause into a
+typed form: the resume payload is validated against the model and stored
+under `human_input_key` in the world state, and an invalid payload is a
+failure the observer can re-plan around. Approval actions always run alone
+in a parallel wave.
+
+### Stuck handlers
+
+When planning fails, the planner node consults the `stuck_handlers` given
+to `GoapGraph`, wrapped in a `MulticastStuckHandler`. A handler receives
+the state and the `no_plan_explanation` and returns a
+`StuckHandlerResult`: `REPLAN` with `state_updates` and/or a `new_goal`
+makes the planner try again, up to `max_stuck_iterations` times;
+`NO_RESOLUTION` lets the run end with `status="no_plan"`.
+`FunctionalStuckHandler` wraps a plain function, and `AsyncStuckHandler`
+implementations are awaited on the async path.
+
+### Early termination
+
+`termination_policies` stop a run before the goal is reached:
+`MaxActionsPolicy`, `MaxCostPolicy`, `MaxWallClockPolicy`,
+`MaxTokensPolicy`, `MaxLLMCallsPolicy` and `OnStuckPolicy`, combined with
+`FirstOfPolicy` or `AllOfPolicy`. The observer checks goal satisfaction
+first, so a run that reaches the goal on the step that exhausts a cap
+reports `goal_achieved`; otherwise it ends with `status="terminated"` and
+an `EarlyTermination` record naming the policy that fired. The wall-clock
+anchor is an epoch timestamp stored in the state, so budgets survive a
+resume in another process.
+
+## Sensors, guards and condition resolvers
+
+Three hooks let a graph check the world instead of trusting its state.
+`sensors` (`Sensor`, `AsyncSensor`, `FunctionalSensor`) run in the planner
+node before each planning pass and merge fresh observations into
+`world_state`. `guards` (`ActionGuard`, `FunctionalGuard`) run before an
+action executes and return `GuardResult`s: a `GuardSeverity.BLOCK` result
+fails the action and counts toward its retry budget, a `WARN` is logged
+and the action proceeds. `resolvers` (`ConditionResolver`,
+`FunctionalConditionResolver`, `PromptConditionResolver`) answer the
+preconditions no action can establish with a three-valued
+`ConditionStatus`; resolved values are written back to the state so a
+resumed run does not ask again.
+
+## Checkpointing
+
+Any LangGraph checkpointer works with its stock serializer because the
+state is JSON (see *The state is plain JSON*). Compile with
+`checkpointer=MemorySaver()`, or the Postgres and Redis savers from the
+`checkpoint-postgres` and `checkpoint-redis` extras, build the input with
+`GoapGraph.initial_state(goal, world_state)`, and invoke with a
+`thread_id`. A run interrupted mid-plan, by a crash or by a
+human-in-the-loop pause, resumes from the last checkpoint with its plan,
+history and failure counts intact; `rehydrate_state` turns a checkpointed
+state back into typed objects.
+
+## Plan explanations
+
+A failed planning pass explains itself. `explain_no_plan` performs a
+static reachability analysis and reports the goal values no action
+produces and the precondition values nothing establishes;
+`explain_infeasibility` reports every violated constraint of a
+CSP-infeasible plan with its `ResourceShortfall`s. The planner stores the
+result under `no_plan_explanation`, stuck handlers receive it as their
+`reason`, and `langgoap explain` prints it from the command line.
+
+## Visualization
+
+`render_mermaid`, `render_dot` and `render_ascii` draw a plan as a graph;
+`render_mermaid_gantt` and `render_ascii_gantt` draw the CSP schedule of
+durative actions; `visualize(plan, format="auto")` picks a renderer for
+the current front end. Step costs are evaluated against each step's
+pre-state, and a cost function that cannot be evaluated is shown without
+a number rather than failing the render. In Jupyter a `Plan` displays as
+Markdown offline; set `LANGGOAP_DISPLAY_PNG=1` to fetch a PNG from
+mermaid.ink instead.
+
+## Command line and deployment
+
+The `langgoap` CLI loads actions from a Python module. `langgoap plan`
+plans only (add `--run` to execute), `langgoap actions` lists the catalog,
+`langgoap explain` diagnoses an unreachable goal, `langgoap visualize`
+renders a plan, and `langgoap deploy-init` writes a LangGraph deployment.
+`scaffold_deployment` is the function behind the last one: it emits
+`langgraph.json`, a `graph.py` entrypoint, `.env.example` and a README so
+`langgraph dev` serves the graph with an `/mcp` endpoint and `langgraph
+deploy` ships it to LangGraph Platform.
+
+## Deep Agents and tool interop
+
+LangGOAP graphs compose with the LangChain ecosystem in both directions.
+`goapify_tool` turns a LangChain tool into an `ActionSpec`, with an
+optional `EffectValidator` to check the tool's effects, and
+`create_goap_agent` builds a graph from a list of tools and a goal.
+`create_goap_tool` wraps a compiled graph as a `StructuredTool`,
+`create_goap_subagent` exposes it as a Deep Agents sub-agent, and
+`format_goap_result` turns a run's result into a compact report for the
+calling agent. `GoapSubgraph` and `add_goap_subgraph` embed a graph as a
+node of a larger `StateGraph`.
+
 ## Related reading
 
 - {doc}`../api/index` — public API reference.

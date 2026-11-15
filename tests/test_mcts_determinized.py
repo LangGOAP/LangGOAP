@@ -15,7 +15,7 @@ supplied, so callers can pair ``expected()``-only tree statistics with
 "Determinized UCT" / "Sparse Sampling" variant (Kocsis–Szepesvári 2006;
 Kearns, Mansour & Ng 2002).
 
-See ``research/plans/phase-6.0-launch-demo.md`` — Fix A.
+See the internal "phase-6.0-launch-demo" design note (not in the repository) — Fix A.
 """
 
 from __future__ import annotations

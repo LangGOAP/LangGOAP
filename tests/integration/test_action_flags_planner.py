@@ -1,7 +1,7 @@
 """Integration tests for ``ActionSpec.can_rerun`` / ``read_only`` flags.
 
 Mirrors Embabel's contract on
-``research/repos/embabel-agent/embabel-agent-api/src/main/kotlin/
+``https://github.com/embabel/embabel-agent/blob/HEAD/embabel-agent-api/src/main/kotlin/
 com/embabel/agent/core/Action.kt``:
 
 * ``canRerun: Boolean`` — when ``False``, the planner must not include

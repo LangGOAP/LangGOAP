@@ -21,7 +21,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 
 # Install dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir "langgraph>=1.0.0" "langchain>=1.0.0" && \
+    pip install --no-cache-dir "langgraph>=1.0.0" && \
     pip install --no-cache-dir jupyter langchain-openai langchain-anthropic
 
 # Create a startup script that checks if local library is mounted

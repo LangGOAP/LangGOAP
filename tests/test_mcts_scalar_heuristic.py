@@ -9,9 +9,9 @@ supply a continuous ``(state, goal) -> float in [-1, +1]`` value
 function that is consumed at rollout leaves (and any non-terminal
 stop) so UCB1 exploitation terms separate.
 
-Related plan doc: ``research/plans/mcts-scalar-heuristic.md``.
+Related plan doc: the internal "mcts-scalar-heuristic" design note (not in the repository).
 Related experiment:
-``research/experiments/2026-04-21-mcts-scalar-heuristic.md``.
+the internal "2026-04-21-mcts-scalar-heuristic" design note (not in the repository).
 """
 
 from __future__ import annotations

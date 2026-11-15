@@ -1,7 +1,7 @@
 """Pre-registered A/B benchmark: MCTS vs A* on stochastic gridworlds.
 
 Runs the protocol declared in
-``research/experiments/2026-04-20-mcts-on-stochastic.md``:
+the internal "2026-04-20-mcts-on-stochastic" design note (not in the repository):
 
 - Two domain cells \u2014 ``cliff-walking-4x12`` and ``frozen-lake-4x4``.
 - Three arms \u2014 ``astar`` (baseline), ``mcts`` (treatment), and
@@ -14,7 +14,7 @@ Can be invoked two ways:
 
 * ``uv run python -m tests.benchmarks.stochastic_gridworld_bench`` \u2014
   runs the full pre-registered protocol and writes a structured JSON
-  + Markdown summary under ``research/experiments/results/``.
+  + Markdown summary under ``tests/benchmarks/results/`` (gitignored).
 * ``uv run pytest tests/benchmarks/stochastic_gridworld_bench.py`` \u2014
   runs a reduced 5-seed smoke test so the harness itself stays under
   CI budget; the real numbers are produced by the script invocation.
@@ -493,19 +493,9 @@ def main() -> None:
     if inconclusive:
         extended = run_benchmark(SEEDS_STAGE_1 + SEEDS_STAGE_2, include_ablation=False)
         results["stage_2"] = extended
-    # Research artifacts live at the *top-level* ``research/`` tree
-    # (outside the git repo), not under ``langgoap/``.  The harness may
-    # be invoked from either the workspace root or from inside
-    # ``langgoap/`` \u2014 resolve both cases here.
-    cwd = Path.cwd()
-    if (cwd / "research").is_dir():
-        base = cwd
-    elif (cwd.parent / "research").is_dir():
-        base = cwd.parent
-    else:
-        base = cwd
+    # Results land next to the harness; the directory is gitignored.
     out_dir = (
-        base / "research" / "experiments" / "results" / "2026-04-20-mcts-on-stochastic"
+        Path(__file__).resolve().parent / "results" / "2026-04-20-mcts-on-stochastic"
     )
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "results.json").write_text(json.dumps(results, indent=2))

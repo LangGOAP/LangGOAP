@@ -12,7 +12,7 @@ explicit :class:`~langgoap.planner.transitions.DivergencePolicy`
 of kind ``"risk-averse"`` (structured user opt-in) or the
 ``prefer_mcts_for_stochastic=True`` classifier flag.
 
-See ``research/plans/strategy-router.md``.
+See the internal "strategy-router" design note (not in the repository).
 """
 
 from __future__ import annotations

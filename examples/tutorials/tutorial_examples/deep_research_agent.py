@@ -1,7 +1,7 @@
 r"""Deep research agent — Tier 3 tutorial translating deepagents' example.
 
 Adapts the orchestrator-plus-subagent research loop from
-``research/repos/deepagents/examples/deep_research`` into a LangGOAP plan
+``https://github.com/langchain-ai/deepagents/blob/HEAD/examples/deep_research`` into a LangGOAP plan
 driven by the Layer A on-ramp :func:`langgoap.integrations.create_goap_agent`.
 The tutorial spotlights five features at once:
 

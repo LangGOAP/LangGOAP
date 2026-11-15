@@ -17,8 +17,10 @@ blocked? Planner routes through log analysis → hotfix. No routing code changed
 
 ## Run
 
+The narrated version is `incident_response_screencast.ipynb` in this directory; the scripts below run the same three stages from the command line.
+
 ```bash
-cd langgoap
+cd LangGOAP
 uv run python examples/screencast/incident/before.py
 uv run python examples/screencast/incident/after.py
 uv run python examples/screencast/incident/after_disrupted.py

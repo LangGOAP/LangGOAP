@@ -11,7 +11,7 @@ a single ``action_failed`` result — the planner / observer then decide
 whether to replan, blacklist, or escalate.
 
 API surface mirrors Embabel's ``ActionQos`` data class
-(``research/repos/embabel-agent/embabel-agent-api/src/main/kotlin/
+(``https://github.com/embabel/embabel-agent/blob/HEAD/embabel-agent-api/src/main/kotlin/
 com/embabel/agent/core/ActionQos.kt``) with two LangGOAP-specific
 additions:
 

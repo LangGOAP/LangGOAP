@@ -71,6 +71,7 @@ venv.bak/
 docs/_build/
 docs/examples/basics/
 docs/examples/tutorials/
+docs/examples/screencast/
 docs/api/generated/
 
 # Jupyter
@@ -111,3 +112,6 @@ examples/.Trash*
 
 # MFCQI local analysis outputs (the committed badge lives in .github/badges/)
 .mfcqi-reports/
+
+# Benchmark harness output (see tests/benchmarks/stochastic_gridworld_bench.py)
+tests/benchmarks/results/

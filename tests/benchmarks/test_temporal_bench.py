@@ -50,7 +50,6 @@ def _run_astar_only(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.bench
 class TestAStarPlanning:
     """Benchmark A* planning without CSP for temporal chains."""
 
@@ -87,7 +86,6 @@ class TestAStarPlanning:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.bench
 class TestPipelinePlanning:
     """Benchmark the full A* → CSP pipeline with temporal scheduling."""
 

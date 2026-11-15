@@ -1,7 +1,7 @@
 """Unit tests for ``langgoap.termination`` policies.
 
 API reference:
-  research/repos/embabel-agent/embabel-agent-api/src/main/kotlin/
+  https://github.com/embabel/embabel-agent/blob/HEAD/embabel-agent-api/src/main/kotlin/
     com/embabel/agent/core/EarlyTerminationPolicy.kt
 """
 

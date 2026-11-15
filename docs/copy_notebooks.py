@@ -8,14 +8,16 @@ the notebooks listed in :data:`CATALOG` from the project's
 
 Only notebooks explicitly listed in :data:`CATALOG` are copied.
 Notebooks that live in ``examples/tutorials/`` but are not part of
-the shipped v0.1.0 catalog (LangGraph reference originals, exploratory
+the shipped catalog (LangGraph reference originals, exploratory
 drafts, etc.) are intentionally excluded so the Sphinx toctree stays
 aligned with ``docs/examples/index.md``.
 
 Usage:
     python docs/copy_notebooks.py
 """
-import shutil
+
+import json
+import re
 from pathlib import Path
 
 # Resolve paths relative to this script's location
@@ -23,6 +25,11 @@ DOCS_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = DOCS_DIR.parent
 EXAMPLES_SRC = PROJECT_ROOT / "examples"
 EXAMPLES_DST = DOCS_DIR / "examples"
+
+#: Where relative links that leave the rendered notebook tree point instead.
+GITHUB_BLOB = "https://github.com/LangGOAP/LangGOAP/blob/main/"
+
+_LINK = re.compile(r"\]\(([^)\s#]+)(#[^)\s]*)?\)")
 
 # Explicit catalog: only these notebooks are copied into the docs
 # build.  Anything in examples/ that is not listed here is excluded.
@@ -35,6 +42,11 @@ CATALOG: dict[str, list[str]] = {
         "stuck_handlers.ipynb",
         "typed_form_hitl.ipynb",
         "action_qos.ipynb",
+        "cli.ipynb",
+        "goap_subgraph.ipynb",
+        "tracing.ipynb",
+        "stochastic_gridworld.ipynb",
+        "mcts_vs_astar_stochastic.ipynb",
     ],
     "tutorials": [
         # Tier 1 — Primers
@@ -69,6 +81,59 @@ CATALOG: dict[str, list[str]] = {
 }
 
 
+def _is_rendered_notebook(path: Path) -> bool:
+    """True when ``path`` is a catalog notebook, i.e. it exists in the docs tree too."""
+    try:
+        rel = path.relative_to(EXAMPLES_SRC)
+    except ValueError:
+        return False
+    return rel.name in CATALOG.get(rel.parent.as_posix(), [])
+
+
+def rewrite_relative_links(markdown: str, notebook_dir: Path) -> str:
+    """Point relative links that leave the rendered notebook tree at GitHub.
+
+    A notebook under ``examples/`` may link to its backing test
+    (``../../tests/integration/test_x.py``), to a sibling file
+    (``script.md``) or to a directory (``../screencast/incident/``).
+    Those paths are valid on GitHub but not inside ``docs/examples/``, so
+    the copy rendered by Sphinx gets absolute ``GITHUB_BLOB`` URLs
+    (issue #66).  Links to other catalog notebooks stay relative, because
+    the docs tree mirrors ``examples/`` for them; absolute URLs, anchors
+    and targets that do not exist are left alone.
+    """
+
+    def _replace(match: re.Match[str]) -> str:
+        target, anchor = match.group(1), match.group(2) or ""
+        if target.startswith(("http://", "https://", "mailto:")):
+            return match.group(0)
+        resolved = (notebook_dir / target).resolve()
+        if not resolved.exists() or _is_rendered_notebook(resolved):
+            return match.group(0)
+        try:
+            rel = resolved.relative_to(PROJECT_ROOT).as_posix()
+        except ValueError:
+            return match.group(0)
+        if target.endswith("/"):
+            rel += "/"
+        return f"]({GITHUB_BLOB}{rel}{anchor})"
+
+    return _LINK.sub(_replace, markdown)
+
+
+def _copy_notebook(src_file: Path, dst_file: Path) -> None:
+    """Copy one notebook, rewriting the links in its Markdown cells."""
+    notebook = json.loads(src_file.read_text())
+    for cell in notebook.get("cells", []):
+        if cell.get("cell_type") != "markdown":
+            continue
+        text = "".join(cell["source"])
+        cell["source"] = rewrite_relative_links(text, src_file.parent).splitlines(
+            keepends=True
+        )
+    dst_file.write_text(json.dumps(notebook, indent=1, ensure_ascii=False) + "\n")
+
+
 def copy_notebooks() -> None:
     """Copy every notebook in :data:`CATALOG` into ``docs/examples/``."""
     copied = 0
@@ -91,9 +156,11 @@ def copy_notebooks() -> None:
                 missing.append(str(src_file.relative_to(PROJECT_ROOT)))
                 continue
             dst_file = dst_path / name
-            shutil.copy2(src_file, dst_file)
+            _copy_notebook(src_file, dst_file)
             copied += 1
-            print(f"  {src_file.relative_to(PROJECT_ROOT)} -> {dst_file.relative_to(DOCS_DIR)}")
+            print(
+                f"  {src_file.relative_to(PROJECT_ROOT)} -> {dst_file.relative_to(DOCS_DIR)}"
+            )
 
     print(f"\nCopied {copied} notebooks.")
     if missing:

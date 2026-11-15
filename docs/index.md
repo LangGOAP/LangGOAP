@@ -233,7 +233,7 @@ Requires Python 3.10+.
 
 - **[Concepts](concepts/index.md)** — GOAP planning, constraint
   optimization, and the LangGraph-native execution model.
-- **[Examples](examples/index.md)** — 27 tutorial notebooks and
+- **[Examples](examples/index.md)** — 22 tutorial notebooks and
   12 basics notebooks.
 - **[API reference](api/index.md)** — every symbol in the public
   `langgoap.__all__`.
