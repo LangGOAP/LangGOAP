@@ -23,9 +23,11 @@ type any implementation.
 
 from __future__ import annotations
 
+import copy
 import time
+import warnings
 from dataclasses import replace
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
@@ -79,10 +81,33 @@ class AStarStrategy:
         time_budget_ms: Optional wall-clock budget in milliseconds.  When
             set, A* returns the best complete plan found within the budget
             (anytime behaviour).  ``None`` means run until exhaustion.
+        tracer: Optional :class:`~langgoap.tracing.PlanningTracer` that
+            receives the search hooks.  When omitted, ``GoapPlanner`` hands
+            the strategy its own tracer, so passing ``strategy=AStarStrategy()``
+            explicitly keeps the same tracing as the default (#63).
+        record_expansions: Emit ``on_search_expand`` per expanded node.
     """
 
-    def __init__(self, *, time_budget_ms: float | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        time_budget_ms: float | None = None,
+        tracer: Any = None,
+        record_expansions: bool = False,
+    ) -> None:
         self._time_budget_ms = time_budget_ms
+        self._tracer = tracer
+        self._record_expansions = record_expansions
+
+    def _with_tracer(self, tracer: Any, record_expansions: bool) -> AStarStrategy:
+        """A copy reporting to ``tracer``, unless one was set at construction."""
+        if self._tracer is not None:
+            return self
+        return AStarStrategy(
+            time_budget_ms=self._time_budget_ms,
+            tracer=tracer,
+            record_expansions=record_expansions,
+        )
 
     def plan(
         self,
@@ -101,20 +126,44 @@ class AStarStrategy:
             actions,
             blacklisted_actions=blacklisted_actions,
             time_budget_ms=self._time_budget_ms,
+            tracer=self._tracer,
+            record_expansions=self._record_expansions,
         )
 
 
-class CSPRefinementStrategy:
-    """Run CSP validation / optimization over an existing candidate plan.
+def refine_with_csp(plan: Plan, goal: GoalSpec) -> Plan:
+    """Validate ``plan`` against ``goal``'s constraints and attach CSP scoring.
 
-    This strategy takes a precomputed candidate plan at construction
-    time and refines it through :func:`langgoap.planner.csp.validate_plan`.
-    It does **not** run A* itself — compose it with
-    :class:`AStarStrategy` via :class:`TwoPhasePipelineStrategy` for
-    the common case.
+    Runs :func:`langgoap.planner.csp.validate_plan` over an existing plan
+    and returns the plan re-scored with a
+    :class:`~langgoap.score.HardSoftScore` and ``metadata.csp`` filled in.
+    It does **not** search: pair it with A* (or use
+    :class:`TwoPhasePipelineStrategy`, which does both) when you need a
+    plan constructed as well as checked.
+    """
+    # Local imports avoid pipeline <-> strategy import cycles.
+    from langgoap.planner.csp import validate_plan
+    from langgoap.planner.pipeline import _augment_plan
+
+    return _augment_plan(plan, goal, validate_plan(plan, goal))
+
+
+class CSPRefinementStrategy:
+    """Deprecated: call :func:`refine_with_csp` instead.
+
+    This class never fit the :class:`PlanningStrategy` contract: its
+    ``plan()`` ignored ``start`` and ``actions`` and refined the plan
+    given at construction time (#63).  It remains as a thin wrapper until
+    0.3.0 and warns on construction.
     """
 
     def __init__(self, candidate: Plan) -> None:
+        warnings.warn(
+            "CSPRefinementStrategy is deprecated and will be removed in 0.3.0; "
+            "call refine_with_csp(plan, goal) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._candidate = candidate
 
     def plan(
@@ -127,13 +176,8 @@ class CSPRefinementStrategy:
         prior_plan: Plan | None = None,
         current_step: int = 0,
     ) -> Plan | None:
-        del prior_plan, current_step  # CSP refines the constructor-time candidate
-        # Local import to avoid pipeline ↔ strategy import cycles.
-        from langgoap.planner.csp import validate_plan
-        from langgoap.planner.pipeline import _augment_plan
-
-        csp_meta = validate_plan(self._candidate, goal)
-        return _augment_plan(self._candidate, goal, csp_meta)
+        del start, actions, blacklisted_actions, prior_plan, current_step
+        return refine_with_csp(self._candidate, goal)
 
 
 class TwoPhasePipelineStrategy:
@@ -145,8 +189,28 @@ class TwoPhasePipelineStrategy:
     Protocol-typed kwarg used for custom strategies.
     """
 
-    def __init__(self, *, max_alternatives: int = 5) -> None:
+    def __init__(
+        self,
+        *,
+        max_alternatives: int = 5,
+        tracer: Any = None,
+        record_expansions: bool = False,
+    ) -> None:
         self._max_alternatives = max_alternatives
+        self._tracer = tracer
+        self._record_expansions = record_expansions
+
+    def _with_tracer(
+        self, tracer: Any, record_expansions: bool
+    ) -> TwoPhasePipelineStrategy:
+        """A copy reporting to ``tracer``, unless one was set at construction."""
+        if self._tracer is not None:
+            return self
+        return TwoPhasePipelineStrategy(
+            max_alternatives=self._max_alternatives,
+            tracer=tracer,
+            record_expansions=record_expansions,
+        )
 
     def plan(
         self,
@@ -165,7 +229,25 @@ class TwoPhasePipelineStrategy:
             actions,
             blacklisted_actions=blacklisted_actions,
             max_alternatives=self._max_alternatives,
+            tracer=self._tracer,
+            record_expansions=self._record_expansions,
         )
+
+
+def rebind_inner_tracer(strategy: Any, tracer: Any, record_expansions: bool) -> Any:
+    """Copy ``strategy`` with its ``_inner`` search bound to ``tracer``.
+
+    Shared by the wrapper strategies (lazy, anytime, repair) so a tracer
+    given to ``GoapPlanner`` reaches the A* they delegate to (#63).  A
+    wrapper whose inner strategy has no ``_with_tracer`` hook is returned
+    unchanged.
+    """
+    binder = getattr(strategy._inner, "_with_tracer", None)
+    if binder is None:
+        return strategy
+    clone = copy.copy(strategy)
+    clone._inner = binder(tracer, record_expansions)
+    return clone
 
 
 class LazyDecompositionStrategy:
@@ -199,6 +281,11 @@ class LazyDecompositionStrategy:
             raise ValueError(f"lookahead must be >= 1, got {lookahead}")
         self._lookahead = lookahead
         self._inner: PlanningStrategy = inner or AStarStrategy()
+
+    def _with_tracer(
+        self, tracer: Any, record_expansions: bool
+    ) -> LazyDecompositionStrategy:
+        return rebind_inner_tracer(self, tracer, record_expansions)
 
     def plan(
         self,
@@ -302,6 +389,11 @@ class AnytimePlanningStrategy:
             time_budget_ms=time_budget_ms
         )
 
+    def _with_tracer(
+        self, tracer: Any, record_expansions: bool
+    ) -> AnytimePlanningStrategy:
+        return rebind_inner_tracer(self, tracer, record_expansions)
+
     def plan(
         self,
         start: PlanningState,
@@ -375,4 +467,6 @@ __all__ = [
     "LazyDecompositionStrategy",
     "PlanningStrategy",
     "TwoPhasePipelineStrategy",
+    "rebind_inner_tracer",
+    "refine_with_csp",
 ]

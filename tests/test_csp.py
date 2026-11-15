@@ -854,6 +854,17 @@ class TestParetoPlans:
         qualities = [f[0].total_cost for f in frontier]  # use plan order as proxy
         assert frontier[0][0] is p2  # highest quality first
 
+    def test_no_objectives_metadata_counts_every_plan(self) -> None:
+        """Without objectives the frontier metadata is still annotated (#63)."""
+        a = self._plan_with_resources(cost=5.0)
+        b = self._plan_with_resources(cost=8.0)
+        goal = GoalSpec(conditions={"done": True})
+
+        frontier = pareto_plans([a, b], goal, scale=100)
+
+        assert [meta.plans_evaluated for _, meta in frontier] == [2, 2]
+        assert all(meta.scale_factor == 100 for _, meta in frontier)
+
     def test_no_objectives_returns_all_feasible_sorted_by_cost(self) -> None:
         """When goal has no objectives, all feasible plans are returned sorted by cost."""
         p_cheap = make_plan(make_action("cheap", eff={"done": True}))

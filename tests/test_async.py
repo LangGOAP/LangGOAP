@@ -26,25 +26,29 @@ from tests.conftest import make_plan as _make_plan
 class TestAsyncActionSpec:
     def test_is_async_execute_false_for_sync(self) -> None:
         action = ActionSpec(name="sync", execute=lambda ws: {})
-        assert action.is_async_execute() is False
+        with pytest.warns(DeprecationWarning, match="is_async_execute"):
+            assert action.is_async_execute() is False
 
     def test_is_async_execute_true_for_async_execute(self) -> None:
         async def async_fn(ws: dict[str, Any]) -> dict[str, Any]:
             return {}
 
         action = ActionSpec(name="async", execute=async_fn)
-        assert action.is_async_execute() is True
+        with pytest.warns(DeprecationWarning, match="is_async_execute"):
+            assert action.is_async_execute() is True
 
     def test_is_async_execute_true_for_aexecute_field(self) -> None:
         async def async_fn(ws: dict[str, Any]) -> dict[str, Any]:
             return {}
 
         action = ActionSpec(name="async", execute=lambda ws: {}, aexecute=async_fn)
-        assert action.is_async_execute() is True
+        with pytest.warns(DeprecationWarning, match="is_async_execute"):
+            assert action.is_async_execute() is True
 
     def test_is_async_execute_false_for_no_execute(self) -> None:
         action = ActionSpec(name="noop")
-        assert action.is_async_execute() is False
+        with pytest.warns(DeprecationWarning, match="is_async_execute"):
+            assert action.is_async_execute() is False
 
     def test_aexecute_field_stored(self) -> None:
         async def afn(ws: dict[str, Any]) -> dict[str, Any]:
@@ -187,7 +191,8 @@ class TestAsyncGoapAction:
 
         spec = CustomAsyncAction().to_spec()
         assert spec.aexecute is not None
-        assert spec.is_async_execute() is True
+        with pytest.warns(DeprecationWarning, match="is_async_execute"):
+            assert spec.is_async_execute() is True
 
 
 # ---------------------------------------------------------------------------

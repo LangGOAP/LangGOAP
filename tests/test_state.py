@@ -158,6 +158,18 @@ class TestPlanningStateAccessors:
         assert state.get("x") is None
         assert state.get("x", "fallback") == "fallback"
 
+    def test_get_returns_falsy_values_that_are_present(self) -> None:
+        state = PlanningState.from_dict({"n": 0, "flag": False, "name": ""})
+        assert state.get("n", "missing") == 0
+        assert state.get("flag", "missing") is False
+        assert state.get("name", "missing") == ""
+        assert state.get("absent", "missing") == "missing"
+
+    def test_contains_and_get_see_keys_added_by_apply(self) -> None:
+        state = PlanningState.from_dict({"a": 1}).apply({"b": 2})
+        assert "a" in state and "b" in state and "c" not in state
+        assert state.get("b") == 2
+
     def test_contains(self) -> None:
         state = PlanningState.from_dict({"a": 1})
         assert "a" in state
