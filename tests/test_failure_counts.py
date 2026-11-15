@@ -104,7 +104,7 @@ class TestGraphKeepsEarlierFailures:
         assert counts["B"] >= 1
         assert result["blacklisted_actions"] == ["B"]
 
-    def test_invalid_form_after_a_retried_failure_keeps_both_counts(self) -> None:
+    def test_denied_form_after_a_retried_failure_keeps_both_counts(self) -> None:
         actions, _ = _flaky_then_gated(_Form)
         graph = GoapGraph(actions)
         compiled = graph.compile(checkpointer=MemorySaver())
@@ -112,10 +112,28 @@ class TestGraphKeepsEarlierFailures:
         compiled.invoke(
             graph.initial_state(GoalSpec(conditions={"done": True})), config=config
         )
-        result = compiled.invoke(Command(resume={"not_the_field": 1}), config=config)
+        result = compiled.invoke(Command(resume=False), config=config)
         assert result["status"] == "no_plan"
         counts = result["action_failure_counts"]
         assert counts["A"] == 1 and counts["B"] >= 1
+
+    def test_invalid_form_after_a_retried_failure_is_asked_again(self) -> None:
+        """An invalid submission is not a failure: it is re-asked, and the
+        earlier action's count is untouched in the meantime."""
+        actions, _ = _flaky_then_gated(_Form)
+        graph = GoapGraph(actions)
+        compiled = graph.compile(checkpointer=MemorySaver())
+        config = {"configurable": {"thread_id": "t-form-reask"}}
+        compiled.invoke(
+            graph.initial_state(GoalSpec(conditions={"done": True})), config=config
+        )
+        paused = compiled.invoke(Command(resume={"not_the_field": 1}), config=config)
+        assert paused["__interrupt__"][0].value["attempt"] == 2
+        counts = paused["action_failure_counts"]
+        assert counts == {"A": 1}
+        assert [
+            h["action_name"] for h in paused["execution_history"] if not h["success"]
+        ] == ["A"]
 
     def test_guard_block_after_a_retried_failure_keeps_both_counts(self) -> None:
         actions, _ = _flaky_then_gated(False)

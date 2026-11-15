@@ -383,7 +383,21 @@ def _check_form_approval(
     *,
     failure_counts: Mapping[str, int] | None = None,
 ) -> dict[str, Any] | None:
-    """Typed-form HITL gate.  See :func:`_check_human_approval`."""
+    """Typed-form HITL gate.  See :func:`_check_human_approval`.
+
+    The resume value is interpreted as follows:
+
+    * ``False`` or ``{"approved": False, "reason": ...}`` (when the model has
+      no ``approved`` field) declines the form.  That is a decision, so it
+      is recorded and blacklisted exactly like a denied boolean gate.
+    * A dict (or model instance) that validates is the answer; it is stored
+      under ``human_input_key`` and the action runs.
+    * Anything else is an input error, not a decision: the operator is
+      asked again and the new interrupt payload carries ``attempt``,
+      ``validation_errors`` (``loc`` / ``msg`` / ``type`` per error) and
+      ``rejected_payload``.  Each round needs a human resume, so nothing
+      loops on its own.
+    """
     from pydantic import BaseModel, ValidationError
 
     model_cls: type[BaseModel] = action.require_human_approval  # type: ignore[assignment]
@@ -405,41 +419,66 @@ def _check_form_approval(
         else:
             logger.info("Action %r: reusing the operator's %r answer", action.name, key)
             return None
-    schema = model_cls.model_json_schema()
-    resume_value = interrupt(
-        {
-            "type": "goap_action_form",
-            "action": action.name,
-            "form_schema": schema,
-            "model_name": model_cls.__name__,
-            "preconditions": dict(action.preconditions),
-            "world_state": dict(world_state),
-        }
-    )
-
-    if resume_value is None or not isinstance(resume_value, (dict, BaseModel)):
-        return _build_form_invalid_failure(
-            action,
-            "form payload missing or wrong shape",
-            state_before,
-            world_state,
-            failure_counts=failure_counts,
-        )
-    try:
+    payload: dict[str, Any] = {
+        "type": "goap_action_form",
+        "action": action.name,
+        "form_schema": model_cls.model_json_schema(),
+        "model_name": model_cls.__name__,
+        "preconditions": dict(action.preconditions),
+        "world_state": dict(world_state),
+        "attempt": 1,
+    }
+    parsed: BaseModel
+    while True:
+        resume_value = interrupt(payload)
+        if _is_form_denial(resume_value, model_cls):
+            reason = "denied by operator"
+            if isinstance(resume_value, dict):
+                reason = resume_value.get("reason", reason)
+            result = _build_failure(
+                action,
+                RuntimeError(f"human_approval_denied: {reason}"),
+                state_before,
+                world_state,
+            )
+            result["action_failure_counts"] = _blacklisting_counts(
+                action, failure_counts
+            )
+            return result
         if isinstance(resume_value, BaseModel):
             parsed = resume_value
+            break
+        if isinstance(resume_value, dict):
+            try:
+                parsed = model_cls.model_validate(resume_value)
+                break
+            except ValidationError as exc:
+                errors = [
+                    {"loc": list(e["loc"]), "msg": e["msg"], "type": e["type"]}
+                    for e in exc.errors()
+                ]
         else:
-            parsed = model_cls.model_validate(resume_value)
-    except ValidationError as exc:
-        return _build_form_invalid_failure(
-            action,
-            f"form payload failed validation: {exc.errors()!r}",
-            state_before,
-            world_state,
-            failure_counts=failure_counts,
+            errors = [
+                {
+                    "loc": [],
+                    "msg": "form payload must be an object matching the schema",
+                    "type": "wrong_shape",
+                }
+            ]
+        logger.info(
+            "Action %r: form submission %d rejected (%d error(s)); asking again",
+            action.name,
+            payload["attempt"],
+            len(errors),
         )
+        payload = {
+            **payload,
+            "attempt": payload["attempt"] + 1,
+            "validation_errors": errors,
+            "rejected_payload": resume_value,
+        }
 
-    # Approved \u2014 merge the validated form (as JSON-friendly dict) into
+    # Approved: merge the validated form (as a JSON-friendly dict) into
     # world_state under human_input_key (default: action name).  Storing
     # the dict rather than the Pydantic instance keeps the value
     # round-trippable through any checkpointer serializer without
@@ -448,23 +487,15 @@ def _check_form_approval(
     return None
 
 
-def _build_form_invalid_failure(
-    action: ActionSpec,
-    reason: str,
-    state_before: dict[str, Any],
-    world_state: dict[str, Any],
-    *,
-    failure_counts: Mapping[str, int] | None = None,
-) -> dict[str, Any]:
-    """Build a failure result for a rejected typed-form HITL submission."""
-    result = _build_failure(
-        action,
-        RuntimeError(f"human_form_invalid: {reason}"),
-        state_before,
-        world_state,
+def _is_form_denial(resume_value: Any, model_cls: Any) -> bool:
+    """``False``, or ``{"approved": False}`` when the form has no such field."""
+    if resume_value is False:
+        return True
+    return (
+        isinstance(resume_value, dict)
+        and resume_value.get("approved") is False
+        and "approved" not in getattr(model_cls, "model_fields", {})
     )
-    result["action_failure_counts"] = _blacklisting_counts(action, failure_counts)
-    return result
 
 
 def _prepare_execution(
