@@ -122,7 +122,9 @@ def _measure_mean_reward(
     values = []
     for seed in seeds:
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=128, rollout_depth=6, seed=seed),
+            exploration=MCTSExploration(
+                iterations=128, rollout_depth=6, seed=seed, wall_clock_ms=0
+            ),
             transition_model=model,
             scalar_heuristic=heuristic,
         )

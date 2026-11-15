@@ -55,7 +55,9 @@ class TestMCTSStrategyPlanning:
         )
 
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=64, rollout_depth=3, seed=7)
+            exploration=MCTSExploration(
+                iterations=64, rollout_depth=3, seed=7, wall_clock_ms=0
+            )
         )
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({})
@@ -78,7 +80,9 @@ class TestMCTSStrategyPlanning:
         )
 
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=16, rollout_depth=3, seed=7)
+            exploration=MCTSExploration(
+                iterations=16, rollout_depth=3, seed=7, wall_clock_ms=0
+            )
         )
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"done": True})
@@ -99,7 +103,9 @@ class TestMCTSStrategyPlanning:
         ]
         goal = GoalSpec(conditions={"done": True})
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=32, rollout_depth=3, seed=7)
+            exploration=MCTSExploration(
+                iterations=32, rollout_depth=3, seed=7, wall_clock_ms=0
+            )
         )
         plan = strategy.plan(PlanningState.from_dict({}), goal, actions)
         assert plan is None
@@ -121,7 +127,9 @@ class TestMCTSStrategyPlanning:
         ]
         goal = GoalSpec(conditions={"done": True})
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=32, rollout_depth=3, seed=7),
+            exploration=MCTSExploration(
+                iterations=32, rollout_depth=3, seed=7, wall_clock_ms=0
+            ),
             reuse=MCTSReuseConfig(anytime_fallback=True),
         )
         plan = strategy.plan(PlanningState.from_dict({}), goal, actions)
@@ -173,7 +181,9 @@ class TestMCTSPlanCompilesInLangGraph:
         goal = GoalSpec(conditions={"done": True})
 
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=64, rollout_depth=3, seed=7)
+            exploration=MCTSExploration(
+                iterations=64, rollout_depth=3, seed=7, wall_clock_ms=0
+            )
         )
         plan = strategy.plan(PlanningState.from_dict({}), goal, two_step_actions)
         assert plan is not None

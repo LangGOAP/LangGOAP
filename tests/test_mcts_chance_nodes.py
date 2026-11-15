@@ -99,7 +99,9 @@ class TestStochasticExpansionInsertsChanceLayer:
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"remaining": 3, "done": False})
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=16, rollout_depth=4, seed=7),
+            exploration=MCTSExploration(
+                iterations=16, rollout_depth=4, seed=7, wall_clock_ms=0
+            ),
             transition_model=model,
         )
         plan = strategy.plan(start, goal, [_counter_action()])
@@ -135,7 +137,9 @@ class TestDeterministicFastPath:
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"remaining": 3, "done": False})
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=16, rollout_depth=4, seed=7)
+            exploration=MCTSExploration(
+                iterations=16, rollout_depth=4, seed=7, wall_clock_ms=0
+            )
         )
         strategy.plan(start, goal, [_counter_action()])
         root = strategy._last_root  # type: ignore[attr-defined]
@@ -238,7 +242,9 @@ class TestChanceNodeConvergence:
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"pos": 0, "done": False})
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=64, rollout_depth=4, seed=7),
+            exploration=MCTSExploration(
+                iterations=64, rollout_depth=4, seed=7, wall_clock_ms=0
+            ),
             transition_model=model,
             scalar_heuristic=_pos_progress_heuristic,
         )
@@ -277,7 +283,9 @@ class TestChanceNodeConvergence:
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"pos": 0, "done": False})
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=512, rollout_depth=6, seed=7),
+            exploration=MCTSExploration(
+                iterations=512, rollout_depth=6, seed=7, wall_clock_ms=0
+            ),
             transition_model=model,
             scalar_heuristic=_pos_progress_heuristic,
         )
@@ -307,7 +315,9 @@ class TestChanceNodeConvergence:
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"pos": 0, "done": False})
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=128, rollout_depth=6, seed=7),
+            exploration=MCTSExploration(
+                iterations=128, rollout_depth=6, seed=7, wall_clock_ms=0
+            ),
             transition_model=model,
         )
         strategy.plan(start, goal, _risky_vs_safe_actions())

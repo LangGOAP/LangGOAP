@@ -206,7 +206,9 @@ class TestMCTSStrategyWithHeuristic:
 
         start = PlanningState.from_dict({"remaining": 4, "done": False})
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=64, rollout_depth=4, seed=7),
+            exploration=MCTSExploration(
+                iterations=64, rollout_depth=4, seed=7, wall_clock_ms=0
+            ),
             scalar_heuristic=progress,
         )
         plan = strategy.plan(start, count_goal, count_actions)
@@ -235,7 +237,9 @@ class TestMCTSStrategyWithHeuristic:
         start = PlanningState.from_dict({"remaining": 4, "done": False})
 
         shaped = MCTSStrategy(
-            exploration=MCTSExploration(iterations=128, rollout_depth=2, seed=7),
+            exploration=MCTSExploration(
+                iterations=128, rollout_depth=2, seed=7, wall_clock_ms=0
+            ),
             scalar_heuristic=progress,
         ).plan(start, count_goal, count_actions)
         assert shaped is not None and len(shaped.actions) == 4
