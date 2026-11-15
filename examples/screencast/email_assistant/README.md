@@ -34,14 +34,17 @@ in `world_state["invite"]`. No routers.
 
 **after_disrupted.py** — the operator denies the send (the action fails, is
 blacklisted, and the planner routes through `escalate_to_user`); the invite
-form fails validation (same mechanism); the process dies while the human is
-deciding and a new process resumes the thread from the checkpointer.
+form fails validation (the operator is asked again with the errors) and is
+then declined (same mechanism as the denied send); the process dies while
+the human is deciding and a new process resumes the thread from the
+checkpointer.
 
 | | Hand-wired (`before.py`) | GOAP (`after.py`) |
 |---|---|---|
 | Which path | 3 routers, 11 `if` branches, 4 `raise ValueError` | triage facts as preconditions |
 | Human gate | 4 handlers × (accept / edit / ignore / respond) | `require_human_approval=True` or a Pydantic model |
 | Human says no | `Ignore` tool call synthesised so a router can see it | action failure, blacklist, re-plan |
+| Human fills the form wrong | `raise ValueError(f"Unexpected response: ...")` | asked again, errors in the payload |
 | Bad model output | `bad_tool_name` node patches the tool name | no tool names to patch |
 | Crash mid-approval | checkpointer (same) | checkpointer (same) |
 

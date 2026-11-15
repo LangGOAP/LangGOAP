@@ -9,9 +9,10 @@ human gates are declared on the actions:
 * ``send_email``       — ``require_human_approval=True`` (approve / deny)
 * ``send_cal_invite``  — ``require_human_approval=CalendarInvite`` (typed form)
 
-A denied send, or an invite form that fails validation, is an ordinary
-action failure: the observer blacklists the action and the planner routes
-through ``escalate_to_user`` instead.
+A denied send, or a declined invite form, is an ordinary action failure:
+the observer blacklists the action and the planner routes through
+``escalate_to_user`` instead.  An invite form that fails validation is an
+input error, not a decision: the operator is asked again with the errors.
 Everything is hermetic; no mailbox, no LLM.
 
     uv run python examples/screencast/email_assistant/after.py

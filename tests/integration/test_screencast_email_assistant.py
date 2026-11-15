@@ -157,9 +157,9 @@ class TestHumanGates:
         assert ws.get("reply_sent") is not True
         assert ws["escalated"] is True
 
-    def test_invalid_invite_form_fails_the_action_and_escalates(self) -> None:
-        """A form that fails validation is a deliberate failure, like a denial:
-        the action is blacklisted and the planner falls back to escalation."""
+    def test_invalid_invite_form_is_asked_again_with_the_errors(self) -> None:
+        """A form that fails validation is an input error, not a decision: the
+        operator is asked again and the new payload names the missing fields."""
         graph = build_graph()
         compiled = graph.compile(checkpointer=MemorySaver())
         config = _config("bad-form")
@@ -167,15 +167,54 @@ class TestHumanGates:
             graph.initial_state(build_goal(), initial_world_state(EMAILS["meeting"])),
             config=config,
         )
-        result = compiled.invoke(Command(resume={"title": "no times"}), config=config)
+        paused = compiled.invoke(Command(resume={"title": "no times"}), config=config)
+        form = _interrupt(paused)
+        assert form["type"] == "goap_action_form"
+        assert form["attempt"] == 2
+        assert form["rejected_payload"] == {"title": "no times"}
+        assert {tuple(e["loc"]) for e in form["validation_errors"]} == {
+            ("start",),
+            ("end",),
+        }
+        assert all(h.success for h in graph.rehydrate(paused)["execution_history"])
+        assert paused["blacklisted_actions"] == []
+
+        paused = compiled.invoke(Command(resume=VALID_INVITE), config=config)
+        assert _interrupt(paused)["action"] == "send_email"
+        result = compiled.invoke(Command(resume=True), config=config)
+        assert result["status"] == "goal_achieved"
+        assert result["world_state"]["invite"] == VALID_INVITE
+        assert _history(graph, result) == [
+            "find_meeting_time",
+            "send_cal_invite",
+            "draft_reply",
+            "send_email",
+            "mark_as_read",
+        ]
+
+    def test_declined_invite_form_is_escalated(self) -> None:
+        """Declining the form is a decision: blacklisted like a denied send,
+        and the planner falls back to escalation."""
+        graph = build_graph()
+        compiled = graph.compile(checkpointer=MemorySaver())
+        config = _config("declined-form")
+        compiled.invoke(
+            graph.initial_state(build_goal(), initial_world_state(EMAILS["meeting"])),
+            config=config,
+        )
+        result = compiled.invoke(
+            Command(resume={"approved": False, "reason": "not this week"}),
+            config=config,
+        )
         assert "__interrupt__" not in result
         assert result["status"] == "goal_achieved"
         assert result["blacklisted_actions"] == ["send_cal_invite"]
-        history = graph.rehydrate(result)["execution_history"]
-        failed = [h for h in history if not h.success]
+        failed = [
+            h for h in graph.rehydrate(result)["execution_history"] if not h.success
+        ]
         assert [h.action_name for h in failed] == ["send_cal_invite"]
-        assert "human_form_invalid" in str(failed[0].error)
-        assert [h.action_name for h in history] == [
+        assert "human_approval_denied: not this week" in str(failed[0].error)
+        assert _history(graph, result) == [
             "find_meeting_time",
             "send_cal_invite",
             "escalate_to_user",

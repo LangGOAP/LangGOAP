@@ -1,7 +1,8 @@
 """AFTER, DISRUPTED — the human says no, fills the form wrong, or the process dies.
 
 Three things the upstream graph handles with ``raise ValueError`` or not at
-all.  Here each is an ordinary action failure or an ordinary checkpoint resume.
+all.  Here a denial is an ordinary action failure, a bad form is asked
+again with the errors, and a crash is an ordinary checkpoint resume.
 
     uv run python examples/screencast/email_assistant/after_disrupted.py
 """
@@ -24,7 +25,7 @@ from examples.screencast.email_assistant.after import (
 
 def _report(result: dict[str, Any]) -> None:
     print(
-        f"  status: {result['status']}  replans: {result.get('replan_count', 0)}  blacklisted: {result.get('blacklisted_actions', [])}"
+        f"  status: {result['status']}  replans: {result['replan_count']}  blacklisted: {result['blacklisted_actions']}"
     )
     for h in result["execution_history"]:
         mark = "ok  " if h["success"] else "FAIL"
@@ -56,7 +57,7 @@ def denied_send() -> dict[str, Any]:
 
 def invalid_form() -> dict[str, Any]:
     print("=" * 60)
-    print("  DISRUPTION 2 — the invite form fails validation")
+    print("  DISRUPTION 2 — the invite form fails validation, then is declined")
     print("=" * 60)
     graph = build_graph()
     compiled = graph.compile(checkpointer=MemorySaver())
@@ -68,7 +69,17 @@ def invalid_form() -> dict[str, Any]:
     print(
         "  [human] form for send_cal_invite -> {'title': 'no times'}  (start/end missing)"
     )
-    result = compiled.invoke(Command(resume={"title": "no times"}), config=config)
+    paused = compiled.invoke(Command(resume={"title": "no times"}), config=config)
+    ask = paused["__interrupt__"][0].value
+    print(
+        f"  asked again: attempt {ask['attempt']}, rejected {ask['rejected_payload']}"
+    )
+    for err in ask["validation_errors"]:
+        print(f"    {'.'.join(map(str, err['loc']))}: {err['msg']}")
+    print("  [human] form for send_cal_invite -> DECLINE ('not this week')")
+    result = compiled.invoke(
+        Command(resume={"approved": False, "reason": "not this week"}), config=config
+    )
     _report(result)
     print()
     return result

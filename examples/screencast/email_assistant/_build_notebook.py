@@ -41,6 +41,7 @@ model sometimes emits.
 | Which path | 3 routers, 11 `if` branches, 4 `raise ValueError` | triage facts as preconditions |
 | Human gate | 4 handlers × (accept / edit / ignore / respond) | `require_human_approval=True` or a Pydantic model |
 | Human says no | an `Ignore` tool call is synthesised so a router can see it | action failure, blacklist, re-plan |
+| Human fills the form wrong | `raise ValueError(f\"Unexpected response: ...\")` | asked again, errors in the payload |
 | Bad model output | `bad_tool_name` patches the tool name and loops | no tool names to patch |
 """))
 
@@ -181,14 +182,17 @@ print("effects   :", approval["effects"])
 print("draft     :", approval["world_state"]["draft"])"""))
 
 cells.append(
-    S(
-        """## 3. Disruption: the human says no, fills the form wrong, or the process dies
+    S("""## 3. Disruption: the human says no, fills the form wrong, or the process dies
 
 Upstream, an unexpected inbox response is a `ValueError`. Here a denial is an action failure with the
 operator's reason attached. The observer blacklists `send_email`, the planner re-plans from the current
 world state, and `escalate_to_user` (cost 5, dearer than the whole reply path) is now the cheapest way to
-`follow_up_done`. An invite form that fails Pydantic validation is the same mechanism."""
-    )
+`follow_up_done`.
+
+An invite form that fails Pydantic validation is a different thing: an input error, not a decision. The
+operator is asked again, and the new interrupt payload carries the attempt number, the rejected payload
+and the validation errors. Declining the form (`{"approved": False, "reason": ...}`) is a decision and
+takes the same path as the denied send.""")
 )
 
 cells.append(C("""import logging, sys
@@ -220,11 +224,12 @@ cells.append(
 | `enter_after_human` (5 branches + 2 `ValueError`) | the gate either lets the action run or fails it |
 | 4 Agent Inbox handlers (accept / edit / ignore / respond) | `require_human_approval=True` and a Pydantic model |
 | `Ignore` tool call synthesised on denial | blacklist + re-plan to `escalate_to_user` |
+| `raise ValueError` on an unexpected inbox response | a bad form is asked again with the errors; a declined one is blacklisted |
 
 The integration test
 [`tests/integration/test_screencast_email_assistant.py`](https://github.com/LangGOAP/LangGOAP/blob/main/tests/integration/test_screencast_email_assistant.py)
-pins the four paths, both gate payloads, the denial re-plan, the invalid-form failure, the crash-resume
-and the async path, and keeps the hand-wired version faithful to upstream (`ValueError` included)."""
+pins the four paths, both gate payloads, the denial re-plan, the invalid-form re-ask, the declined form,
+the crash-resume and the async path, and keeps the hand-wired version faithful to upstream (`ValueError` included)."""
     )
 )
 

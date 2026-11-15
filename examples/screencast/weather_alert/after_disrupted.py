@@ -28,8 +28,8 @@ def _report(result: dict[str, Any]) -> None:
     goal = result["goal"]
     conditions = goal["conditions"] if isinstance(goal, dict) else dict(goal.conditions)
     print(
-        f"  status: {result['status']}  goal: {conditions}  replans: {result.get('replan_count', 0)}"
-        f"  blacklisted: {result.get('blacklisted_actions', [])}"
+        f"  status: {result['status']}  goal: {conditions}  replans: {result['replan_count']}"
+        f"  blacklisted: {result['blacklisted_actions']}"
     )
     for h in result["execution_history"]:
         mark = "ok  " if h["success"] else "FAIL"
