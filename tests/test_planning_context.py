@@ -125,7 +125,9 @@ class TestTransitionModelSeesTheWorldState:
     def test_mcts_passes_context_to_the_model(self) -> None:
         model = _RecordingModel()
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=32, rollout_depth=3, seed=5),
+            exploration=MCTSExploration(
+                iterations=32, rollout_depth=3, seed=5, wall_clock_ms=0
+            ),
             transition_model=model,
         )
         result = GoapGraph(

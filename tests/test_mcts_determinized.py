@@ -118,7 +118,9 @@ class TestDispatchBypassesChanceLayer:
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"pos": 0, "done": False})
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=64, rollout_depth=4, seed=7),
+            exploration=MCTSExploration(
+                iterations=64, rollout_depth=4, seed=7, wall_clock_ms=0
+            ),
             reuse=MCTSReuseConfig(force_deterministic_tree=True),
             transition_model=model,
             scalar_heuristic=_pos_progress_heuristic,
@@ -141,7 +143,9 @@ class TestDispatchBypassesChanceLayer:
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"pos": 0, "done": False})
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=64, rollout_depth=4, seed=7),
+            exploration=MCTSExploration(
+                iterations=64, rollout_depth=4, seed=7, wall_clock_ms=0
+            ),
             transition_model=model,
             scalar_heuristic=_pos_progress_heuristic,
         )
@@ -178,7 +182,9 @@ class TestDeterminizedMCTSWithStochasticRollout:
             scalar_heuristic=_pos_progress_heuristic,
         )
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=256, rollout_depth=8, seed=7),
+            exploration=MCTSExploration(
+                iterations=256, rollout_depth=8, seed=7, wall_clock_ms=0
+            ),
             reuse=MCTSReuseConfig(force_deterministic_tree=True),
             transition_model=model,
             rollout_policy=rollout,
@@ -216,7 +222,9 @@ class TestDeterminizedUCTMatchesChanceNodeAtEqualBudget:
             scalar_heuristic=_pos_progress_heuristic,
         )
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=256, rollout_depth=8, seed=seed),
+            exploration=MCTSExploration(
+                iterations=256, rollout_depth=8, seed=seed, wall_clock_ms=0
+            ),
             reuse=MCTSReuseConfig(force_deterministic_tree=force_deterministic),
             transition_model=model,
             rollout_policy=rollout,

@@ -55,7 +55,9 @@ class TestExpectedStatesAreDeterministicReplay:
     def test_expected_states_never_contain_sampled_keys(self) -> None:
         model = _NoisyModel()
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=128, rollout_depth=6, seed=3),
+            exploration=MCTSExploration(
+                iterations=128, rollout_depth=6, seed=3, wall_clock_ms=0
+            ),
             transition_model=model,
         )
         start = PlanningState.from_dict({"remaining": 2, "done": False})
@@ -68,7 +70,9 @@ class TestExpectedStatesAreDeterministicReplay:
     def test_expected_states_match_model_expected_replay(self) -> None:
         model = _NoisyModel()
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=128, rollout_depth=6, seed=3),
+            exploration=MCTSExploration(
+                iterations=128, rollout_depth=6, seed=3, wall_clock_ms=0
+            ),
             transition_model=model,
         )
         start = PlanningState.from_dict({"remaining": 2, "done": False})

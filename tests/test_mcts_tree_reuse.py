@@ -122,7 +122,9 @@ class TestReuseOffIsBitIdentical:
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"remaining": 3, "done": False})
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=32, rollout_depth=4, seed=7)
+            exploration=MCTSExploration(
+                iterations=32, rollout_depth=4, seed=7, wall_clock_ms=0
+            )
         )
         strategy.plan(start, goal, [_counter_action()])
         assert strategy.reuse.reuse_tree is False
@@ -145,7 +147,9 @@ class TestAdvancePromotesObservedChildStochastic:
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"remaining": 3, "done": False})
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=64, rollout_depth=4, seed=7),
+            exploration=MCTSExploration(
+                iterations=64, rollout_depth=4, seed=7, wall_clock_ms=0
+            ),
             reuse=MCTSReuseConfig(reuse_tree=True, tree_reuse_decay=0.6),
             transition_model=model,
         )
@@ -177,7 +181,9 @@ class TestAdvancePromotesObservedChildStochastic:
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"remaining": 3, "done": False})
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=32, rollout_depth=4, seed=7),
+            exploration=MCTSExploration(
+                iterations=32, rollout_depth=4, seed=7, wall_clock_ms=0
+            ),
             reuse=MCTSReuseConfig(reuse_tree=True),
             transition_model=model,
         )
@@ -205,7 +211,9 @@ class TestAdvancePromotesObservedChildDeterministic:
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"remaining": 3, "done": False})
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=32, rollout_depth=4, seed=7),
+            exploration=MCTSExploration(
+                iterations=32, rollout_depth=4, seed=7, wall_clock_ms=0
+            ),
             reuse=MCTSReuseConfig(reuse_tree=True, tree_reuse_decay=0.6),
         )
         strategy.plan(start, goal, [_counter_action()])
@@ -239,7 +247,9 @@ class TestDecaySemantics:
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"remaining": 3, "done": False})
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=64, rollout_depth=4, seed=7),
+            exploration=MCTSExploration(
+                iterations=64, rollout_depth=4, seed=7, wall_clock_ms=0
+            ),
             reuse=MCTSReuseConfig(reuse_tree=True, tree_reuse_decay=decay),
             transition_model=model,
         )
@@ -285,7 +295,9 @@ class TestReuseAccumulatesStatsAcrossTicks:
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({"remaining": 3, "done": False})
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=64, rollout_depth=4, seed=7),
+            exploration=MCTSExploration(
+                iterations=64, rollout_depth=4, seed=7, wall_clock_ms=0
+            ),
             reuse=MCTSReuseConfig(reuse_tree=True, tree_reuse_decay=1.0),
             transition_model=model,
         )
@@ -347,7 +359,9 @@ class TestReuseHonoursBlacklist:
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({})
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=200, rollout_depth=4, seed=11),
+            exploration=MCTSExploration(
+                iterations=200, rollout_depth=4, seed=11, wall_clock_ms=0
+            ),
             reuse=MCTSReuseConfig(reuse_tree=True, tree_reuse_decay=1.0),
         )
         actions = _branching_actions()
@@ -373,7 +387,9 @@ class TestReuseHonoursBlacklist:
         goal = GoalSpec(conditions={"done": True})
         start = PlanningState.from_dict({})
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=64, rollout_depth=4, seed=11),
+            exploration=MCTSExploration(
+                iterations=64, rollout_depth=4, seed=11, wall_clock_ms=0
+            ),
             reuse=MCTSReuseConfig(reuse_tree=True, tree_reuse_decay=1.0),
         )
         actions = _branching_actions()
@@ -404,7 +420,9 @@ class TestReuseStateIsPerThread:
 
         goal = GoalSpec(conditions={"done": True})
         strategy = MCTSStrategy(
-            exploration=MCTSExploration(iterations=32, rollout_depth=4, seed=1),
+            exploration=MCTSExploration(
+                iterations=32, rollout_depth=4, seed=1, wall_clock_ms=0
+            ),
             reuse=MCTSReuseConfig(reuse_tree=True, tree_reuse_decay=1.0),
         )
         actions = _branching_actions()
