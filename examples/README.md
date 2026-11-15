@@ -52,6 +52,7 @@ See [`tutorials/README.md`](tutorials/README.md) for the 22 featured tutorials a
 **LangGraph tutorial refactors** — official LangGraph tutorials rewritten as GOAP, each with a narrated notebook that runs the condensed hand-wired original, the GOAP version and the GOAP version under disruption (no API keys):
 
 - [`screencast/llm_compiler/`](screencast/llm_compiler/) — LLMCompiler: `$N` dependency references, a hand-written scheduler and a `Replan`-emitting joiner become preconditions, `executor="parallel"` and blacklist-and-replan. Notebook: [`llm_compiler_screencast.ipynb`](screencast/llm_compiler/llm_compiler_screencast.ipynb). Backed by [`test_screencast_llm_compiler.py`](../tests/integration/test_screencast_llm_compiler.py).
+- [`screencast/email_assistant/`](screencast/email_assistant/) — executive-ai-assistant: three message-shape routers with `ValueError` fall-throughs and four Agent Inbox handlers become triage facts as preconditions, `require_human_approval=True` and a Pydantic form; a denied send is re-planned around; a new process resumes a paused thread. Notebook: [`email_assistant_screencast.ipynb`](screencast/email_assistant/email_assistant_screencast.ipynb). Backed by [`test_screencast_email_assistant.py`](../tests/integration/test_screencast_email_assistant.py).
 
 ## Running notebooks
 

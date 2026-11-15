@@ -81,6 +81,9 @@ CATALOG: dict[str, list[str]] = {
     "screencast/llm_compiler": [
         "llm_compiler_screencast.ipynb",
     ],
+    "screencast/email_assistant": [
+        "email_assistant_screencast.ipynb",
+    ],
 }
 
 

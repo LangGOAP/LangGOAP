@@ -14,6 +14,7 @@ condensed hand-wired original, the GOAP version and the GOAP version under
 disruption, hermetically, backed by an integration test.
 
 - `screencast/llm_compiler/llm_compiler_screencast.ipynb` — LLMCompiler: `$N` dependency references, a hand-written scheduler and a joiner that emits `Replan` become preconditions, `executor="parallel"` and the observer's blacklist-and-replan loop.
+- `screencast/email_assistant/email_assistant_screencast.ipynb` — executive-ai-assistant: three message-shape routers with `ValueError` fall-throughs and four Agent Inbox handlers become triage facts as preconditions, `require_human_approval=True` and a Pydantic form; a denied send is re-planned around, and a new process resumes a paused thread.
 
 ## Basics
 
@@ -81,6 +82,7 @@ screencast/research_agent/screencast
 :caption: LangGraph tutorial refactors
 
 screencast/llm_compiler/llm_compiler_screencast
+screencast/email_assistant/email_assistant_screencast
 ```
 
 ```{toctree}
