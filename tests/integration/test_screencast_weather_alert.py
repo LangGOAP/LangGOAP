@@ -31,7 +31,7 @@ from examples.screencast.weather_alert.after import (
     build_graph,
     initial_world_state,
 )
-from langgoap import GoapGraph
+from langgoap import GoalSpec, GoapGraph
 
 
 def _config(thread: str) -> RunnableConfig:
@@ -126,7 +126,9 @@ class TestHumanDenial:
             "withhold_alert",
         ]
         typed = graph.rehydrate(result)
-        assert dict(typed["goal"].conditions) == {"decision_logged": True}
+        relaxed = typed["goal"]
+        assert isinstance(relaxed, GoalSpec)
+        assert dict(relaxed.conditions) == {"decision_logged": True}
         failed = [h for h in typed["execution_history"] if not h.success]
         assert [h.action_name for h in failed] == ["approve_alert"]
         assert "river gauge is stable" in str(failed[0].error)

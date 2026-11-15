@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Annotated, Any, Literal
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import START, StateGraph
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
@@ -157,7 +157,7 @@ def join(state: CompilerState) -> dict[str, Any]:
 def should_continue(state: CompilerState) -> Literal["plan_and_schedule", "__end__"]:
     # Routing by message type: an AIMessage means "done", anything else means "again".
     if isinstance(state["messages"][-1], AIMessage):
-        return "__end__"  # END
+        return "__end__"  # langgraph.graph.END
     return "plan_and_schedule"
 
 

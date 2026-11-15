@@ -92,7 +92,7 @@ def data_logging(state: WeatherState) -> WeatherState:
     }
 
 
-def _plan(kind: str, focus: str) -> Callable[[WeatherState], WeatherState]:
+def _plan(kind: str, focus: str) -> Callable[..., Any]:
     def node(state: WeatherState) -> WeatherState:
         response = f"{kind} plan for a {state['disaster_type']} ({state['severity']}) in {state['weather_data']['city']}: {focus}."
         print(f"  [{kind.lower().replace(' ', '_')}_response] {response}")
