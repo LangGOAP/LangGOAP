@@ -1,7 +1,7 @@
 """Integration tests for the ``StuckHandler`` protocol.
 
 Mirrors Embabel's contract on
-``research/repos/embabel-agent/embabel-agent-api/src/test/kotlin/
+``https://github.com/embabel/embabel-agent/blob/HEAD/embabel-agent-api/src/test/kotlin/
 com/embabel/agent/api/common/MulticastStuckHandlerTest.kt``:
 
 * ``StuckHandler.handle_stuck(state, reason) -> StuckHandlerResult`` —

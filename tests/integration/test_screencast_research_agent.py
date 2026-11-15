@@ -132,7 +132,7 @@ class TestHandWiredRouted:
 
 
 # ---------------------------------------------------------------------------
-# Live-API path — opt in via LANGGOAP_RUN_LIVE_DEMO=1
+# Live-API path — marked ``api``; runs when OPENAI_API_KEY and TAVILY_API_KEY are set
 # ---------------------------------------------------------------------------
 
 

@@ -61,7 +61,9 @@ class GoapExecutor:
             ``transition_model.sample``.  When omitted, a single
             ``random.Random()`` is created at construction time and
             reused for every action \u2014 callers who want true
-            reproducibility should pass a seeded instance.
+            reproducibility should pass a seeded instance.  QoS back-off
+            jitter uses a separate, unseeded stream, so retries never
+            perturb the sampled effects.
     """
 
     def __init__(
@@ -81,6 +83,9 @@ class GoapExecutor:
         self._guards: list[ActionGuard | AsyncActionGuard] = guards or []
         self._transition_model: TransitionModel | None = transition_model
         self._rng: random.Random = rng if rng is not None else random.Random()
+        # Back-off jitter draws from its own stream so a retry never shifts
+        # the seeded ``transition_model.sample`` sequence (#64).
+        self._backoff_rng = random.Random()
         # Optional source-of-truth action map for rebinding fields the
         # serializer cannot round-trip (callable execute, Pydantic
         # type references on require_human_approval, human_input_key
@@ -158,7 +163,7 @@ class GoapExecutor:
                 action,
                 world_state,
                 tracer=self._tracer,
-                rng=self._rng,
+                rng=self._backoff_rng,
             )
             returned_dict = _apply_result(
                 raw,
@@ -237,7 +242,7 @@ class GoapExecutor:
                 action,
                 world_state,
                 tracer=self._tracer,
-                rng=self._rng,
+                rng=self._backoff_rng,
             )
             returned_dict = _apply_result(
                 raw,

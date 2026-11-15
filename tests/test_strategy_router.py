@@ -6,7 +6,7 @@ MCTS for ``is_stochastic=True``; it routes there only on explicit
 opt-in (``prefer_mcts_for_stochastic=True``) or when the user
 declared a risk-averse :class:`DivergencePolicy`.
 
-See ``research/plans/strategy-router.md``.
+See the internal "strategy-router" design note (not in the repository).
 """
 
 from __future__ import annotations

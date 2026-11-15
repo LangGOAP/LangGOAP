@@ -1008,7 +1008,8 @@ def pareto_plans(
         frontier = sorted(feasible, key=lambda t: t[0].total_cost)
         if max_frontier is not None:
             frontier = frontier[:max_frontier]
-        return frontier
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        return _annotate_metadata(frontier, len(plans), elapsed_ms, scale)
 
     frontier_items = _pareto_frontier(feasible, plan_obj_values, goal.objectives)
     frontier = _sort_by_primary_objective(frontier_items, goal.objectives)

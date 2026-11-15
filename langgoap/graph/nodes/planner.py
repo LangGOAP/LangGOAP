@@ -40,6 +40,30 @@ if TYPE_CHECKING:
     from langgoap.stuck import StuckHandler
 
 
+def _any_mode_no_plan_dict(
+    goal: MultiGoal, rejections: list[dict[str, Any]], blacklisted: list[str]
+) -> dict[str, Any]:
+    """Build the ``no_plan_explanation`` for an any/best_value ``MultiGoal``.
+
+    Each sub-goal's own explanation is kept under ``subgoals`` so a stuck
+    handler can see *why* every alternative failed instead of ``None`` (#64).
+    """
+    lines = [
+        f"[{i}] {rej.get('suggestion', 'no plan')}" for i, rej in enumerate(rejections)
+    ]
+    payload: dict[str, Any] = {
+        "mode": goal.mode,
+        "subgoals": rejections,
+        "suggestion": (
+            f"None of the {len(rejections)} sub-goal(s) of this MultiGoal "
+            f"({goal.mode} mode) can be planned. " + " ".join(lines)
+        ),
+    }
+    if blacklisted:
+        payload["blacklisted_actions"] = list(blacklisted)
+    return payload
+
+
 def _infeasible_no_plan_dict(plan: Plan, goal: GoalSpec) -> dict[str, Any]:
     """Build the ``no_plan_explanation`` payload for a rejected infeasible plan.
 
@@ -167,6 +191,7 @@ class GoapPlanner:
         self._strategy = strategy
         # See ``GoapExecutor.__init__`` for the SafeTracerProxy rationale.
         self._tracer: PlanningTracer = SafeTracerProxy(tracer or NullTracer())
+        self._has_tracer = tracer is not None
         self._record_expansions = record_expansions
         self._sensors: list[Sensor | AsyncSensor] = list(sensors) if sensors else []
         self._resolvers: list[ConditionResolver | AsyncConditionResolver] = (
@@ -240,6 +265,7 @@ class GoapPlanner:
         """
         strategy = _STRATEGY_OVERRIDE.get() or self._strategy
         if strategy is not None:
+            strategy = self._bind_tracer(strategy)
             # Forward repair kwargs only when meaningful so that legacy
             # user strategies whose ``plan`` signature predates the
             # widened Protocol (no ``prior_plan``/``current_step`` kwargs)
@@ -277,6 +303,21 @@ class GoapPlanner:
             tracer=self._tracer,
             record_expansions=self._record_expansions,
         )
+
+    def _bind_tracer(self, strategy: Any) -> Any:
+        """Give a searching strategy this planner's tracer when it has none.
+
+        ``AStarStrategy()`` and ``TwoPhasePipelineStrategy()`` passed
+        explicitly used to lose search tracing that the default path kept
+        (#63).  Strategies expose an optional ``_with_tracer`` hook; those
+        constructed with their own tracer keep it.
+        """
+        if not self._has_tracer:
+            return strategy
+        binder = getattr(strategy, "_with_tracer", None)
+        if binder is None:
+            return strategy
+        return binder(self._tracer, self._record_expansions)
 
     def _plan_single_checked(
         self,
@@ -319,21 +360,6 @@ class GoapPlanner:
             )
             return None, _infeasible_no_plan_dict(result, goal)
         return result, None
-
-    def _resolve_sequential_subgoal(
-        self, raw_goal: MultiGoal, state: GoapState, was_replan: bool
-    ) -> GoalSpec:
-        """Pick the current sub-goal from a sequential ``MultiGoal``."""
-        idx = state.get("current_subgoal_index", 0)
-        effective_goal = raw_goal.goals[idx]
-        if not was_replan:
-            logger.info(
-                "Planning for MultiGoal (sequential, subgoal %d/%d): %s",
-                idx + 1,
-                len(raw_goal.goals),
-                dict(effective_goal.conditions),
-            )
-        return effective_goal
 
     def _plan_sequential(
         self,
@@ -415,7 +441,7 @@ class GoapPlanner:
         raw_goal: MultiGoal,
         world_state: dict[str, Any],
         blacklisted: list[str],
-    ) -> tuple[int, Plan] | None:
+    ) -> tuple[tuple[int, Plan] | None, list[dict[str, Any]]]:
         """Enumerate sub-goals of an ``any``- or ``best_value``-mode
         ``MultiGoal`` and return the best plan.
 
@@ -428,7 +454,12 @@ class GoapPlanner:
         ``"best_value"``: selection key is ``plan.net_value(goal,
         world_state) = goal.value - plan.total_cost``.  Ties on net
         value tie-break to lower cost via ``_is_better_plan``.
+
+        Also returns one ``no_plan_explanation`` payload per sub-goal that
+        could not be planned, so an all-infeasible result can explain
+        itself to stuck handlers (#64).
         """
+        rejections: list[dict[str, Any]] = []
         best_idx = -1
         best_plan: Plan | None = None
         best_goal: GoalSpec | None = None
@@ -436,8 +467,11 @@ class GoapPlanner:
         for i, sg in enumerate(raw_goal.goals):
             sub_pkeys = _planning_keys(self.actions, sg)
             sub_start = PlanningState.from_dict(world_state, keys=sub_pkeys)
-            candidate, _rejected = self._plan_single_checked(sub_start, sg, blacklisted)
+            candidate, rejected = self._plan_single_checked(sub_start, sg, blacklisted)
             if candidate is None:
+                rejections.append(
+                    rejected or explain_no_plan(sub_start, sg, self.actions).to_dict()
+                )
                 continue
             if best_plan is None:
                 best_idx, best_plan, best_goal = i, candidate, sg
@@ -453,8 +487,8 @@ class GoapPlanner:
                 if _is_better_plan(candidate, best_plan):
                     best_idx, best_plan, best_goal = i, candidate, sg
         if best_plan is None:
-            return None
-        return best_idx, best_plan
+            return None, rejections
+        return (best_idx, best_plan), rejections
 
     def _plan_with_stuck_recovery(
         self, state: GoapState
@@ -630,15 +664,25 @@ class GoapPlanner:
                 pkeys = _planning_keys(self.actions, effective_goal)
                 start = PlanningState.from_dict(world_state, keys=pkeys)
             else:  # "any"
-                resolved = self._resolve_any_subgoal(raw_goal, world_state, blacklisted)
+                resolved, rejections = self._resolve_any_subgoal(
+                    raw_goal, world_state, blacklisted
+                )
                 if resolved is None:
-                    logger.warning("MultiGoal 'any' mode: no sub-goal is reachable")
+                    no_plan_dict = _any_mode_no_plan_dict(
+                        raw_goal, rejections, blacklisted
+                    )
+                    logger.warning(
+                        "MultiGoal %r mode: no sub-goal is reachable. %s",
+                        raw_goal.mode,
+                        no_plan_dict["suggestion"],
+                    )
                     return (
                         {
                             "plan": None,
                             "status": "no_plan",
                             "current_step": 0,
                             "replan_count": replan_count,
+                            "no_plan_explanation": no_plan_dict,
                         },
                         was_replan,
                     )

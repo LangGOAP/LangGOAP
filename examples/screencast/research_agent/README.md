@@ -63,8 +63,8 @@ This runs **all three** agents back-to-back under a revoked Tavily key (the scri
 ### 4. Live, full real-API integration test
 
 ```bash
-LANGGOAP_RUN_LIVE_DEMO=1 OPENAI_API_KEY=... TAVILY_API_KEY=... \
-  uv run pytest tests/integration/test_screencast_research_agent.py::TestLiveAPI -v
+OPENAI_API_KEY=... TAVILY_API_KEY=... \
+  uv run pytest -m api tests/integration/test_screencast_research_agent.py::TestLiveAPI -v
 ```
 
 Costs a few cents per execution. Asserts the GOAP run finishes under the $2.00 cap with a non-empty summary.

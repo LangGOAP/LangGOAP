@@ -536,3 +536,55 @@ class TestMultipleViolatedConstraints:
         )
         source = render_mermaid(plan_obj)
         assert "cost_usd" in source and "tokens" in source
+
+
+# ---------------------------------------------------------------------------
+# #63 — explain_no_plan compares values, not keys, and does not use truthiness
+# ---------------------------------------------------------------------------
+
+
+def test_explain_no_plan_goal_value_never_produced_is_unreachable() -> None:
+    """A goal wanting ``x=False`` is unreachable when actions only set ``x=True``."""
+    action = ActionSpec(name="a", effects={"x": True})
+    goal = GoalSpec(conditions={"x": False})
+    start = PlanningState.from_dict({"x": True})
+
+    explanation = explain_no_plan(start, goal, [action])
+
+    assert "x" in explanation.unreachable_conditions
+
+
+def test_explain_no_plan_falsy_start_value_satisfies_precondition() -> None:
+    """``n=0`` in the start state satisfies a precondition ``n=0``; it is not missing."""
+    action = ActionSpec(name="a", preconditions={"n": 0}, effects={"done": True})
+    goal = GoalSpec(conditions={"done": True, "other": True})
+    start = PlanningState.from_dict({"n": 0})
+
+    explanation = explain_no_plan(start, goal, [action])
+
+    assert "n" not in explanation.missing_preconditions
+    assert explanation.unreachable_conditions == ("other",)
+
+
+def test_explain_no_plan_precondition_value_never_produced_is_missing() -> None:
+    """``y=True`` is missing when the only producer sets ``y=False``."""
+    producer = ActionSpec(name="p", effects={"y": False})
+    consumer = ActionSpec(name="c", preconditions={"y": True}, effects={"done": True})
+    goal = GoalSpec(conditions={"done": True})
+    start = PlanningState.from_dict({})
+
+    explanation = explain_no_plan(start, goal, [producer, consumer])
+
+    assert "y" in explanation.missing_preconditions
+
+
+def test_explain_no_plan_falsy_goal_value_already_held_is_reachable() -> None:
+    """Start ``x=False`` already satisfies goal ``x=False`` even with no producer."""
+    action = ActionSpec(name="a", effects={"done": True})
+    goal = GoalSpec(conditions={"x": False, "done": True})
+    start = PlanningState.from_dict({"x": False})
+
+    explanation = explain_no_plan(start, goal, [action])
+
+    assert "x" not in explanation.unreachable_conditions
+    assert explanation.unreachable_conditions == ()

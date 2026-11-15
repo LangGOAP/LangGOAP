@@ -105,7 +105,7 @@ class GoapGraph:
             the same model you passed to :class:`MCTSStrategy` so plan-time
             and runtime share one noise distribution.
         rng: Optional ``random.Random`` forwarded to the executor for
-            reproducible sampling.
+            reproducible sampling; retry back-off jitter never draws from it.
         executor: ``"sequential"`` (default) runs one plan step per
             executor node invocation with :class:`GoapExecutor`;
             ``"parallel"`` wires :class:`ParallelGoapExecutor`, which runs

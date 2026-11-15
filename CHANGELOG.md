@@ -32,6 +32,40 @@ default behaviours change; each has an explicit opt-in that restores the
 
 ### Changed
 
+- Planner hygiene (#63): `assert_expected_matches_declared` raises
+  `ValueError` instead of relying on `assert`; `explain_no_plan` compares
+  `(key, value)` pairs, so a goal wanting `x=False` is unreachable when
+  actions only set `x=True` and start values such as `0` count as
+  present; `pareto_plans` annotates `plans_evaluated` and solver time
+  without objectives too; `PlanningState.get` / `in` use a cached dict
+  view and the A* heuristic no longer allocates a dict per evaluation;
+  `AStarStrategy` and `TwoPhasePipelineStrategy` accept `tracer` /
+  `record_expansions` and inherit the planner's tracer when passed
+  explicitly (the lazy, anytime and repair wrappers forward it);
+  `refine_with_csp(plan, goal)` replaces `CSPRefinementStrategy`.
+- Graph-runtime hygiene (#64): an `execute()` return that is neither a
+  dict nor `None` is logged as a warning before the declared effects are
+  applied; QoS back-off jitter uses its own RNG so a retry never perturbs
+  seeded `TransitionModel.sample` sequences; `GoapObserver` built without
+  action specs reads `max_retries` from the plan's specs; an any/best_value
+  `MultiGoal` that cannot be planned emits a `no_plan_explanation` with one
+  entry per sub-goal; a final `no_plan` is reported as `no_plan` rather
+  than `max_replans_exceeded`; dead helpers (`_safe_tracer_call`,
+  `_safe_tracer_acall`, `GoapPlanner._resolve_sequential_subgoal`) are
+  removed.
+- Public exports (#65): `PlanQualityMetric` and the `Minimize*` metrics,
+  `RepairResult` / `repair_plan`, `AgentModel` / `UniformRandomAgentModel`,
+  `ScalarHeuristic` and the rollout policies,
+  `assert_expected_matches_declared`, `SafeTracerProxy`,
+  `async_execute_action` and `EffectValidator` are importable from
+  `langgoap`; `langgoap.planner` re-exports the planner-level ones.
+  `StoreExecutionHistory.store` exposes the backing store, and
+  `ReflexionTracer` uses it instead of a private attribute.
+- The deployment scaffold (#65) lists `"."` first in `langgraph.json`
+  dependencies so the factory module ships, installs
+  `langgraph-cli[inmem]`, uses the `LANGSMITH_*` variables, names the
+  generated agent in its README and no longer tells users to pass a
+  checkpointer that LangGraph Platform ignores.
 - **`GoapState` is JSON-native (#17).** LangGraph channels now hold plain
   dicts, lists and scalars, so every `BaseCheckpointSaver` (in-memory,
   Postgres, Redis, SQLite, your own) works with its **stock** serializer
@@ -328,6 +362,26 @@ default behaviours change; each has an explicit opt-in that restores the
 
 ### Documentation
 
+- The API reference is generated from `langgoap.__all__` by
+  `docs/generate_api_index.py`, grouped by the comment headers in
+  `langgoap/__init__.py`, and a test fails when the page is stale; it
+  documented 63 of the public names before (#66).
+- The concepts page gains sections for pluggable strategies and MCTS,
+  multi-goal decomposition, retries and QoS, human-in-the-loop and typed
+  forms, stuck handlers, early termination, sensors / guards / resolvers,
+  checkpointing, plan explanations, visualization, the CLI and
+  deployment, and Deep Agents / tool interop; `myst.xref_missing` is no
+  longer suppressed (#66).
+- Catalog and stale-text sweep (#67): every basics notebook is rendered
+  in the docs and listed in `examples/README.md`; the notebook counts on
+  the docs landing page match the catalog; the incident screencast
+  notebook is linked; the research-agent screencast uses the standard
+  `python3` kernel; the CHANGELOG dates 0.1.1 and 0.1.2; the removed
+  `LANGGOAP_RUN_LIVE_DEMO` gate, the deleted `SECURITY.md` link and the
+  `cd langgoap` clone step are corrected; docstrings cite upstream
+  repositories instead of the maintainer's private `research/` tree; the
+  copyright year is 2026; the Jupyter image no longer installs the unused
+  `langchain` package; the unused `bench` pytest marker is gone.
 - **Versioned docs document their own release (#60).** The docs workflow
   builds each tag from its own git worktree and virtualenv instead of
   main's checkout, the version switcher's `populate` receives the URL it
@@ -351,12 +405,47 @@ default behaviours change; each has an explicit opt-in that restores the
 
 ### Deprecated
 
+- `CSPRefinementStrategy` (call `refine_with_csp`) and
+  `ActionSpec.is_async_execute()` (the executors pick the async path
+  themselves) warn and will be removed in 0.3.0 (#63, #64).
 - `langgoap.install_langgoap_serde`, `langgoap.LangGOAPSerializer` and
   `langgoap.LANGGOAP_ALLOWED_MSGPACK_TYPES` are no-op shims that emit
   `DeprecationWarning`; they will be removed in 0.3.0.
   `LangGOAPRedisSerializer` is gone (it imported the Redis backend).
 
-## [0.1.1] — Unreleased
+## [0.1.2] — 2026-05-15
+
+### Fixed
+
+- README images render on PyPI: the six relative image references were
+  replaced with absolute `raw.githubusercontent.com` URLs.
+
+### CI
+
+- The TestPyPI reinstall step passes `--index-strategy unsafe-best-match`
+  so the freshly uploaded wheel resolves against PyPI's dependencies.
+
+## [0.1.1] — 2026-05-15
+
+### Fixed
+
+- `click` is a core runtime dependency (#6). `0.1.0` was uploaded to
+  TestPyPI with it under a `[cli]` extra while the `langgoap` console
+  script was always registered, and has been yanked.
+- Docker-backed checkpointer tests skip when no daemon is reachable; the
+  min-versions release check skips `ortools`.
+
+### Changed
+
+- Public API classes are spelled `LangGOAP*` (`LangGOAPSerializer`, ...)
+  instead of `LangGoap*`.
+
+### CI
+
+- Test matrix across Ubuntu, macOS and Windows with a PR quality gate;
+  release pipeline split into build, TestPyPI and PyPI stages;
+  `actions/checkout`, `astral-sh/setup-uv` and `actions/setup-python`
+  bumped to Node 24 releases.
 
 Initial release. LangGOAP is a Goal-Oriented Action Planning framework
 for LangGraph with constraint optimization, natural-language goal

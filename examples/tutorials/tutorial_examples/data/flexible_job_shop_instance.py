@@ -2,7 +2,7 @@ r"""Domain data for the flexible job shop tutorial (notebook 15).
 
 This is a Tier 3 showcase instance derived from the classic flexible
 job shop scheduling problem (FJSSP) literature and the MINI_FSP example
-in ``research/repos/unified-planning/unified_planning/test/examples/
+in ``https://github.com/aiplan4eu/unified-planning/blob/HEAD/unified_planning/test/examples/
 scheduling/flexible_jobshop.py``.
 
 The instance is deliberately small so CP-SAT solves it in milliseconds

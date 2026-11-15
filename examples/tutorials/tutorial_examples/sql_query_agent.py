@@ -1,7 +1,7 @@
 r"""Text-to-SQL agent — Tier 2 tutorial translating deepagents' example.
 
 Adapts the workflow sketched in
-``research/repos/deepagents/examples/text-to-sql-agent`` (schema
+``https://github.com/langchain-ai/deepagents/blob/HEAD/examples/text-to-sql-agent`` (schema
 exploration → query drafting → execution) into a GOAP plan driven by
 LangGOAP.  The tutorial spotlights three features at once:
 

@@ -6,7 +6,7 @@ to route between nodes. In the GOAPified version, these routing decisions are
 replaced by GOAP A* planning — the planner discovers the optimal action sequence
 automatically, and the observer triggers replanning when execution deviates.
 
-Reference: research/repos/langgraph/examples/rag/langgraph_adaptive_rag.ipynb
+Reference: https://github.com/langchain-ai/langgraph/blob/HEAD/examples/rag/langgraph_adaptive_rag.ipynb
 """
 
 from __future__ import annotations

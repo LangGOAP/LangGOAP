@@ -8,7 +8,7 @@ strictly dominates A* by at least 15pp, is at least 5x A*'s goal
 rate, and clears a one-sided Welch significance bar at p < 0.05.
 
 Motivated by the null verdict on Pac-Man ``slippery-classic``
-(research/experiments/results/2026-04-21-stochastic-mcts-expansion.md)
+(the internal "2026-04-21-stochastic-mcts-expansion" design note (not in the repository))
 where domain-specific interactions with the ghost controller masked
 the library-level advantage of stochastic-aware tree expansion.
 FrozenLake exposes the advantage cleanly because (a) holes are

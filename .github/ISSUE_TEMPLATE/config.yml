@@ -12,4 +12,4 @@ contact_links:
     about: Questions about LangChain / LangGraph core behaviour
   - name: 🔒 Report a security vulnerability
     url: https://github.com/LangGOAP/LangGOAP/security/advisories/new
-    about: See SECURITY.md — do not report vulnerabilities as public issues
+    about: Report privately through GitHub Security Advisories — do not open a public issue

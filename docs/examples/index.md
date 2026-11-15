@@ -18,6 +18,11 @@ Short primers — each notebook exercises a single mechanic.
 - `stuck_handlers.ipynb` — `FunctionalStuckHandler` and `MulticastStuckHandler` recovering planning failures.
 - `typed_form_hitl.ipynb` — Typed-form `interrupt()` with Pydantic validation on resume.
 - `action_qos.ipynb` — In-executor retry with `ActionQos` and exponential backoff.
+- `cli.ipynb` — The `langgoap` CLI: `plan`, `actions`, `explain`, `visualize`, `deploy-init`.
+- `goap_subgraph.ipynb` — Embedding a `GoapGraph` as a node of a larger `StateGraph` with `add_goap_subgraph`.
+- `tracing.ipynb` — Observability hooks with `LoggingTracer`, `LangSmithTracer`, and `MultiTracer`.
+- `stochastic_gridworld.ipynb` — `TransitionModel` separating declared effects from sampled dynamics on FrozenLake-4x4.
+- `mcts_vs_astar_stochastic.ipynb` — When to use `MCTSStrategy` instead of A* on stochastic domains.
 
 ## Tutorials
 
@@ -74,6 +79,11 @@ basics/termination_policies
 basics/stuck_handlers
 basics/typed_form_hitl
 basics/action_qos
+basics/cli
+basics/goap_subgraph
+basics/tracing
+basics/stochastic_gridworld
+basics/mcts_vs_astar_stochastic
 ```
 
 ```{toctree}

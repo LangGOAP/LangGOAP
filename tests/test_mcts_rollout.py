@@ -108,6 +108,24 @@ class TestRandomRollout:
         )
         assert r1 == pytest.approx(r2)
 
+    def test_goal_reached_during_rollout_scores_plus_one(self) -> None:
+        """The loop judges the rolled-out cursor, not the start state (#63)."""
+        from langgoap.planner.mcts import RandomRollout
+
+        actions = [
+            ActionSpec(name="a", preconditions={}, effects={"x": 1}, cost=1.0),
+            ActionSpec(
+                name="b", preconditions={"x": 1}, effects={"done": True}, cost=1.0
+            ),
+        ]
+        policy = RandomRollout(max_depth=20, rng=random.Random(3))
+        reward = policy.rollout(
+            state=PlanningState.from_dict({}),
+            goal=GoalSpec(conditions={"done": True}),
+            actions=actions,
+        )
+        assert reward == pytest.approx(1.0)
+
 
 class TestHeuristicRollout:
     def test_reaches_two_step_goal_deterministically(

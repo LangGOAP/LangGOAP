@@ -9,7 +9,7 @@ the policy's reason as the ``replan_reason`` so downstream consumers
 (history, tracer, CLI) see exactly why the run stopped.
 
 API mirrors Embabel's contract on
-``research/repos/embabel-agent/embabel-agent-api/src/main/kotlin/
+``https://github.com/embabel/embabel-agent/blob/HEAD/embabel-agent-api/src/main/kotlin/
 com/embabel/agent/core/EarlyTerminationPolicy.kt``.  Built-ins:
 
 * :class:`MaxActionsPolicy` — terminate after N executed actions.

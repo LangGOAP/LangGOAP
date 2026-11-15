@@ -6,7 +6,7 @@ Protocol describes *how the world responds* — separating spec from
 dynamics so A* can plan under an expected-value view while MCTS
 rollouts and the graph runtime see the actual sampled view.
 
-See ``research/experiments/2026-04-20-mcts-on-stochastic.md`` §8.1
+See the internal "2026-04-20-mcts-on-stochastic" design note (not in the repository)
 for the committed design.  The default :class:`DeterministicTransitionModel`
 is backwards-compatible — callers that do not wire a model observe
 the pre-existing bit-identical behaviour.
@@ -134,30 +134,36 @@ def assert_expected_matches_declared(
 
     Dispatches on the model's ``divergence_policy`` attribute:
 
-    * **None / absent (strict path)** — assert ``model.expected(state,
+    * **None / absent (strict path)** — require ``model.expected(state,
       action) == action.get_effects(state)`` exactly.  Catches silent
       declared-effect typos in user-authored :class:`TransitionModel`
       implementations.
     * **Set, unbounded** (``max_relative_deviation is None``) — skip
       the equality check, but require a non-empty ``reason`` so every
       opt-out carries at least a sentence of documentation.
-    * **Set, bounded** — assert
+    * **Set, bounded** — require
       ``|expected - declared| / max(|declared|, 1.0) ≤
       max_relative_deviation`` for every numeric effect value.
       Boolean and string values still require exact equality; only
       numeric values are bound-relaxed, because flipping a boolean
       flag is a categorical change, not a bounded perturbation.
+
+    Raises:
+        ValueError: when the model diverges from the declared effects (or
+            an opt-out carries no reason).  A plain ``raise`` rather than
+            ``assert`` so the contract also holds under ``python -O``.
     """
     policy: DivergencePolicy | None = getattr(model, "divergence_policy", None)
     declared = dict(action.get_effects(dict(state)))
     expected = dict(model.expected(state, action))
 
     if policy is None:
-        assert expected == declared, (
-            f"TransitionModel.expected() diverges from declared effects "
-            f"but no divergence_policy was set. "
-            f"expected={expected!r} declared={declared!r}"
-        )
+        if expected != declared:
+            raise ValueError(
+                f"TransitionModel.expected() diverges from declared effects "
+                f"but no divergence_policy was set. "
+                f"expected={expected!r} declared={declared!r}"
+            )
         return
 
     if not policy.reason.strip():
@@ -175,30 +181,33 @@ def assert_expected_matches_declared(
         expected_value = expected.get(key, declared_value)
         if isinstance(declared_value, bool) or isinstance(expected_value, bool):
             # Booleans are not bound-relaxed — flipping is categorical.
-            assert expected_value == declared_value, (
-                f"TransitionModel.expected()[{key!r}] flipped from "
-                f"{declared_value!r} to {expected_value!r}; bounded "
-                f"divergence does not cover non-numeric effects."
-            )
+            if expected_value != declared_value:
+                raise ValueError(
+                    f"TransitionModel.expected()[{key!r}] flipped from "
+                    f"{declared_value!r} to {expected_value!r}; bounded "
+                    f"divergence does not cover non-numeric effects."
+                )
             continue
         if isinstance(declared_value, (int, float)) and isinstance(
             expected_value, (int, float)
         ):
             denom = max(abs(float(declared_value)), 1.0)
             deviation = abs(float(expected_value) - float(declared_value)) / denom
-            assert deviation <= bound, (
-                f"TransitionModel.expected()[{key!r}] declares bounded "
-                f"deviation ≤{bound} but observed {deviation:.3f} "
-                f"(declared={declared_value!r}, expected={expected_value!r})."
-            )
+            if deviation > bound:
+                raise ValueError(
+                    f"TransitionModel.expected()[{key!r}] declares bounded "
+                    f"deviation ≤{bound} but observed {deviation:.3f} "
+                    f"(declared={declared_value!r}, expected={expected_value!r})."
+                )
             continue
         # Non-numeric, non-boolean (strings, frozensets, etc.) require
         # exact equality regardless of the numeric bound.
-        assert expected_value == declared_value, (
-            f"TransitionModel.expected()[{key!r}] diverges from "
-            f"declared={declared_value!r} to expected={expected_value!r}; "
-            f"bounded divergence applies only to numeric values."
-        )
+        if expected_value != declared_value:
+            raise ValueError(
+                f"TransitionModel.expected()[{key!r}] diverges from "
+                f"declared={declared_value!r} to expected={expected_value!r}; "
+                f"bounded divergence applies only to numeric values."
+            )
 
 
 __all__ = [

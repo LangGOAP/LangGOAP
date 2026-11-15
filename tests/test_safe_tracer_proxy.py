@@ -1,7 +1,7 @@
 """Unit tests for :class:`langgoap.tracing.SafeTracerProxy`.
 
 The proxy consolidates the previous three "never raise" patterns
-(per-call ``_safe_tracer_call`` guards, :class:`MultiTracer`
+(per-call try/except guards, :class:`MultiTracer`
 catch-and-log, ad-hoc inline try/excepts) into a single wrapper
 installed once at node construction time.  These tests pin its
 contract so future refactors do not regress the exception-safety

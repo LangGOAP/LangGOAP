@@ -126,12 +126,10 @@ def _heuristic(
     most one goal condition; :func:`_search` always supplies the scalars
     from :func:`_heuristic_scale` so the estimate never overshoots.
     """
-    state_dict = state.to_dict()
-    unsatisfied = sum(
-        1
-        for k, v in goal_conditions.items()
-        if k not in state_dict or state_dict[k] != v
-    )
+    # (key, value) membership on the frozenset: no dict allocation per
+    # heuristic evaluation (#63).
+    conditions = state.conditions
+    unsatisfied = sum(1 for kv in goal_conditions.items() if kv not in conditions)
     if unsatisfied == 0 or min_cost <= 0.0:
         return 0.0
     return math.ceil(unsatisfied / per_action) * min_cost

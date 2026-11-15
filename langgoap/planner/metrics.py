@@ -18,8 +18,8 @@ The canonical use case is Pac-Man's ghost-proximity integral — a
 :class:`MinimizeTrajectorySum` with ``expression=inverse_ghost_
 distance`` penalises every plan step that ever passes within
 striking distance of an adversary, not just plans whose terminal
-state is unsafe.  See ``research/plans/trajectory-level-cost.md``
-for the motivation and ``research/experiments/`` for the pre-
+state is unsafe.  See the internal "trajectory-level-cost" design note (not in the repository)
+for the motivation and the internal experiment logs (not in the repository) for the pre-
 registered A/B.
 """
 

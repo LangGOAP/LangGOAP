@@ -13,7 +13,7 @@ replan also fails, returns None.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
@@ -191,6 +191,11 @@ class RepairStrategy:
 
             inner = AStarStrategy()
         self._inner: PlanningStrategy = inner
+
+    def _with_tracer(self, tracer: Any, record_expansions: bool) -> RepairStrategy:
+        from langgoap.planner.strategy import rebind_inner_tracer
+
+        return rebind_inner_tracer(self, tracer, record_expansions)
 
     def plan(
         self,

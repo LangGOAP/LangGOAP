@@ -1,7 +1,7 @@
 """Exception-safe wrapper around any :class:`PlanningTracer`.
 
 Consolidates the three pre-existing "never raise" patterns (per-call
-``_safe_tracer_call`` guards in the node modules,
+per-call try/except guards the node modules once carried,
 :class:`MultiTracer`'s catch-and-log, and ad-hoc inline try/excepts)
 into a single proxy installed once at node construction time.  Once
 the proxy wraps the user-supplied tracer, call sites can invoke hooks

@@ -749,7 +749,7 @@ class TestSingleCompletionPerPlanCall:
 # ---------------------------------------------------------------------------
 # Irrelevant-action regression armor — ported verbatim from Embabel.
 #
-# Source: research/repos/embabel-agent/embabel-agent-api/src/test/kotlin/
+# Source: https://github.com/embabel/embabel-agent/blob/HEAD/embabel-agent-api/src/test/kotlin/
 #         com/embabel/plan/goap/IrrelevantActionsTest.kt
 #
 # Each Kotlin nested class becomes a Python test class below, and each

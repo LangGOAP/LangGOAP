@@ -46,7 +46,7 @@ management and virtual environments.
 
 ```bash
 git clone https://github.com/LangGOAP/LangGOAP.git
-cd langgoap
+cd LangGOAP
 uv sync
 ```
 

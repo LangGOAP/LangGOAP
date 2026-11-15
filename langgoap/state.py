@@ -64,6 +64,12 @@ class PlanningState:
     context: Mapping[str, Any] = field(
         default_factory=lambda: _EMPTY_CONTEXT, compare=False, repr=False
     )
+    #: Lazily built ``dict`` view of :attr:`conditions`, so ``get`` and
+    #: ``in`` are O(1) instead of a scan of the frozenset (#63).  Excluded
+    #: from equality and hashing; filled on first use.
+    _dict: dict[str, Any] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     @classmethod
     def from_dict(
@@ -104,9 +110,17 @@ class PlanningState:
 
         return cls(conditions=frozenset(items), context=context)
 
+    def _view(self) -> dict[str, Any]:
+        """The cached read-only dict view (built once; the state is frozen)."""
+        view = self._dict
+        if view is None:
+            view = dict(self.conditions)
+            object.__setattr__(self, "_dict", view)
+        return view
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to a mutable dictionary snapshot."""
-        return dict(self.conditions)
+        return dict(self._view())
 
     def satisfies(self, requirements: Mapping[str, Any]) -> bool:
         """Check if this state satisfies all given conditions.
@@ -150,20 +164,14 @@ class PlanningState:
         return merged
 
     def get(self, key: str, default: Any = None) -> Any:
-        """Get a value by key, returning default if missing.
-
-        Scans the frozenset directly to avoid a full dict allocation.
-        """
-        for k, v in self.conditions:
-            if k == key:
-                return v
-        return default
+        """Get a value by key, returning default if missing."""
+        return self._view().get(key, default)
 
     def __len__(self) -> int:
         return len(self.conditions)
 
     def __contains__(self, key: str) -> bool:
-        return any(k == key for k, _ in self.conditions)
+        return key in self._view()
 
     def __repr__(self) -> str:
         return f"PlanningState({self.to_dict()!r})"

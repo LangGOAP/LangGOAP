@@ -5,7 +5,7 @@ both following Gymnasium conventions) and a
 ``SlipperyTransitionModel`` that conforms to
 :class:`~langgoap.planner.transitions.TransitionModel`.
 
-See ``research/experiments/2026-04-20-mcts-on-stochastic.md``.
+See the internal "2026-04-20-mcts-on-stochastic" design note (not in the repository).
 """
 
 from __future__ import annotations

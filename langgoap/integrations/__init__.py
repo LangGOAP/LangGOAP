@@ -28,7 +28,7 @@ from langgoap.integrations.deepagents import (
 from langgoap.integrations.langgraph_deploy import scaffold_deployment
 from langgoap.integrations.prebuilt import create_goap_agent
 from langgoap.integrations.subgraph import GoapSubgraph, add_goap_subgraph
-from langgoap.integrations.tools import goapify_tool
+from langgoap.integrations.tools import EffectValidator, goapify_tool
 
 __all__ = [
     "create_goap_agent",
@@ -36,6 +36,7 @@ __all__ = [
     "create_goap_subagent",
     "format_goap_result",
     "goapify_tool",
+    "EffectValidator",
     "GoapSubgraph",
     "add_goap_subgraph",
     "scaffold_deployment",

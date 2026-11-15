@@ -1,7 +1,7 @@
 """Directory Handler — Tier 1 primer for LangGOAP.
 
 A minimal end-to-end GOAP loop adapted from GOApy's ``directory_handler``
-example (``research/repos/GOApy/examples/directory_handler``).
+example (``https://github.com/leopepe/GOApy/blob/HEAD/examples/directory_handler``).
 
 World state models a workspace directory and a marker file inside it.
 The planner discovers that it must create the directory *before* it can

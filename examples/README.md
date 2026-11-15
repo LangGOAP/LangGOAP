@@ -23,7 +23,13 @@ the source of truth.
 Single-mechanic primers, each runnable end-to-end without an LLM unless explicitly noted.
 
 - [`basics/plan_visualization.ipynb`](basics/plan_visualization.ipynb) — Mermaid / DOT / ASCII rendering of plans and CSP schedules.
-- [`basics/nl_goal_interpreter.ipynb`](basics/nl_goal_interpreter.ipynb) — Plain-English request → `GoalSpec` via `GoalInterpreter`.
+- [`basics/nl_goal_interpreter.ipynb`](basics/nl_goal_interpreter.ipynb) — Plain-English request → `GoalSpec` via `GoalInterpreter` (needs an LLM).
+- [`basics/create_goap_agent_quickstart.ipynb`](basics/create_goap_agent_quickstart.ipynb) — The one-liner: LangChain tools + goal → compiled `StateGraph`.
+- [`basics/termination_policies.ipynb`](basics/termination_policies.ipynb) — `MaxCostPolicy`, `MaxActionsPolicy`, and `FirstOfPolicy` composition.
+- [`basics/stuck_handlers.ipynb`](basics/stuck_handlers.ipynb) — `FunctionalStuckHandler` and `MulticastStuckHandler` recovering planning failures.
+- [`basics/typed_form_hitl.ipynb`](basics/typed_form_hitl.ipynb) — Typed-form `interrupt()` with Pydantic validation on resume.
+- [`basics/action_qos.ipynb`](basics/action_qos.ipynb) — In-executor retry with `ActionQos` and exponential backoff.
+- [`basics/goap_subgraph.ipynb`](basics/goap_subgraph.ipynb) — Embedding a `GoapGraph` as a node of a larger `StateGraph`.
 - [`basics/tracing.ipynb`](basics/tracing.ipynb) — Observability hooks with `LoggingTracer`, `LangSmithTracer`, and `MultiTracer`.
 - [`basics/cli.ipynb`](basics/cli.ipynb) — The `langgoap` CLI: `plan`, `actions`, `explain`, `visualize`, `deploy-init`.
 - [`basics/stochastic_gridworld.ipynb`](basics/stochastic_gridworld.ipynb) — `TransitionModel` separating declared effects from sampled dynamics on FrozenLake-4x4.
@@ -31,7 +37,7 @@ Single-mechanic primers, each runnable end-to-end without an LLM unless explicit
 
 ## Tutorials
 
-See [`tutorials/README.md`](tutorials/README.md) for the full 22-tutorial catalog across three tiers.
+See [`tutorials/README.md`](tutorials/README.md) for the 22 featured tutorials across three tiers plus the five LangGraph-comparison notebooks.
 
 ## Screencasts
 

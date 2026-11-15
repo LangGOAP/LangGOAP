@@ -180,6 +180,11 @@ class StoreExecutionHistory:
         self._store = store
         self._index_limit = index_limit
 
+    @property
+    def store(self) -> BaseStore:
+        """The backing ``BaseStore``, for components that share it (e.g. reflections)."""
+        return self._store
+
     @staticmethod
     def goal_hash_for(goal: GoalSpec) -> str:
         """Return the goal-index key this history would file ``goal`` under.

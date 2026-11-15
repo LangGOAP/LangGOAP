@@ -70,6 +70,8 @@ jobs:
                 uv sync && uv pip install -r docs/requirements.txt
               fi
               uv run python docs/copy_notebooks.py || true
+              # Older tags predate the generator; their committed page is used as is.
+              [ -f docs/generate_api_index.py ] && uv run python docs/generate_api_index.py || true
               uv run sphinx-build -b html docs "$OUTPUT_DIR/$tag"
             )
             git worktree remove --force "$WORKTREE"
@@ -86,6 +88,7 @@ jobs:
 
           echo "=== Building docs for main ==="
           uv run --group docs python docs/copy_notebooks.py
+          uv run --group docs python docs/generate_api_index.py
           uv run --group docs sphinx-build -b html docs "$OUTPUT_DIR/main"
 
           VERSIONS_JSON=$(echo "$VERSIONS_JSON" | python3 -c "
