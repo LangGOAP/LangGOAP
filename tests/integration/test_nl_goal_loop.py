@@ -132,9 +132,10 @@ class TestNLGoalLoop:
         Pipeline cost: $0.5 + $0.1 + $1.0 = $1.60.
         Budget cap: $1.00 — below the total, so CSP marks the plan INFEASIBLE.
 
-        CSP is advisory: the plan still executes (no execute callable → effects
-        applied via defaults), but the CSP metadata must record the violation,
-        proving the constraint was evaluated and not silently ignored.
+        Hard constraints are enforced (``GoalPolicy.on_infeasible="fail"``,
+        issue #13): the plan is rejected, the run ends as ``no_plan``, and the
+        ``no_plan_explanation`` names the violated budget, proving the
+        constraint was evaluated and not silently ignored.
         """
         actions = _report_pipeline_actions()
         fake_response = InterpretedGoal(
@@ -147,11 +148,13 @@ class TestNLGoalLoop:
 
         result = graph.invoke_nl("Generate a report under $1", llm=llm)
 
-        # CSP is advisory: plan executes despite constraint violation
-        plan_obj = result.get("plan")
-        assert plan_obj is not None, "graph must expose the executed plan"
-        assert plan_obj.metadata.csp is not None, "CSP metadata must be attached"
-        assert plan_obj.metadata.csp.status == CSPStatus.INFEASIBLE
+        assert result["status"] == "no_plan"
+        assert result.get("plan") is None
+        expl = result["no_plan_explanation"]
+        shortfall = expl["resource_shortfalls"][0]
+        assert shortfall["key"] == "cost_usd"
+        assert shortfall["available_max"] == 1.0
+        assert shortfall["required"] == pytest.approx(1.6)
 
     def test_nl_with_unreachable_goal_returns_no_plan(self) -> None:
         """NL request that produces an unreachable GoalSpec fails gracefully."""

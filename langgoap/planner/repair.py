@@ -91,6 +91,11 @@ def repair_plan(
         )
 
     remaining = plan.actions[current_step:]
+    blacklist = set(blacklisted_actions or ())
+    # Single-use actions that already ran earlier in this plan must not be
+    # scheduled again; A* enforces ``can_rerun`` within a search path and
+    # this is the repair-side equivalent.
+    spent = {a.name for a in plan.actions[:current_step] if not a.can_rerun}
 
     # Walk the remaining actions and collect the longest valid prefix.
     sim_state = current_state
@@ -99,13 +104,20 @@ def repair_plan(
     prefix_cost: float = 0.0
 
     for action in remaining:
+        # The observer leaves ``current_step`` on the action that just
+        # failed and blacklists it; reusing it as the prefix would
+        # re-execute the failure on every replan (issue #14).
+        if action.name in blacklist or action.name in spent:
+            break
         if sim_state.satisfies(action.preconditions):
-            sim_dict = sim_state.to_dict()
+            sim_dict = sim_state.as_context()
             cost = action.get_cost(sim_dict)
             prefix_cost += cost
             sim_state = sim_state.apply(action.get_effects(sim_dict))
             prefix_actions.append(action)
             prefix_states.append(sim_state)
+            if not action.can_rerun:
+                spent.add(action.name)
         else:
             break  # first inapplicable action ends the valid prefix
 
@@ -162,8 +174,11 @@ class RepairStrategy:
     On the first planning call (``prior_plan=None``), delegates to the
     inner strategy unchanged.  When a ``prior_plan`` is supplied (i.e.
     the planner is replanning after state drift), attempts
-    :func:`repair_plan` first.  Falls back to a full inner-strategy replan
-    only when repair fails to produce a valid plan.
+    :func:`repair_plan` first.  Blacklisted actions and single-use actions
+    that already ran are never kept in the reused prefix.  Falls back to a
+    full inner-strategy replan only when repair fails to produce a valid
+    plan, or when no prefix was reusable and the inner strategy is not
+    plain A* (so CSP refinement still applies).
 
     Args:
         inner: The base strategy to delegate to.  Defaults to
@@ -216,11 +231,21 @@ class RepairStrategy:
             blacklisted_actions=blacklisted_actions,
         )
 
-        if result.repair_applied and result.repaired_plan is not None:
-            return result.repaired_plan
+        if result.repaired_plan is not None:
+            if result.repair_applied:
+                return result.repaired_plan
+            # No prefix was reusable, so the "repaired" plan is a plain A*
+            # suffix from ``start``.  That is exactly what an A* inner
+            # strategy would compute again, so return it directly; a
+            # non-A* inner (e.g. the CSP pipeline) still gets its turn so
+            # its refinement semantics are preserved.
+            from langgoap.planner.strategy import AStarStrategy
 
-        # Repair either found no usable prefix or suffix replanning failed;
-        # delegate to the inner strategy for a full replan.
+            if isinstance(self._inner, AStarStrategy):
+                return result.repaired_plan
+
+        # Suffix replanning failed, or the inner strategy owns the semantics
+        # of a from-scratch plan; delegate to it for a full replan.
         return self._inner.plan(
             start, goal, actions, blacklisted_actions=blacklisted_actions
         )

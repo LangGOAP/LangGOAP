@@ -15,6 +15,7 @@ from langchain_core.tools import BaseTool, tool
 from langgraph.graph.state import CompiledStateGraph
 
 from langgoap.goals import GoalSpec
+from langgoap.graph.state import plan_from_state, rehydrate_state
 from langgoap.integrations import create_goap_agent
 
 # Repo-relative path where the README-companion artifacts (PNGs and
@@ -80,7 +81,7 @@ class TestCreateGoapAgentBasic:
         )
         assert result["status"] == "goal_achieved"
         # plan should chain the three tools
-        plan = result["plan"]
+        plan = plan_from_state(result["plan"])
         assert plan is not None
         assert plan.action_names == ["gather_data", "process_data", "write_report"]
 
@@ -311,11 +312,16 @@ class TestReadmeQuickstart:
         # The natural-language goal should resolve to a published-article flag.
         assert agent.goap_goal.conditions.get("published") is True
 
-        result = agent.invoke(
-            {
-                "world_state": {"topic": "GOAP for LangGraph"},
-                "goal": agent.goap_goal,
-            }
+        # A compiled graph returns the JSON-native state; the README's typed
+        # transcript comes from rehydrating it with the agent's actions.
+        result = rehydrate_state(
+            agent.invoke(
+                {
+                    "world_state": {"topic": "GOAP for LangGraph"},
+                    "goal": agent.goap_goal,
+                }
+            ),
+            agent.goap_actions,
         )
 
         assert result["status"] == "goal_achieved"
@@ -342,11 +348,16 @@ class TestReadmeQuickstart:
     def test_replan_to_premium(self, llm: Any) -> None:
         """Fast writer fails once → blacklist → replan picks premium writer."""
         agent = _build_quickstart_agent(llm, fail_fast_n_times=1)
-        result = agent.invoke(
-            {
-                "world_state": {"topic": "GOAP for LangGraph"},
-                "goal": agent.goap_goal,
-            }
+        # A compiled graph returns the JSON-native state; the README's typed
+        # transcript comes from rehydrating it with the agent's actions.
+        result = rehydrate_state(
+            agent.invoke(
+                {
+                    "world_state": {"topic": "GOAP for LangGraph"},
+                    "goal": agent.goap_goal,
+                }
+            ),
+            agent.goap_actions,
         )
 
         assert result["status"] == "goal_achieved"

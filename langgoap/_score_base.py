@@ -38,6 +38,10 @@ class Score:
         """
         raise NotImplementedError
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise to a JSON-native dict; see :func:`langgoap.score.score_from_dict`."""
+        raise NotImplementedError
+
     def is_feasible(self) -> bool:
         """Return True if this score represents a feasible plan."""
         raise NotImplementedError

@@ -18,14 +18,35 @@ A GOAP problem is defined by three things:
 
 The planner searches the state space with A\* from the initial state,
 expanding actions whose preconditions are satisfied, applying effects,
-and stopping when the goal conditions hold. Cost functions drive the
-heuristic; `CostFunction` is a `Protocol`, so users can supply dynamic,
-state-dependent costs.
+and stopping when the goal conditions hold. The heuristic is admissible
+and consistent — `ceil(unsatisfied goal conditions / most goal
+conditions any single action establishes) × cheapest static action
+cost` — so the first plan A\* returns is a cheapest plan. `CostFunction`
+is a `Protocol`, so users can supply dynamic, state-dependent costs;
+when any cost is dynamic the heuristic falls back to zero (plain
+Dijkstra) rather than risk overestimating.
+
+With a `time_budget_ms`, planning is *anytime*: weighted A\* runs with a
+tightening weight schedule, so a complete (bounded-suboptimal) plan is
+available early and is improved while the budget lasts; on expiry the
+best complete plan found so far is returned. `AnytimePlanningStrategy`
+wraps this for strategies that do not take a budget themselves.
 
 Actions are declared as `ActionSpec` frozen dataclasses. Every
 `ActionSpec` field is immutable (`MappingProxyType` for preconditions
 and effects) so the same action can be reused across concurrent
-planning runs without mutation hazards.
+planning runs without mutation hazards. Precondition, effect and goal
+values must be hashable (scalars, tuples, frozensets); a list or dict
+is rejected at construction with the offending key named.
+
+The planner only hashes and compares *planning keys* (those that appear
+in some precondition, effect or goal condition), but the rest of the
+world state is not lost: `PlanningState` carries it as a `context`, and
+cost functions, dynamic effects and `TransitionModel.expected` /
+`sample` receive `state.as_context()`, the full world state with the
+planning keys layered on top. Rich data (documents, tool output) can
+therefore drive a dynamic cost or effect without becoming part of the
+search space.
 
 ## The plan *is* a compiled `StateGraph`
 
@@ -41,16 +62,82 @@ wrapped by `RunnableLambda(func=..., afunc=...)`, so
 `compiled.invoke()` and `compiled.ainvoke()` both fire the tracer
 hooks exactly once per transition.
 
+### The state is plain JSON
+
+LangGraph hands every channel value and every node write to the
+checkpointer's serializer, so the graph is built from
+`GoapStateChannels`, a schema whose values are dicts, lists and scalars
+only. That is what lets *any* `BaseCheckpointSaver` — in-memory,
+Postgres, Redis, SQLite or your own — persist a GOAP run with its stock
+serializer; LangGOAP ships no serializer and imports no backend. Typed
+objects live at the edges: `GoapGraph.invoke()` converts the goal on
+the way in and returns a `GoapState` whose `goal`, `plan` and
+`execution_history` are `GoalSpec` / `Plan` / `ActionResult` objects;
+the nodes rehydrate on entry and serialise on exit, so strategies,
+tracers, guards and stuck handlers never see the JSON form. Code that
+drives the compiled graph directly sees the JSON form and can call
+`GoapGraph.rehydrate(result)` (or `langgoap.graph.state.rehydrate_state`)
+to get objects back. Two consequences follow:
+
+- With a checkpointer attached, build the input with
+  `GoapGraph.initial_state(goal, world_state)` or pass `goal.to_dict()`.
+  LangGraph persists the raw input before the state reducers can convert
+  a `GoalSpec` object, and the stock serializer refuses it.
+- Callables are never read from a checkpoint. Plan actions are stored by
+  their declarative fields and rebound by name to the live action list;
+  a goal's callable `value` and its plan-quality `metrics` are kept
+  reachable for the lifetime of the process, and a checkpoint restored
+  in another process falls back to `value=1.0` and drops the metrics
+  with a warning.
+
+### Replanning, retries and blacklisting
+
+The observer compares the world state after each action with the
+planner's expected state and routes back to the planner on a failure or
+a deviation. A failed action is retried up to `ActionSpec.max_retries`
+times (or per its `ActionQos` policy) and then blacklisted for the rest
+of the run; the planner excludes blacklisted actions and finds another
+path if one exists. When every remaining path needs a blacklisted
+action the run ends with `status="no_plan"` and a `no_plan_explanation`
+that names the blacklisted actions and the knobs that would unblock the
+goal. `GoalPolicy(blacklist_fallback=True)` opts into the alternative:
+re-admit the failed actions and plan through them again, bounded by
+`max_replans`.
+
+`RepairStrategy` reuses the already-executed prefix of the previous plan
+and re-plans the suffix; blacklisted actions and spent `can_rerun=False`
+actions never survive in the prefix, and when the repair cannot reach the
+goal the strategy delegates to its inner strategy instead of returning an
+unrepaired plan.
+
+`ParallelGoapExecutor` runs independent plan actions as a wave. Each
+action's world-state delta is merged independently, a failure aborts the
+wave after the successful siblings' deltas are kept, and an action that
+requires human approval always runs in a wave of its own so the
+`interrupt()` is never raised mid-wave.
+
 ## Constraint optimization
 
-When a goal carries `constraints` or `objectives`, `GoapPlanner`
-routes through a two-phase pipeline (`langgoap.pipeline_plan`):
+When a goal carries `constraints`, `objectives`, `soft_goals` or
+`metrics` (`pipeline.needs_csp`), `GoapPlanner` routes through a
+two-phase pipeline (`langgoap.pipeline_plan`):
 
 1. A\* produces a candidate plan ignoring constraints — the
    *construction heuristic*.
 2. CP-SAT validates or replaces that plan against resource budgets,
    temporal precedence, and weighted objectives — the *refinement
    phase*.
+
+A goal that states only hard limits is satisfied by the first feasible
+A\* plan. A goal that states *preferences* — objectives, soft
+constraints or soft goals (`pipeline.needs_selection`) — compares that
+plan against alternative plans and lets CP-SAT pick the best one, with
+total cost as a strict tie-breaker. Plan-quality `metrics` are arbitrary
+Python callables that CP-SAT cannot express; they re-score the chosen
+plan but do not drive selection. When the only plan is `INFEASIBLE` the
+run ends with `no_plan` and an explanation listing the plan and its
+per-resource shortfalls; `GoalPolicy(on_infeasible="execute")` runs it
+anyway and reports the status in `plan.metadata.csp`.
 
 The CP-SAT layer supports:
 
@@ -134,10 +221,10 @@ rollouts sampled from.
 
 `StrategyRouter` dispatches to the right `PlanningStrategy` based on
 the problem. It reads cheap `ProblemFeatures` at `plan()` time —
-action count, goal-condition count, hard-constraint / soft-objective
-presence, trajectory-metric presence, `is_stochastic`, and
-`risk_profile` — and asks its `classifier` which registered
-strategy to invoke. Because `StrategyRouter` itself satisfies
+action count, goal-condition count, relaxed-plan horizon,
+hard-constraint / soft-objective presence, trajectory-metric presence,
+`is_stochastic`, and `risk_profile` — and asks its `classifier` which
+registered strategy to invoke. Because `StrategyRouter` itself satisfies
 `PlanningStrategy`, callers that already accept a strategy (e.g.
 `GoapPlanner(strategy=...)`) can opt in by passing a router with no
 other changes.
@@ -150,7 +237,10 @@ The default `RuleBasedClassifier` is lexicographic and conservative:
    via `DivergencePolicy(kind="risk-averse")`).
 3. `is_stochastic` **and** `prefer_mcts_for_stochastic=True` →
    `"mcts"` (flag-gated opt-in).
-4. High branching × deep horizon → `"mcts"`.
+4. High branching (30+ actions) **and** a deep horizon → `"mcts"`.
+   The horizon is the depth of the relaxed planning graph from the
+   start state to the goal (delete effects ignored), so catalog size
+   alone never promotes a short chain to MCTS.
 5. Otherwise → `"astar"`.
 
 Routing is a pure function of the problem, so decisions are

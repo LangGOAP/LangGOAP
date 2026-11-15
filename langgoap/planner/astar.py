@@ -3,6 +3,9 @@
 Forward-chaining A* search over GOAP state space. Includes:
 - Reachability pre-check (fast early exit when a goal condition has no
   producing action)
+- An admissible, consistent heuristic (unsatisfied goal conditions scaled
+  by the largest per-action goal coverage and the smallest static cost),
+  so the first goal state popped is cost-optimal
 - Action specificity tie-breaking
 - Two-pass plan optimization: backward relevance + forward simulation
 """
@@ -11,16 +14,26 @@ from __future__ import annotations
 
 import heapq
 import logging
+import math
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass, field, replace
+from typing import Any, Mapping, cast
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
 from langgoap.planner.types import Plan, PlanMetadata
 from langgoap.score import SimpleScore
 from langgoap.state import PlanningState
+
+# Monotonic clock used for time budgets; a module attribute so tests can
+# inject a deterministic clock without patching ``time`` globally.
+_clock = time.monotonic
+
+#: Weight schedule for anytime search: weighted A* (f = g + w*h) with a
+#: tightening ``w`` returns a complete plan early and improves it while
+#: the budget lasts.  The final ``1.0`` iteration is plain (optimal) A*.
+ANYTIME_WEIGHTS: tuple[float, ...] = (3.0, 2.0, 1.5, 1.0)
 
 logger = logging.getLogger(__name__)
 
@@ -56,14 +69,72 @@ class _SearchNode:
 # ---------------------------------------------------------------------------
 
 
-def _heuristic(state: PlanningState, goal_conditions: Mapping[str, Any]) -> float:
-    """Admissible heuristic: count of unsatisfied goal conditions."""
+def _heuristic_scale(
+    goal_conditions: Mapping[str, Any], actions: list[ActionSpec]
+) -> tuple[int, float]:
+    """Return ``(max_goal_effects_per_action, min_action_cost)`` for ``actions``.
+
+    These two scalars turn the raw unsatisfied-condition count into an
+    admissible estimate (see :func:`_heuristic`):
+
+    * ``max_goal_effects_per_action`` is the largest number of goal
+      ``(key, value)`` pairs any single action can establish.  For
+      dynamic-effect actions only the declared ``effect_keys`` are known,
+      so every goal key they list counts.  Never below 1.
+    * ``min_action_cost`` is the smallest static cost in the action set.
+      A callable cost has no static lower bound, so its presence forces
+      the bound to ``0.0`` (the search then degrades gracefully to
+      uniform-cost search, which is still optimal).
+    """
+    goal_items = set(goal_conditions.items())
+    goal_keys = set(goal_conditions)
+    per_action = 1
+    min_cost: float | None = None
+    for a in actions:
+        if a.has_dynamic_effects:
+            n = len((a.effect_keys or frozenset()) & goal_keys)
+        else:
+            static_effects = cast(Mapping[str, Any], a.effects)
+            n = len([kv for kv in static_effects.items() if kv in goal_items])
+        if n > per_action:
+            per_action = n
+        if callable(a.cost):
+            min_cost = 0.0
+        elif min_cost is None or a.cost < min_cost:
+            min_cost = float(a.cost)
+    if min_cost is None or min_cost < 0.0:
+        min_cost = 0.0
+    return per_action, min_cost
+
+
+def _heuristic(
+    state: PlanningState,
+    goal_conditions: Mapping[str, Any],
+    *,
+    per_action: int = 1,
+    min_cost: float = 1.0,
+) -> float:
+    """Admissible, consistent heuristic for the A* search.
+
+    ``ceil(unsatisfied / per_action) * min_cost`` where ``unsatisfied`` is
+    the number of goal conditions the state does not yet meet.  At least
+    ``ceil(unsatisfied / per_action)`` more actions are needed because no
+    action establishes more than ``per_action`` goal conditions, and each
+    of them costs at least ``min_cost``.  With the defaults
+    (``per_action=1``, ``min_cost=1.0``) this is the plain count, which is
+    only admissible when every action costs at least 1 and establishes at
+    most one goal condition; :func:`_search` always supplies the scalars
+    from :func:`_heuristic_scale` so the estimate never overshoots.
+    """
     state_dict = state.to_dict()
-    return sum(
+    unsatisfied = sum(
         1
         for k, v in goal_conditions.items()
         if k not in state_dict or state_dict[k] != v
     )
+    if unsatisfied == 0 or min_cost <= 0.0:
+        return 0.0
+    return math.ceil(unsatisfied / per_action) * min_cost
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +244,7 @@ def _forward_optimization(
         # Dynamic-effect actions are always kept — their effects depend
         # on the simulated state and may produce new values we cannot
         # evaluate without running the callable.
-        current_dict = current.to_dict()
+        current_dict = current.as_context()
         resolved = action.get_effects(current_dict)
         produces_new = any(current_dict.get(k) != v for k, v in resolved.items())
         if action.has_dynamic_effects or produces_new:
@@ -201,6 +272,7 @@ def _search(
     tracer: Any = None,
     record_expansions: bool = False,
     attempt: int = 1,
+    weight: float = 1.0,
 ) -> tuple[Plan | None, int]:
     """Core A* search loop.
 
@@ -227,6 +299,9 @@ def _search(
     Returns:
         ``(plan, nodes_explored)`` — ``plan`` is ``None`` when no path
         exists or the deadline expired before a complete plan was found.
+        ``weight`` > 1 runs weighted A* (``f = g + weight * h``): complete
+        and bounded-suboptimal (cost <= weight * optimal) but faster, which
+        is what the anytime schedule in :func:`plan` relies on.
         ``nodes_explored`` is always the number of nodes popped during
         this attempt and feeds the aggregate reported by :func:`plan`.
     """
@@ -262,18 +337,23 @@ def _search(
     # across calls.
     counter = [0]
 
-    h0 = _heuristic(start, goal_conditions)
-    root = _SearchNode(f_score=h0, g_score=0.0, counter=counter[0], state=start)
+    per_action, min_cost = _heuristic_scale(goal_conditions, sorted_actions)
+    h0 = _heuristic(start, goal_conditions, per_action=per_action, min_cost=min_cost)
+    root = _SearchNode(
+        f_score=weight * h0, g_score=0.0, counter=counter[0], state=start
+    )
     open_list: list[_SearchNode] = [root]
     # Map from state → best g_score seen
     best_g: dict[PlanningState, float] = {start: 0.0}
     nodes_explored = 0
-    best_complete: Plan | None = None  # best complete plan seen (anytime support)
 
     while open_list:
-        # Anytime: stop and return best complete plan found when deadline expires.
-        if deadline is not None and time.monotonic() >= deadline:
-            return best_complete, nodes_explored
+        # Deadline: a single A* run has no "best so far" (the first goal it
+        # pops is the only complete plan it ever sees), so give up and let
+        # the anytime loop in :func:`plan` keep the plan from a previous,
+        # more heavily weighted iteration.
+        if deadline is not None and _clock() >= deadline:
+            return None, nodes_explored
         current = heapq.heappop(open_list)
         nodes_explored += 1
 
@@ -289,9 +369,9 @@ def _search(
             )
 
         if current.state.satisfies(goal_conditions):
-            # In anytime mode, A* explores by f-score; the first goal found
-            # is optimal (admissible heuristic), so return immediately.
-            # best_complete is only used if the deadline fires mid-search.
+            # With ``weight == 1`` and an admissible, consistent heuristic the
+            # first goal popped is optimal; with ``weight > 1`` it is a
+            # complete plan whose cost is at most ``weight`` times optimal.
             built = _build_plan_from_node(
                 current, start, goal_conditions, nodes_explored, t0
             )
@@ -309,6 +389,9 @@ def _search(
             open_list,
             counter,
             has_single_use_actions=has_single_use_actions,
+            per_action=per_action,
+            min_cost=min_cost,
+            weight=weight,
         )
 
     # Open list exhausted without reaching the goal — reachability pre-check
@@ -340,12 +423,12 @@ def _build_plan_from_node(
     sim_state = start
     total_cost = 0.0
     for a in optimized:
-        sim_dict = sim_state.to_dict()
+        sim_dict = sim_state.as_context()
         total_cost += a.get_cost(sim_dict)
         sim_state = sim_state.apply(a.get_effects(sim_dict))
         expected.append(sim_state)
 
-    elapsed_ms = (time.monotonic() - t0) * 1000
+    elapsed_ms = (_clock() - t0) * 1000
     return Plan(
         actions=optimized,
         expected_states=tuple(expected),
@@ -368,6 +451,9 @@ def _expand_neighbors(
     counter: list[int],
     *,
     has_single_use_actions: bool = False,
+    per_action: int = 1,
+    min_cost: float = 1.0,
+    weight: float = 1.0,
 ) -> None:
     """Push every improving neighbour of ``current`` onto the open list.
 
@@ -380,7 +466,7 @@ def _expand_neighbors(
     is hoisted to the caller so the common case (every action is
     rerunnable) pays no per-expansion cost.
     """
-    current_dict = current.state.to_dict()
+    current_dict = current.state.as_context()
     used_names: frozenset[str] = (
         frozenset(a.name for a in current.actions)
         if has_single_use_actions
@@ -399,12 +485,14 @@ def _expand_neighbors(
         if tentative_g >= best_g.get(new_state, float("inf")):
             continue
         best_g[new_state] = tentative_g
-        h = _heuristic(new_state, goal_conditions)
+        h = _heuristic(
+            new_state, goal_conditions, per_action=per_action, min_cost=min_cost
+        )
         counter[0] += 1
         heapq.heappush(
             open_list,
             _SearchNode(
-                f_score=tentative_g + h,
+                f_score=tentative_g + weight * h,
                 g_score=tentative_g,
                 counter=counter[0],
                 state=new_state,
@@ -413,6 +501,73 @@ def _expand_neighbors(
                 trace_action_name=action.name,
             ),
         )
+
+
+def _with_nodes(plan_obj: Plan, nodes_explored: int) -> Plan:
+    """Return *plan_obj* with ``metadata.nodes_explored`` set to the total."""
+    if plan_obj.metadata.nodes_explored == nodes_explored:
+        return plan_obj
+    return replace(
+        plan_obj, metadata=replace(plan_obj.metadata, nodes_explored=nodes_explored)
+    )
+
+
+def _run_search(
+    start: PlanningState,
+    goal_conditions: Mapping[str, Any],
+    actions: list[ActionSpec],
+    t0: float,
+    deadline: float | None,
+    *,
+    tracer: Any,
+    record_expansions: bool,
+    attempt: int,
+) -> tuple[Plan | None, int]:
+    """One logical search: plain A* without a deadline, anytime A* with one.
+
+    The anytime loop runs weighted A* over :data:`ANYTIME_WEIGHTS`.  Each
+    iteration is complete, so the first one that finishes yields a usable
+    plan; later, tighter iterations can only improve it and the ``1.0``
+    iteration is optimal.  When the deadline fires the best complete plan
+    found so far is returned (``None`` only if not even the loosest
+    iteration finished), with ``nodes_explored`` summed over iterations.
+    """
+    if deadline is None:
+        return _search(
+            start,
+            goal_conditions,
+            actions,
+            t0,
+            None,
+            tracer=tracer,
+            record_expansions=record_expansions,
+            attempt=attempt,
+        )
+    best: Plan | None = None
+    total = 0
+    for weight in ANYTIME_WEIGHTS:
+        if _clock() >= deadline:
+            break
+        result, n = _search(
+            start,
+            goal_conditions,
+            actions,
+            t0,
+            deadline,
+            tracer=tracer,
+            record_expansions=record_expansions,
+            attempt=attempt,
+            weight=weight,
+        )
+        total += n
+        if result is None:
+            # Either the deadline interrupted this iteration (keep the best
+            # so far) or weighted A*, which is complete, proved no plan
+            # exists.  Both end the loop.
+            break
+        if best is None or result.total_cost < best.total_cost:
+            best = result
+    return (_with_nodes(best, total) if best is not None else None), total
 
 
 def plan(
@@ -424,6 +579,7 @@ def plan(
     time_budget_ms: float | None = None,
     tracer: Any = None,
     record_expansions: bool = False,
+    blacklist_fallback: bool | None = None,
 ) -> Plan | None:
     """Find an optimal action sequence from start to goal using A*.
 
@@ -433,14 +589,21 @@ def plan(
         goal: Goal specification with target conditions.
         actions: Available actions to choose from.
         blacklisted_actions: Action names to exclude from planning.
-            If filtering makes the goal unreachable, the planner retries
-            with all actions (graceful degradation: an unreachable goal
-            from the filtered set is preferred over returning ``None``
-            when a plan through the full action set still exists).
+        blacklist_fallback: When the blacklist makes the goal unreachable,
+            ``True`` retries with the full action set (re-admitting the
+            blacklisted actions) instead of returning ``None``.  ``None``
+            (default) reads ``goal.policy.blacklist_fallback``, which is
+            ``False`` unless the caller opted in: a permanently failing,
+            human-denied, or guard-blocked action must not be re-run just
+            because it is the only path (issue #15).
         time_budget_ms: Optional wall-clock budget in milliseconds.
-            When set, the search returns the best *complete* plan found
-            within the budget rather than running until exhaustion.
-            ``None`` (the default) means no limit — original behaviour.
+            When set, the search is *anytime*: weighted A* runs with the
+            tightening schedule :data:`ANYTIME_WEIGHTS`, so a complete
+            (bounded-suboptimal) plan is available early and is improved
+            while the budget lasts; the final iteration is optimal A*.
+            On expiry the best complete plan found so far is returned, or
+            ``None`` when not even the loosest iteration finished.
+            ``None`` (the default) means no limit — plain optimal A*.
         tracer: Optional :class:`~langgoap.tracing.PlanningTracer` that
             receives per-expansion, dead-end, and completion events when
             ``record_expansions`` is also ``True``.
@@ -452,7 +615,7 @@ def plan(
     """
     if isinstance(start, dict):
         start = PlanningState.from_dict(start)
-    t0 = time.monotonic()
+    t0 = _clock()
     goal_conditions = goal.conditions
     deadline = (t0 + time_budget_ms / 1000.0) if time_budget_ms is not None else None
 
@@ -467,11 +630,11 @@ def plan(
 
     def _emit_complete(found: bool, total_nodes: int) -> None:
         if on_complete is not None:
-            on_complete(total_nodes, (time.monotonic() - t0) * 1000, found)
+            on_complete(total_nodes, (_clock() - t0) * 1000, found)
 
     # Early exit: goal already satisfied
     if start.satisfies(goal_conditions):
-        elapsed_ms = (time.monotonic() - t0) * 1000
+        elapsed_ms = (_clock() - t0) * 1000
         _emit_complete(True, 0)
         return Plan(
             actions=(),
@@ -484,11 +647,14 @@ def plan(
             score=SimpleScore(scalar=0.0),
         )
 
+    if blacklist_fallback is None:
+        blacklist_fallback = goal.policy.blacklist_fallback
+
     # Filter blacklisted actions
     blacklist_set = set(blacklisted_actions) if blacklisted_actions else set()
     if blacklist_set:
         available = [a for a in actions if a.name not in blacklist_set]
-        result, n1 = _search(
+        result, n1 = _run_search(
             start,
             goal_conditions,
             available,
@@ -498,12 +664,13 @@ def plan(
             record_expansions=record_expansions,
             attempt=1,
         )
-        if result is not None:
-            _emit_complete(True, n1)
+        if result is not None or not blacklist_fallback:
+            _emit_complete(result is not None, n1)
             return result
-        # Blacklist fallback: filtered action set made the goal unreachable
-        # — retry with all actions so the executor can decide at runtime.
-        result, n2 = _search(
+        # Opt-in blacklist fallback: the filtered action set made the goal
+        # unreachable, so retry with all actions and let the executor
+        # decide at runtime.
+        result, n2 = _run_search(
             start,
             goal_conditions,
             actions,
@@ -514,9 +681,11 @@ def plan(
             attempt=2,
         )
         _emit_complete(result is not None, n1 + n2)
-        return result
+        # Report the whole planning effort, not just the second search
+        # (issue #23).
+        return _with_nodes(result, n1 + n2) if result is not None else None
 
-    result, n = _search(
+    result, n = _run_search(
         start,
         goal_conditions,
         actions,

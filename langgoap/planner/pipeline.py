@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import replace
+from types import MappingProxyType
 from typing import Any
 
 from langgoap.actions import ActionSpec
@@ -65,6 +66,14 @@ def _score_from_csp(plan: Plan, goal: GoalSpec, meta: CSPMetadata) -> HardSoftSc
             v = meta.objective_values.get(key, 0.0)
             soft += -v if direction == ObjectiveDirection.MINIMIZE else v
 
+    # Achieved soft goals are rewards: ``soft += weight`` per satisfied
+    # soft goal, evaluated on the plan's expected end state.
+    if goal.soft_goals and plan.expected_states:
+        final_state = plan.expected_states[-1]
+        for sg in goal.soft_goals:
+            if final_state.satisfies(sg.conditions):
+                soft += sg.weight
+
     # Plan-quality metrics contribute to soft as weighted minimisation
     # penalties: ``soft -= weight * metric.evaluate(plan)``.  Metrics
     # are declarative minimise-semantics; clients wanting a maximise
@@ -85,8 +94,35 @@ def _constraint_penalty(c: ConstraintSpec, total: float) -> float:
 
 
 def needs_csp(goal: GoalSpec) -> bool:
-    """Return True if the goal has constraints, objectives, or quality metrics."""
-    return bool(goal.constraints) or goal.objectives is not None or bool(goal.metrics)
+    """Return True if the goal has constraints, objectives, soft goals, or metrics."""
+    return (
+        bool(goal.constraints)
+        or goal.objectives is not None
+        or bool(goal.metrics)
+        or bool(goal.soft_goals)
+    )
+
+
+def needs_selection(goal: GoalSpec) -> bool:
+    """Return True when the goal states *preferences* rather than only limits.
+
+    Objectives, soft constraints, and soft goals can only be honoured by
+    comparing candidate plans against each other; a goal that carries
+    only hard constraints is satisfied by any plan that respects them, so
+    the first feasible A* plan is final.
+
+    Plan-quality ``metrics`` deliberately do *not* trigger selection: they
+    are arbitrary Python callables that CP-SAT cannot express, so
+    enumerating alternatives for them would compare plans on cost alone
+    while paying for an unbounded name-blacklist A* search (which hung the
+    trajectory-cost benchmark on long-horizon problems).  Metrics are
+    folded into the chosen plan's soft score by :func:`_score_from_csp`.
+    """
+    return (
+        goal.objectives is not None
+        or bool(goal.soft_goals)
+        or any(c.level == "soft" for c in goal.constraints)
+    )
 
 
 # Back-compat alias; prefer needs_csp in new code.
@@ -127,7 +163,16 @@ def enumerate_alternatives(
         if len(alternatives) >= max_count:
             break
         trial_blacklist = base_blacklist + [action.name]
-        result = astar_plan(start, goal, actions, blacklisted_actions=trial_blacklist)
+        # Never fall back here: the whole point is to plan *without* the
+        # blacklisted action, so re-admitting it would just reproduce the
+        # rejected plan.
+        result = astar_plan(
+            start,
+            goal,
+            actions,
+            blacklisted_actions=trial_blacklist,
+            blacklist_fallback=False,
+        )
         if result is not None:
             key = tuple(result.action_names)
             if key not in seen:
@@ -150,6 +195,7 @@ def plan(
     max_alternatives: int = 5,
     tracer: Any = None,
     record_expansions: bool = False,
+    blacklist_fallback: bool | None = None,
 ) -> Plan | None:
     """Two-phase planning: A* finds sequences, CSP validates/optimizes.
 
@@ -169,6 +215,8 @@ def plan(
             alternative-enumeration A* runs do **not** re-emit completions.
         record_expansions: Opt-in gate for the per-expansion firehose.
             Must be ``True`` *and* a tracer supplied for any hook to fire.
+        blacklist_fallback: Forwarded to :func:`langgoap.planner.astar.plan`
+            for the primary search; ``None`` reads the goal policy.
 
     Returns:
         A ``Plan`` with ``metadata.csp`` attached.  When CSP finds the
@@ -190,6 +238,7 @@ def plan(
             blacklisted_actions=blacklisted_actions,
             tracer=tracer,
             record_expansions=record_expansions,
+            blacklist_fallback=blacklist_fallback,
         )
 
     # Resolve the CSP-level dead-end hook up-front, matching the
@@ -210,6 +259,7 @@ def plan(
         blacklisted_actions=blacklisted_actions,
         tracer=tracer,
         record_expansions=record_expansions,
+        blacklist_fallback=blacklist_fallback,
     )
     if primary is None:
         logger.warning("A* found no plan; CSP pipeline cannot proceed")
@@ -227,39 +277,48 @@ def plan(
         primary.action_names,
     )
 
-    # SKIPPED means ``validate_plan`` had nothing to check — reached
-    # only when the goal carries metrics but no constraints /
-    # objectives.  Treat it as "primary is acceptable, just score the
-    # metrics" so we do not spin up the alternatives search for a
-    # preference-only goal.  Metric values still contribute to the
-    # plan's ``soft`` score via ``_score_from_csp`` regardless of
-    # status.  Metrics on their own cannot *select* among
-    # alternatives with this pipeline because
-    # ``enumerate_alternatives`` is name-blacklist based and planners
-    # with a small action-name cardinality (Pac-Man's macro-action
-    # model) produce no diverse pool to re-rank over; metric-driven
-    # selection belongs in the MCTS strategy where rollouts naturally
-    # produce diverse trajectories.
-    if csp_meta.status in (CSPStatus.FEASIBLE, CSPStatus.OPTIMAL, CSPStatus.SKIPPED):
+    # ``SKIPPED`` means ``validate_plan`` had nothing to bound-check
+    # (a goal with soft goals / metrics but no constraints or
+    # objectives); it is a feasible outcome.
+    primary_feasible = csp_meta.status in (
+        CSPStatus.FEASIBLE,
+        CSPStatus.OPTIMAL,
+        CSPStatus.SKIPPED,
+    )
+
+    # A goal that only carries hard limits is satisfied by the cheapest
+    # A* plan that respects them: no comparison against alternatives is
+    # needed.  Goals that state *preferences* (objectives, soft
+    # constraints, soft goals, metrics) must look at alternatives even
+    # when the primary plan is feasible, otherwise the preference never
+    # influences which plan runs (issue #12).
+    if primary_feasible and not needs_selection(goal):
         return _augment_plan(primary, goal, csp_meta)
 
-    # Primary plan rejected → emit a pipeline-level dead-end event so
-    # dashboards can render the rejection, then generate alternatives.
-    # Alternatives intentionally run without the tracer: they are
-    # internal retries that belong to this single logical plan() call
-    # and must not re-emit ``on_search_complete``.
-    if on_dead_end is not None:
-        on_dead_end(
-            "csp_infeasible",
-            {
-                "plan": list(primary.action_names),
-                "status": csp_meta.status.value,
-            },
+    if not primary_feasible:
+        # Primary plan rejected → emit a pipeline-level dead-end event so
+        # dashboards can render the rejection, then generate alternatives.
+        # Alternatives intentionally run without the tracer: they are
+        # internal retries that belong to this single logical plan() call
+        # and must not re-emit ``on_search_complete``.
+        if on_dead_end is not None:
+            on_dead_end(
+                "csp_infeasible",
+                {
+                    "plan": list(primary.action_names),
+                    "status": csp_meta.status.value,
+                },
+            )
+        logger.info(
+            "Primary plan infeasible; generating up to %d alternatives",
+            max_alternatives,
         )
-    logger.info(
-        "Primary plan infeasible; generating up to %d alternatives",
-        max_alternatives,
-    )
+    else:
+        logger.info(
+            "Goal states preferences; comparing primary plan against up to %d "
+            "alternatives",
+            max_alternatives,
+        )
     alternatives = enumerate_alternatives(
         start,
         goal,
@@ -270,20 +329,61 @@ def plan(
     )
 
     if not alternatives:
-        logger.warning("No alternative plans found")
+        if not primary_feasible:
+            logger.warning("No alternative plans found")
         return _augment_plan(primary, goal, csp_meta)
 
-    # Phase 3: CP-SAT multi-plan optimization
-    best_plan, opt_meta = optimize_plans(alternatives, goal)
+    # Phase 3: CP-SAT multi-plan selection.  A feasible primary competes
+    # on equal footing with the alternatives; an infeasible one is left
+    # out so the solver cannot pick it.
+    candidates = ([primary] if primary_feasible else []) + alternatives
+    best_plan, opt_meta = optimize_plans(candidates, goal)
 
     if opt_meta.status in (CSPStatus.FEASIBLE, CSPStatus.OPTIMAL):
         logger.info(
-            "CSP selected plan %s (status=%s)",
+            "CSP selected plan %s (status=%s, candidates=%d)",
             best_plan.action_names,
             opt_meta.status.value,
+            len(candidates),
         )
-        return _augment_plan(best_plan, goal, opt_meta)
+        return _augment_plan(
+            best_plan,
+            goal,
+            _selection_metadata(best_plan, goal, opt_meta, len(candidates)),
+        )
 
+    if primary_feasible:
+        return _augment_plan(primary, goal, csp_meta)
     # All alternatives infeasible — return primary with infeasible metadata
     logger.warning("All alternative plans infeasible")
     return _augment_plan(primary, goal, csp_meta)
+
+
+def _selection_metadata(
+    chosen: Plan, goal: GoalSpec, opt_meta: CSPMetadata, candidates: int
+) -> CSPMetadata:
+    """Re-validate the selected plan so its metadata carries the full picture.
+
+    :func:`~langgoap.planner.csp.optimize_plans` reports the selection
+    outcome but not the temporal schedule, makespan, or infeasibility
+    explanation that :func:`~langgoap.planner.csp.validate_plan` computes
+    for a single plan.  Merge the two: validation supplies schedule and
+    resource usage, selection supplies objective values, status, and the
+    number of candidates compared.
+    """
+    full = validate_plan(chosen, goal)
+    # Keep the solver's verdict (OPTIMAL vs FEASIBLE) when the plan passed
+    # re-validation; only a scheduling failure may downgrade it.
+    status = full.status if full.status == CSPStatus.INFEASIBLE else opt_meta.status
+    objective_values = {
+        **dict(opt_meta.objective_values),
+        **dict(full.objective_values),
+    }
+    return replace(
+        full,
+        status=status,
+        solver_time_ms=full.solver_time_ms + opt_meta.solver_time_ms,
+        objective_values=MappingProxyType(objective_values),
+        resource_usage=full.resource_usage or opt_meta.resource_usage,
+        plans_evaluated=candidates,
+    )

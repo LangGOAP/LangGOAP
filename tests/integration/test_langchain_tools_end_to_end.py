@@ -12,6 +12,7 @@ from langchain_core.tools import tool
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
 from langgoap.graph.builder import GoapGraph
+from langgoap.graph.state import plan_from_state
 from langgoap.integrations import (
     GoapSubgraph,
     create_goap_agent,
@@ -107,7 +108,7 @@ class TestLayerA_PrebuiltAgent:
             }
         )
         assert result["status"] == "goal_achieved"
-        names = result["plan"].action_names
+        names = plan_from_state(result["plan"]).action_names
         assert names[-1] == "send_email"
         assert names[-2] == "generate_report"
         assert "fetch_user_profile" in names[:2]

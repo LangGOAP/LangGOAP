@@ -57,7 +57,13 @@ from langgoap.graph.nodes import (
     GoapPlanner,
     ParallelGoapExecutor,
 )
-from langgoap.graph.state import ActionResult, GoapState, successful_action_names
+from langgoap.graph.state import (
+    ActionResult,
+    GoapState,
+    GoapStateChannels,
+    rehydrate_state,
+    successful_action_names,
+)
 from langgoap.guards import (
     ActionGuard,
     AsyncActionGuard,
@@ -246,7 +252,9 @@ __all__ = [
     "GoapObserver",
     "ParallelGoapExecutor",
     "GoapState",
+    "GoapStateChannels",
     "ActionResult",
+    "rehydrate_state",
     "successful_action_names",
     # Planning
     "plan",

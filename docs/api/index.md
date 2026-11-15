@@ -22,6 +22,9 @@ listed here is internal and subject to change without notice.
    langgoap.PlanningState
    langgoap.ActionResult
    langgoap.GoapState
+   langgoap.GoapStateChannels
+   langgoap.rehydrate_state
+   langgoap.successful_action_names
 ```
 
 ## Planning

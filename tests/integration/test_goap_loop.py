@@ -15,7 +15,7 @@ from langgoap.actions import ActionSpec
 from langgoap.goals import GoalPolicy, GoalSpec
 from langgoap.graph.builder import GoapGraph
 from langgoap.graph.nodes import GoapExecutor, GoapObserver, GoapPlanner
-from langgoap.graph.state import GoapState, successful_action_names
+from langgoap.graph.state import GoapState, GoapStateChannels, successful_action_names
 from langgoap.types import ReplanStrategy
 from tests.conftest import make_action as _action
 
@@ -82,7 +82,7 @@ class TestFullGoapLoop:
         )
 
         # Manual
-        manual = StateGraph(GoapState)
+        manual = StateGraph(GoapStateChannels)
         manual.add_node("planner", GoapPlanner(actions))
         manual.add_node("executor", GoapExecutor())
         manual.add_node("observer", GoapObserver(actions))
@@ -148,7 +148,12 @@ class TestFullGoapLoop:
         assert result["replan_count"] >= 1
 
     def test_handles_action_failure_with_replanning(self) -> None:
-        """When an action raises an exception, observer triggers replan."""
+        """When an action raises an exception, observer triggers replan.
+
+        ``gather_data`` is the only producer of ``has_raw_data``, so it
+        declares ``max_retries=1``: the first failure replans without
+        blacklisting it (the blacklist fallback is off by default, issue #15).
+        """
         fail_count = 0
 
         def sometimes_fails(ws: dict[str, Any]) -> dict[str, Any]:
@@ -163,6 +168,7 @@ class TestFullGoapLoop:
                 name="gather_data",
                 effects={"has_raw_data": True},
                 execute=sometimes_fails,
+                max_retries=1,
             ),
             _action(
                 "clean_data", pre={"has_raw_data": True}, eff={"has_clean_data": True}
@@ -181,7 +187,7 @@ class TestFullGoapLoop:
 
         assert result["status"] == "goal_achieved"
         # Should have at least one failed execution in history
-        failures = [h for h in result["execution_history"] if not h.success]
+        failures = [h for h in result["execution_history"] if not h["success"]]
         assert len(failures) >= 1
 
     def test_unreachable_goal_fails_gracefully(self) -> None:
@@ -238,7 +244,7 @@ class TestFullGoapLoop:
 
         history = result["execution_history"]
         assert len(history) >= 4
-        action_names = [h.action_name for h in history if h.success]
+        action_names = [h["action_name"] for h in history if h["success"]]
         assert "gather_data" in action_names
         assert "clean_data" in action_names
         assert "analyze_data" in action_names
@@ -341,7 +347,37 @@ class TestFullGoapLoop:
         assert "write_report" in names
 
     def test_max_replans_prevents_infinite_loop(self) -> None:
-        """max_replans guard terminates a persistently-failing replan cycle."""
+        """max_replans guard terminates a persistently-failing replan cycle.
+
+        The goal opts in to ``blacklist_fallback`` so the failing sole path
+        is re-admitted on every replan; the budget is what ends the run.
+        """
+        fail_count = 0
+
+        def always_fails(ws: dict[str, Any]) -> dict[str, Any]:
+            nonlocal fail_count
+            fail_count += 1
+            raise RuntimeError("permanent failure")
+
+        actions = [
+            ActionSpec(name="bad_action", effects={"done": True}, execute=always_fails)
+        ]
+        result = GoapGraph(actions=actions).invoke(
+            goal=GoalSpec(
+                conditions={"done": True},
+                policy=GoalPolicy(max_replans=2, blacklist_fallback=True),
+            ),
+        )
+
+        assert result["status"] == "failed"
+        assert "max_replans_exceeded" in result.get("replan_reason", "")
+        # Action attempted: initial + up to max_replans retries
+        assert fail_count <= 3
+
+    def test_default_policy_stops_a_failing_sole_path_after_one_attempt(self) -> None:
+        """Without the opt-in fallback a permanently failing sole path ends
+        as ``no_plan`` after a single attempt, and the explanation names the
+        blacklist as the cause."""
         fail_count = 0
 
         def always_fails(ws: dict[str, Any]) -> dict[str, Any]:
@@ -356,7 +392,8 @@ class TestFullGoapLoop:
             goal=GoalSpec(conditions={"done": True}, policy=GoalPolicy(max_replans=2)),
         )
 
-        assert result["status"] == "failed"
-        assert "max_replans_exceeded" in result.get("replan_reason", "")
-        # Action attempted: initial + up to max_replans retries
-        assert fail_count <= 3
+        assert result["status"] == "no_plan"
+        assert fail_count == 1
+        expl = result["no_plan_explanation"]
+        assert expl["blacklisted_actions"] == ["bad_action"]
+        assert "blacklist_fallback" in expl["suggestion"]

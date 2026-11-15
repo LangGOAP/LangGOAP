@@ -708,6 +708,7 @@ class TestSingleCompletionPerPlanCall:
             blacklisted_actions=["blocked", "via_c"],
             tracer=rec,
             record_expansions=True,
+            blacklist_fallback=True,
         )
 
         assert result is not None
@@ -734,6 +735,7 @@ class TestSingleCompletionPerPlanCall:
             blacklisted_actions=["makes_x"],
             tracer=rec,
             record_expansions=True,
+            blacklist_fallback=True,
         )
 
         assert result is not None
@@ -975,3 +977,87 @@ class TestMoreDeviousPlannerBreaking:
             "setA",
             "reachGoal",
         ], f"Plan should be minimal and direct, got {names!r}"
+
+
+# ---------------------------------------------------------------------------
+# Heuristic admissibility (issue #11)
+# ---------------------------------------------------------------------------
+
+
+class TestHeuristicAdmissibility:
+    """The raw "unsatisfied goal conditions" count overestimates whenever one
+    action establishes several goal conditions or any action costs less than
+    1.0, and A* then returns suboptimal plans.  These tests pin the scaled,
+    admissible heuristic to cost-optimal results."""
+
+    def test_multi_effect_action_does_not_hide_cheaper_two_step_plan(self) -> None:
+        actions = [
+            _action("X", eff={"a": True, "b": True, "c": True, "d": True}, cost=2.5),
+            _action("Y1", eff={"a": True, "b": True}, cost=1.0),
+            _action("Y2", eff={"c": True, "d": True}, cost=1.0),
+        ]
+        goal = GoalSpec(conditions={"a": True, "b": True, "c": True, "d": True})
+        result = plan(PlanningState.from_dict({}), goal, actions)
+        assert result is not None
+        assert result.total_cost == pytest.approx(2.0)
+        assert sorted(result.action_names) == ["Y1", "Y2"]
+
+    def test_sub_unit_costs_do_not_hide_cheaper_plan(self) -> None:
+        actions = [
+            _action("X", eff={"a": True, "b": True}, cost=1.5),
+            _action("Y", eff={"a": True}, cost=0.5),
+            _action("Z", pre={"a": True}, eff={"b": True}, cost=0.5),
+        ]
+        goal = GoalSpec(conditions={"a": True, "b": True})
+        result = plan(PlanningState.from_dict({}), goal, actions)
+        assert result is not None
+        assert result.action_names == ["Y", "Z"]
+        assert result.total_cost == pytest.approx(1.0)
+
+    def test_callable_cost_degrades_to_uniform_cost_search_but_stays_optimal(
+        self,
+    ) -> None:
+        actions = [
+            _action("X", eff={"a": True, "b": True}, cost=lambda ws: 1.5),
+            _action("Y", eff={"a": True}, cost=lambda ws: 0.5),
+            _action("Z", pre={"a": True}, eff={"b": True}, cost=0.5),
+        ]
+        goal = GoalSpec(conditions={"a": True, "b": True})
+        result = plan(PlanningState.from_dict({}), goal, actions)
+        assert result is not None
+        assert result.action_names == ["Y", "Z"]
+        assert result.total_cost == pytest.approx(1.0)
+
+    def test_dynamic_effect_keys_count_toward_per_action_coverage(self) -> None:
+        from langgoap.planner.astar import _heuristic_scale
+
+        dyn = ActionSpec(
+            name="dyn",
+            effects=lambda ws: {"a": True, "b": True},
+            effect_keys=frozenset({"a", "b"}),
+            cost=1.0,
+        )
+        per_action, min_cost = _heuristic_scale({"a": True, "b": True}, [dyn])
+        assert per_action == 2
+        assert min_cost == 1.0
+
+    def test_heuristic_never_exceeds_true_remaining_cost(self) -> None:
+        """Brute-force check on a small random-ish domain: h(start) <= C*."""
+        from langgoap.planner.astar import _heuristic, _heuristic_scale
+
+        actions = [
+            _action("p", eff={"a": True}, cost=0.7),
+            _action("q", eff={"b": True}, cost=0.9),
+            _action("pq", eff={"a": True, "b": True}, cost=1.2),
+            _action("r", pre={"a": True, "b": True}, eff={"c": True}, cost=0.4),
+        ]
+        goal = GoalSpec(conditions={"a": True, "b": True, "c": True})
+        start = PlanningState.from_dict({})
+        per_action, min_cost = _heuristic_scale(goal.conditions, actions)
+        h0 = _heuristic(
+            start, goal.conditions, per_action=per_action, min_cost=min_cost
+        )
+        result = plan(start, goal, actions)
+        assert result is not None
+        assert h0 <= result.total_cost + 1e-9
+        assert result.total_cost == pytest.approx(1.6)  # pq (1.2) + r (0.4)

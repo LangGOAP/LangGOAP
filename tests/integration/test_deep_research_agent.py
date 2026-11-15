@@ -193,16 +193,16 @@ class TestDeepResearchLayerA:
         assert "search_broad_corpus" in result.get("blacklisted_actions", [])
 
         history = result["execution_history"]
-        failures = [h for h in history if not h.success]
-        failure_names = [h.action_name for h in failures]
+        failures = [h for h in history if not h["success"]]
+        failure_names = [h["action_name"] for h in failures]
         assert "search_broad_corpus" in failure_names
         rate_failure = next(
-            h for h in failures if h.action_name == "search_broad_corpus"
+            h for h in failures if h["action_name"] == "search_broad_corpus"
         )
-        assert "rate limit" in (rate_failure.error or "")
+        assert "rate limit" in (rate_failure["error"] or "")
 
-        successes = [h for h in history if h.success]
-        success_names = [h.action_name for h in successes]
+        successes = [h for h in history if h["success"]]
+        success_names = [h["action_name"] for h in successes]
         assert success_names == [
             "save_research_request",
             "decompose_topics",

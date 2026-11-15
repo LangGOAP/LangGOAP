@@ -201,7 +201,7 @@ class TestSubgraphQuickstart:
         )
 
         assert result["status"] == "goal_achieved"
-        names = [r.action_name for r in result["execution_history"]]
+        names = [r["action_name"] for r in result["execution_history"]]
         assert names == ["research", "write", "publish"]
         ws = result["world_state"]
         assert ws["published"] is True

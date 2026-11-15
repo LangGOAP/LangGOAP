@@ -126,7 +126,14 @@ class TestAsyncGoapLoop:
             return {"done": True}
 
         actions = [
-            ActionSpec(name="flaky", effects={"done": True}, aexecute=flaky_action),
+            # Sole producer of ``done``: allow two planner-level retries so
+            # the two transient failures replan without blacklisting it.
+            ActionSpec(
+                name="flaky",
+                effects={"done": True},
+                aexecute=flaky_action,
+                max_retries=2,
+            ),
         ]
 
         result = await GoapGraph(actions=actions).ainvoke(

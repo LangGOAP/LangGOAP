@@ -41,7 +41,9 @@ class SafeTracerProxy:
 
     The proxy is itself a valid :class:`PlanningTracer` because the
     Protocol is structural and the proxy responds to every hook name
-    via ``__getattr__``.
+    via ``__getattr__``.  Hooks the wrapped tracer does not implement
+    resolve to no-ops, so a tracer written against an older protocol
+    never changes execution outcomes.
 
     Idempotent wrapping: ``SafeTracerProxy(SafeTracerProxy(t))`` is
     indistinguishable from ``SafeTracerProxy(t)`` because the proxy
@@ -67,12 +69,30 @@ class SafeTracerProxy:
         # Note: __getattr__ is only called when normal attribute lookup
         # fails, so ``self._inner`` (set via object.__setattr__) is
         # found first and never re-enters this branch.
-        attr = getattr(self._inner, name)
+        try:
+            attr = getattr(self._inner, name)
+        except AttributeError:
+            # A tracer that predates a newer hook is still a valid tracer:
+            # the missing hook is a no-op, sync or async by prefix (issue
+            # #36).  Anything that is not a hook name is a genuine error.
+            if name.startswith("aon_"):
+                return _async_noop
+            if name.startswith("on_"):
+                return _sync_noop
+            raise
         if not callable(attr):
             # Properties / data attributes (e.g. ReflexionTracer.reflections)
             # are returned untouched.
             return attr
         return _wrap_callable(attr, name)
+
+
+def _sync_noop(*args: Any, **kwargs: Any) -> None:
+    return None
+
+
+async def _async_noop(*args: Any, **kwargs: Any) -> None:
+    return None
 
 
 def _wrap_callable(attr: Callable[..., Any], name: str) -> Callable[..., Any]:

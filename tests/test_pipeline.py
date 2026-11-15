@@ -357,3 +357,149 @@ class TestPipelineSearchHooks:
         assert len(csp_dead_ends) == 1
         _, detail = csp_dead_ends[0]
         assert detail.get("plan") == ["a"]
+
+
+# ---------------------------------------------------------------------------
+# Preference selection when the primary plan is feasible (issue #12)
+# ---------------------------------------------------------------------------
+
+
+class TestPreferenceSelection:
+    """Objectives, soft goals, soft constraints and metrics are *preferences*:
+    they must shape the selected plan even when the cheapest A* plan already
+    passes every hard constraint.  Before the fix the pipeline returned the
+    first feasible plan and the preference never ran."""
+
+    def test_minimize_objective_beats_cheaper_astar_plan(self) -> None:
+        a = make_action(
+            "usd10", eff={"done": True}, cost=1.0, resources={"cost_usd": 10.0}
+        )
+        b = make_action(
+            "usd0_1", eff={"done": True}, cost=2.0, resources={"cost_usd": 0.1}
+        )
+        goal = GoalSpec(conditions={"done": True}, objectives={"cost_usd": Minimize})
+        result = plan(PlanningState.from_dict({}), goal, [a, b])
+        assert result is not None
+        assert result.action_names == ["usd0_1"]
+        assert result.metadata.csp is not None
+        assert result.metadata.csp.plans_evaluated == 2
+        assert result.metadata.csp.objective_values["cost_usd"] == pytest.approx(0.1)
+        assert result.metadata.csp.status in (CSPStatus.OPTIMAL, CSPStatus.FEASIBLE)
+
+    def test_maximize_objective_beats_cheaper_astar_plan(self) -> None:
+        from langgoap import Maximize
+
+        a = make_action(
+            "low_q", eff={"done": True}, cost=1.0, resources={"quality": 1.0}
+        )
+        b = make_action(
+            "high_q", eff={"done": True}, cost=2.0, resources={"quality": 9.0}
+        )
+        goal = GoalSpec(conditions={"done": True}, objectives={"quality": Maximize})
+        result = plan(PlanningState.from_dict({}), goal, [a, b])
+        assert result is not None
+        assert result.action_names == ["high_q"]
+
+    def test_soft_goal_selects_achieving_plan_at_equal_cost(self) -> None:
+        from langgoap import HardSoftScore, SoftGoal
+
+        a = make_action("a_only", eff={"a": True}, cost=1.0)
+        b = make_action("a_and_bonus", eff={"a": True, "bonus": True}, cost=1.0)
+        goal = GoalSpec(
+            conditions={"a": True},
+            soft_goals=(SoftGoal(conditions={"bonus": True}, weight=5.0),),
+        )
+        assert needs_csp(goal) is True
+        result = plan(PlanningState.from_dict({}), goal, [a, b])
+        assert result is not None
+        assert result.action_names == ["a_and_bonus"]
+        assert isinstance(result.score, HardSoftScore)
+        assert result.score.soft == pytest.approx(5.0)
+
+    def test_soft_goal_ties_break_by_plan_cost(self) -> None:
+        from langgoap import SoftGoal
+
+        a = make_action("cheap_bonus", eff={"a": True, "bonus": True}, cost=1.0)
+        b = make_action("pricey_bonus", eff={"a": True, "bonus": True}, cost=3.0)
+        goal = GoalSpec(
+            conditions={"a": True},
+            soft_goals=(SoftGoal(conditions={"bonus": True}, weight=5.0),),
+        )
+        result = plan(PlanningState.from_dict({}), goal, [b, a])
+        assert result is not None
+        assert result.action_names == ["cheap_bonus"]
+
+    def test_soft_constraint_prefers_non_violating_alternative(self) -> None:
+        a = make_action(
+            "over", eff={"done": True}, cost=1.0, resources={"cost_usd": 5.0}
+        )
+        b = make_action(
+            "under", eff={"done": True}, cost=2.0, resources={"cost_usd": 0.5}
+        )
+        goal = GoalSpec(
+            conditions={"done": True},
+            constraints=(ConstraintSpec(key="cost_usd", max=1.0, level="soft"),),
+        )
+        result = plan(PlanningState.from_dict({}), goal, [a, b])
+        assert result is not None
+        assert result.action_names == ["under"]
+        assert result.score.is_feasible()
+
+    def test_hard_only_goal_returns_primary_without_comparing(self) -> None:
+        a = make_action(
+            "usd10", eff={"done": True}, cost=1.0, resources={"cost_usd": 10.0}
+        )
+        b = make_action(
+            "usd0_1", eff={"done": True}, cost=2.0, resources={"cost_usd": 0.1}
+        )
+        goal = GoalSpec(
+            conditions={"done": True},
+            constraints=(ConstraintSpec(key="cost_usd", max=100.0),),
+        )
+        result = plan(PlanningState.from_dict({}), goal, [a, b])
+        assert result is not None
+        assert result.action_names == ["usd10"]
+        assert result.metadata.csp is not None
+        assert result.metadata.csp.plans_evaluated == 1
+
+    def test_preference_with_no_alternative_returns_primary(self) -> None:
+        a = make_action(
+            "only", eff={"done": True}, cost=1.0, resources={"cost_usd": 3.0}
+        )
+        goal = GoalSpec(conditions={"done": True}, objectives={"cost_usd": Minimize})
+        result = plan(PlanningState.from_dict({}), goal, [a])
+        assert result is not None
+        assert result.action_names == ["only"]
+        assert result.metadata.csp is not None
+        assert result.metadata.csp.status in (
+            CSPStatus.FEASIBLE,
+            CSPStatus.OPTIMAL,
+            CSPStatus.SKIPPED,
+        )
+
+    def test_selection_keeps_schedule_metadata(self) -> None:
+        a = make_action(
+            "slow",
+            eff={"done": True},
+            cost=1.0,
+            resources={"cost_usd": 10.0},
+            duration=timedelta(seconds=5),
+        )
+        b = make_action(
+            "fast",
+            eff={"done": True},
+            cost=2.0,
+            resources={"cost_usd": 0.1},
+            duration=timedelta(seconds=1),
+        )
+        goal = GoalSpec(
+            conditions={"done": True},
+            constraints=(ConstraintSpec(key="cost_usd", max=100.0),),
+            objectives={"cost_usd": Minimize},
+        )
+        result = plan(PlanningState.from_dict({}), goal, [a, b])
+        assert result is not None
+        assert result.action_names == ["fast"]
+        assert result.metadata.csp is not None
+        assert len(result.metadata.csp.schedule) == 1
+        assert result.metadata.csp.makespan == timedelta(seconds=1)

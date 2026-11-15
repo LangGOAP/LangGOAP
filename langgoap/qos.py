@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
+from typing import Any, Mapping
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +62,37 @@ class ActionQos:
     jitter: float = 0.1
     idempotent: bool = False
     retryable_exceptions: tuple[type[BaseException], ...] = (TimeoutError,)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise to a JSON-native dict.
+
+        ``retryable_exceptions`` are classes and cannot be serialised; they
+        are recorded by name for inspection only and :meth:`from_dict`
+        restores the default ``(TimeoutError,)``.  Live actions are rebound
+        by name at run time, so the checkpointed form is never consulted for
+        retry behaviour.
+        """
+        return {
+            "max_attempts": self.max_attempts,
+            "backoff_initial_ms": self.backoff_initial_ms,
+            "backoff_multiplier": self.backoff_multiplier,
+            "backoff_max_ms": self.backoff_max_ms,
+            "jitter": self.jitter,
+            "idempotent": self.idempotent,
+            "retryable_exceptions": [e.__name__ for e in self.retryable_exceptions],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> ActionQos:
+        """Reconstruct from :meth:`to_dict` output (exceptions reset to default)."""
+        return cls(
+            max_attempts=int(data.get("max_attempts", 1)),
+            backoff_initial_ms=float(data.get("backoff_initial_ms", 250.0)),
+            backoff_multiplier=float(data.get("backoff_multiplier", 2.0)),
+            backoff_max_ms=float(data.get("backoff_max_ms", 30_000.0)),
+            jitter=float(data.get("jitter", 0.1)),
+            idempotent=bool(data.get("idempotent", False)),
+        )
 
     def __post_init__(self) -> None:
         if self.max_attempts < 1:

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from langgoap.actions import ActionSpec
-from langgoap.score import Score, SimpleScore
+from langgoap.score import Score, SimpleScore, score_from_dict
 from langgoap.state import PlanningState
 
 if TYPE_CHECKING:
@@ -38,6 +39,30 @@ class PlanMetadata:
     planning_time_ms: float = 0.0
     actions_pruned: int = 0
     csp: CSPMetadata | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise to a JSON-native dict (inverse of :meth:`from_dict`)."""
+        return {
+            "nodes_explored": self.nodes_explored,
+            "applicable_count": self.applicable_count,
+            "planning_time_ms": self.planning_time_ms,
+            "actions_pruned": self.actions_pruned,
+            "csp": self.csp.to_dict() if self.csp is not None else None,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> PlanMetadata:
+        """Reconstruct from the dict produced by :meth:`to_dict`."""
+        from langgoap.planner.csp import CSPMetadata
+
+        csp = data.get("csp")
+        return cls(
+            nodes_explored=int(data.get("nodes_explored", 0)),
+            applicable_count=int(data.get("applicable_count", 0)),
+            planning_time_ms=float(data.get("planning_time_ms", 0.0)),
+            actions_pruned=int(data.get("actions_pruned", 0)),
+            csp=CSPMetadata.from_dict(csp) if csp is not None else None,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +132,67 @@ class Plan:
         else:
             value = float(value_attr)
         return value - self.total_cost
+
+    # ------------------------------------------------------------------
+    # JSON codec
+    # ------------------------------------------------------------------
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise to a JSON-native dict.
+
+        This is the form stored in :class:`~langgoap.graph.state.GoapState`.
+        Actions are stored through :meth:`ActionSpec.to_dict
+        <langgoap.actions.ActionSpec.to_dict>` (declarative fields only);
+        :meth:`from_dict` rebinds them to the live actions by name so
+        callables are never read from a checkpoint.
+        """
+        return {
+            "actions": [a.to_dict() for a in self.actions],
+            "expected_states": [s.to_dict() for s in self.expected_states],
+            "total_cost": self.total_cost,
+            "metadata": self.metadata.to_dict(),
+            "score": self.score.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(
+        cls,
+        data: Mapping[str, Any],
+        *,
+        actions: Mapping[str, ActionSpec] | Iterable[ActionSpec] | None = None,
+    ) -> Plan:
+        """Reconstruct from the dict produced by :meth:`to_dict`.
+
+        Args:
+            data: The serialised plan.
+            actions: The live action list (or a ``name -> ActionSpec``
+                mapping).  Every stored action whose name matches is
+                replaced by the live spec, restoring ``execute`` and the
+                other callables; unmatched names fall back to the
+                callable-free :meth:`ActionSpec.from_dict
+                <langgoap.actions.ActionSpec.from_dict>` reconstruction.
+        """
+        live: Mapping[str, ActionSpec]
+        if actions is None:
+            live = {}
+        elif isinstance(actions, Mapping):
+            live = actions
+        else:
+            live = {a.name: a for a in actions}
+        specs: list[ActionSpec] = []
+        for stored in data.get("actions") or ():
+            spec = live.get(stored["name"])
+            specs.append(spec if spec is not None else ActionSpec.from_dict(stored))
+        return cls(
+            actions=tuple(specs),
+            expected_states=tuple(
+                PlanningState.from_dict(dict(st))
+                for st in data.get("expected_states") or ()
+            ),
+            total_cost=float(data.get("total_cost", 0.0)),
+            metadata=PlanMetadata.from_dict(data.get("metadata") or {}),
+            score=score_from_dict(data.get("score") or {}),
+        )
 
     # ------------------------------------------------------------------
     # Visualization

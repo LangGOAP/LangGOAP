@@ -18,7 +18,12 @@ from langgoap.graph.nodes import (
     _is_approved,
     _is_better_plan,
 )
-from langgoap.graph.state import ActionResult, GoapState
+from langgoap.graph.state import (
+    ActionResult,
+    GoapState,
+    GoapStateChannels,
+    plan_from_state,
+)
 from langgoap.guards import FunctionalGuard, GuardResult, GuardSeverity
 from langgoap.planner.types import Plan, PlanMetadata
 from langgoap.score import BendableScore, HardSoftScore, SimpleScore
@@ -49,7 +54,7 @@ class TestGoapPlanner:
         assert result["status"] == "executing"
         assert result["plan"] is not None
         assert result["current_step"] == 0
-        assert len(result["plan"]) == 2
+        assert len(plan_from_state(result["plan"])) == 2
 
     def test_handles_no_plan(self) -> None:
         actions = [_action("useless", eff={"x": True})]
@@ -203,7 +208,7 @@ class TestGoapExecutor:
         assert result["world_state"]["a"] is True
         assert result["current_step"] == 1
         assert len(result["execution_history"]) == 1
-        assert result["execution_history"][0].success is True
+        assert result["execution_history"][0]["success"] is True
 
     def test_executes_custom_function(self) -> None:
         def custom_fn(ws: dict[str, Any]) -> dict[str, Any]:
@@ -238,8 +243,8 @@ class TestGoapExecutor:
         result = executor(state)
 
         assert result["status"] == "action_failed"
-        assert result["execution_history"][0].success is False
-        assert "boom" in (result["execution_history"][0].error or "")
+        assert result["execution_history"][0]["success"] is False
+        assert "boom" in (result["execution_history"][0]["error"] or "")
 
     def test_handles_no_plan(self) -> None:
         executor = GoapExecutor()
@@ -247,7 +252,7 @@ class TestGoapExecutor:
         result = executor(state)
 
         assert result["status"] == "error"
-        assert result["execution_history"][0].success is False
+        assert result["execution_history"][0]["success"] is False
 
     def test_short_circuits_on_no_plan_status(self) -> None:
         """Executor passes through when planner found no plan."""
@@ -533,8 +538,8 @@ class TestGoapExecutorValidation:
         result = executor(state)
 
         assert result["status"] == "action_failed"
-        assert result["execution_history"][0].success is False
-        assert "validation failed" in (result["execution_history"][0].error or "")
+        assert result["execution_history"][0]["success"] is False
+        assert "validation failed" in (result["execution_history"][0]["error"] or "")
 
     def test_validator_rejection_rolls_back_world_state(self) -> None:
         """Failed validation must restore the world state to its pre-action snapshot.
@@ -570,18 +575,22 @@ class TestGoapExecutorValidation:
         assert "side_effect" not in result["world_state"]
         # The diagnostic record still shows what the action *tried* to do.
         history_entry = result["execution_history"][0]
-        assert history_entry.state_after.get("done") is True
-        assert history_entry.state_after.get("side_effect") == "leaked"
-        assert history_entry.state_before == {"prior": "value"}
+        assert history_entry["state_after"].get("done") is True
+        assert history_entry["state_after"].get("side_effect") == "leaked"
+        assert history_entry["state_before"] == {"prior": "value"}
 
     def test_no_validation_when_no_validator(self) -> None:
-        """Without effect_validator, executor skips validation entirely."""
+        """Without effect_validator, a declared value is only a placeholder.
+
+        The default check (issue #31) requires the returned dict to *set*
+        every declared effect key; it does not compare values.
+        """
 
         def custom_fn(ws: dict[str, Any]) -> dict[str, Any]:
             return {"computed": ws.get("input", 0) * 2}
 
-        # effects say computed=0 but execute returns computed=10
-        # This mismatch is fine because no effect_validator is set.
+        # effects say computed=0 but execute returns computed=10: the key is
+        # set, so the value difference is the observer's business.
         action = _action("compute", eff={"computed": 0}, execute=custom_fn)
         plan_obj = _make_plan(action)
         executor = GoapExecutor()
@@ -617,7 +626,7 @@ class TestGoapExecutorValidation:
         result = executor(state)
 
         assert result["current_step"] == 1
-        assert result["execution_history"][0].success is True
+        assert result["execution_history"][0]["success"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -643,7 +652,7 @@ class TestGoapPlannerRichState:
 
         assert result["status"] == "executing"
         assert result["plan"] is not None
-        assert len(result["plan"]) == 1
+        assert len(plan_from_state(result["plan"])) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -800,7 +809,7 @@ class TestGoapExecutorGuards:
         state: GoapState = {"world_state": {}, "plan": plan_obj, "current_step": 0}
         result = executor(state)
         assert result["world_state"]["x"] is True
-        assert result["execution_history"][0].success is True
+        assert result["execution_history"][0]["success"] is True
 
     def test_warn_guard_allows_execution(self) -> None:
         """WARN-severity guard failure is logged but execution continues."""
@@ -811,7 +820,7 @@ class TestGoapExecutorGuards:
         result = executor(state)
         # Execution should proceed despite the WARN guard failure
         assert result["world_state"]["x"] is True
-        assert result["execution_history"][0].success is True
+        assert result["execution_history"][0]["success"] is True
 
     def test_block_guard_aborts_execution(self) -> None:
         """BLOCK-severity guard failure aborts action and sets action_failed status."""
@@ -829,8 +838,8 @@ class TestGoapExecutorGuards:
 
         assert result.get("status") == "action_failed"
         assert not executed, "action callable must NOT run when a guard blocks"
-        assert result["execution_history"][0].success is False
-        assert "blocked!" in (result["execution_history"][0].error or "")
+        assert result["execution_history"][0]["success"] is False
+        assert "blocked!" in (result["execution_history"][0]["error"] or "")
 
     def test_block_guard_blacklists_action(self) -> None:
         """Guard block sets failure_count = max_retries+1 to trigger blacklisting."""
@@ -871,7 +880,7 @@ class TestGoapExecutorGuards:
         state: GoapState = {"world_state": {}, "plan": plan_obj, "current_step": 0}
         result = await executor.acall(state)
         assert result.get("status") == "action_failed"
-        assert result["execution_history"][0].success is False
+        assert result["execution_history"][0]["success"] is False
 
     @pytest.mark.asyncio
     async def test_async_warn_guard_continues(self) -> None:
@@ -1247,3 +1256,208 @@ class TestIsBetterPlan:
         # Both feasible, shape mismatch → cost tiebreaker; 3.0 < 7.0 so two_hard wins
         assert _is_better_plan(two_hard, one_hard) is True
         assert _is_better_plan(one_hard, two_hard) is False
+
+
+# ---------------------------------------------------------------------------
+# ParallelGoapExecutor wave semantics (issue #16)
+# ---------------------------------------------------------------------------
+
+
+def _parallel_graph(actions: list[ActionSpec]):
+    """Hand-built planner → ParallelGoapExecutor → observer graph."""
+    from langchain_core.runnables import RunnableLambda
+    from langgraph.graph import START, StateGraph
+
+    from langgoap.graph.nodes import GoapObserver, GoapPlanner
+
+    planner = GoapPlanner(actions)
+    executor = ParallelGoapExecutor(actions=actions)
+    observer = GoapObserver(actions)
+    builder = StateGraph(GoapStateChannels)
+    builder.add_node(
+        "planner", RunnableLambda(func=planner.__call__, afunc=planner.acall)
+    )
+    builder.add_node(
+        "executor", RunnableLambda(func=executor.__call__, afunc=executor.acall)
+    )
+    builder.add_node(
+        "observer", RunnableLambda(func=observer.__call__, afunc=observer.acall)
+    )
+    builder.add_edge(START, "planner")
+    builder.add_edge("planner", "executor")
+    builder.add_edge("executor", "observer")
+    return builder.compile()
+
+
+class TestParallelWaveMergeAndFailure:
+    """Siblings in a wave must merge their *deltas*, and a failure must not
+    discard what the completed siblings already did."""
+
+    async def test_async_merge_keeps_both_siblings_updates_to_existing_keys(
+        self,
+    ) -> None:
+        a = _action("a", eff={"x": 1}, execute=lambda ws: {"x": 1})
+        b = _action("b", eff={"y": 1}, execute=lambda ws: {"y": 1})
+        plan_obj = _make_plan(a, b)
+        executor = ParallelGoapExecutor()
+        state: GoapState = {
+            "world_state": {"x": 0, "y": 0},
+            "plan": plan_obj,
+            "current_step": 0,
+        }
+        result = await executor.acall(state)
+        assert result["world_state"] == {"x": 1, "y": 1}
+        assert result["current_step"] == 2
+        assert [r["action_name"] for r in result["execution_history"]] == ["a", "b"]
+
+    def test_sync_failure_keeps_completed_sibling(self) -> None:
+        def boom(ws: dict[str, Any]) -> dict[str, Any]:
+            raise RuntimeError("exploded")
+
+        a = _action("a", eff={"x": True}, execute=lambda ws: {"x": True})
+        b = _action("b", eff={"y": True}, execute=boom)
+        plan_obj = _make_plan(a, b)
+        result = ParallelGoapExecutor()(
+            {"world_state": {}, "plan": plan_obj, "current_step": 0}
+        )
+        assert result["status"] == "action_failed"
+        assert result["world_state"] == {"x": True}
+        history = [
+            (r["action_name"], r["success"]) for r in result["execution_history"]
+        ]
+        assert history == [("a", True), ("b", False)]
+
+    async def test_async_failure_keeps_completed_sibling(self) -> None:
+        def boom(ws: dict[str, Any]) -> dict[str, Any]:
+            raise RuntimeError("exploded")
+
+        a = _action("a", eff={"x": True}, execute=lambda ws: {"x": True})
+        b = _action("b", eff={"y": True}, execute=boom)
+        plan_obj = _make_plan(a, b)
+        result = await ParallelGoapExecutor().acall(
+            {"world_state": {}, "plan": plan_obj, "current_step": 0}
+        )
+        assert result["status"] == "action_failed"
+        assert result["world_state"] == {"x": True}
+        history = {
+            (r["action_name"], r["success"]) for r in result["execution_history"]
+        }
+        assert history == {("a", True), ("b", False)}
+
+    def test_guard_block_mid_wave_keeps_completed_sibling_and_counts(self) -> None:
+        from langgoap.guards import FunctionalGuard, GuardResult, GuardSeverity
+
+        block_b = FunctionalGuard(
+            "block_b",
+            lambda action, ws: GuardResult(
+                passed=action.name != "b",
+                message="b is not allowed",
+                severity=GuardSeverity.BLOCK,
+            ),
+        )
+        a = _action("a", eff={"x": True}, execute=lambda ws: {"x": True})
+        b = _action("b", eff={"y": True}, execute=lambda ws: {"y": True})
+        plan_obj = _make_plan(a, b)
+        result = ParallelGoapExecutor(guards=[block_b])(
+            {"world_state": {}, "plan": plan_obj, "current_step": 0}
+        )
+        assert result["status"] == "action_failed"
+        assert result["world_state"] == {"x": True}
+        assert [r["action_name"] for r in result["execution_history"]] == ["a", "b"]
+        assert result["action_failure_counts"] == {"b": 1}
+
+    def test_validator_rejection_mid_wave_rolls_back_only_that_action(self) -> None:
+        a = _action("a", eff={"x": True}, execute=lambda ws: {"x": True})
+        b = ActionSpec(
+            name="b",
+            effects={"y": True},
+            execute=lambda ws: {"y": True},
+            effect_validator=lambda pre, post: False,
+        )
+        plan_obj = _make_plan(a, b)
+        result = ParallelGoapExecutor()(
+            {"world_state": {}, "plan": plan_obj, "current_step": 0}
+        )
+        assert result["status"] == "action_failed"
+        assert result["world_state"] == {"x": True}
+        assert "y" not in result["world_state"]
+        history = [
+            (r["action_name"], r["success"]) for r in result["execution_history"]
+        ]
+        assert history == [("a", True), ("b", False)]
+
+
+class TestParallelWaveHumanApprovalIsolation:
+    def test_hitl_action_at_current_step_runs_alone(self) -> None:
+        gate = ActionSpec(name="gate", effects={"x": True}, require_human_approval=True)
+        b = _action("b", eff={"y": True})
+        plan_obj = _make_plan(gate, b)
+        assert _find_parallel_group(plan_obj.actions, 0) == [0]
+
+    def test_wave_stops_before_a_hitl_action(self) -> None:
+        a = _action("a", eff={"x": True})
+        gate = ActionSpec(name="gate", effects={"y": True}, require_human_approval=True)
+        c = _action("c", eff={"z": True})
+        plan_obj = _make_plan(a, gate, c)
+        assert _find_parallel_group(plan_obj.actions, 0) == [0]
+        assert _find_parallel_group(plan_obj.actions, 1) == [1]
+        assert _find_parallel_group(plan_obj.actions, 2) == [2]
+
+
+class TestParallelWaveThroughTheGraph:
+    async def test_no_spurious_replan_when_siblings_touch_existing_keys(self) -> None:
+        a = _action("a", eff={"x": 1}, execute=lambda ws: {"x": 1})
+        b = _action("b", eff={"y": 1}, execute=lambda ws: {"y": 1})
+        c = _action(
+            "c",
+            pre={"x": 1, "y": 1},
+            eff={"done": True},
+            execute=lambda ws: {"done": True},
+        )
+        graph = _parallel_graph([a, b, c])
+        result = await graph.ainvoke(
+            {
+                "goal": GoalSpec(conditions={"done": True}),
+                "world_state": {"x": 0, "y": 0},
+            }
+        )
+        assert result["status"] == "goal_achieved"
+        assert result["replan_count"] == 0
+        assert [r["action_name"] for r in result["execution_history"]] == [
+            "a",
+            "b",
+            "c",
+        ]
+
+    @pytest.mark.parametrize("use_async", [False, True])
+    async def test_single_use_sibling_is_not_rerun_after_wave_failure(
+        self, use_async: bool
+    ) -> None:
+        counts = {"a": 0, "b": 0}
+
+        def run_a(ws: dict[str, Any]) -> dict[str, Any]:
+            counts["a"] += 1
+            return {"x": True}
+
+        def flaky_b(ws: dict[str, Any]) -> dict[str, Any]:
+            counts["b"] += 1
+            if counts["b"] == 1:
+                raise RuntimeError("first b fails")
+            return {"y": True}
+
+        a = ActionSpec(name="a", effects={"x": True}, execute=run_a, can_rerun=False)
+        b = ActionSpec(name="b", effects={"y": True}, execute=flaky_b, max_retries=1)
+        c = ActionSpec(
+            name="c",
+            preconditions={"x": True, "y": True},
+            effects={"done": True},
+            execute=lambda ws: {"done": True},
+        )
+        graph = _parallel_graph([a, b, c])
+        payload = {"goal": GoalSpec(conditions={"done": True}), "world_state": {}}
+        result = await graph.ainvoke(payload) if use_async else graph.invoke(payload)
+        assert result["status"] == "goal_achieved"
+        assert counts == {"a": 1, "b": 2}
+        names = [(r["action_name"], r["success"]) for r in result["execution_history"]]
+        assert names.count(("a", True)) == 1
+        assert ("b", False) in names and ("b", True) in names

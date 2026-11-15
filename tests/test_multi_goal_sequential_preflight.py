@@ -14,12 +14,11 @@ uncovered by the Phase 2 per-entity Pac-Man experiment
 2. **Infeasible-sub-goal fallback** — when A* cannot find a plan
    for the current sub-goal (e.g. per-ghost escape is physically
    unreachable inside one planning invocation), advance to the
-   next sub-goal and try again.  "Sequential" becomes
-   *best-effort sequential*: the planner still prefers lower
-   sub-goals but doesn't block the whole invocation on an
-   unreachable one.  Directly enables the per-entity Pac-Man
-   agent to degrade gracefully when flee is insufficient instead
-   of collapsing to ``STOP``.
+   next sub-goal and try again.  Since 0.2.0 this is the explicit
+   ``MultiGoal(on_infeasible="skip")`` opt-in (issue #35): the
+   default is strict, matching the ``MultiGoal`` docstring, and a
+   skipping run records ``skipped_subgoals`` and finishes with
+   ``status="partial"`` rather than claiming ``goal_achieved``.
 """
 
 from __future__ import annotations
@@ -59,7 +58,7 @@ class TestSequentialPreflight:
         assert result["status"] == "goal_achieved"
         # current_subgoal_index must jump past the satisfied prefix.
         assert result["current_subgoal_index"] >= 2
-        names = [r.action_name for r in result["execution_history"]]
+        names = [r["action_name"] for r in result["execution_history"]]
         assert names == ["eat"]
 
 
@@ -68,10 +67,17 @@ class TestSequentialPreflight:
 # ---------------------------------------------------------------------------
 
 
-class TestSequentialFallback:
-    def test_infeasible_subgoal_falls_through_to_next(self) -> None:
-        """Unreachable sub-goal must not wedge the whole invocation."""
-        actions = [
+class TestSequentialStrictByDefault:
+    """A sequential ``MultiGoal`` fails on an unreachable sub-goal (issue #35).
+
+    The docstring promises "goals[0] to completion, then goals[1]"; a
+    skipped stage reported as ``goal_achieved`` is a silent lie.  Skipping
+    is an explicit opt-in (``on_infeasible="skip"``) that records what was
+    skipped and finishes ``partial``.
+    """
+
+    def _actions(self) -> list[ActionSpec]:
+        return [
             ActionSpec(
                 name="eat",
                 preconditions={},
@@ -79,46 +85,76 @@ class TestSequentialFallback:
                 cost=1.0,
             ),
         ]
-        # ``unreachable_flag`` has no action that establishes it and is
-        # not already True in the world state.  Strict-sequential today
-        # would fail the whole plan; best-effort sequential must skip
-        # it and reach the food goal.
-        mg = MultiGoal(
-            goals=(
-                GoalSpec(conditions={"unreachable_flag": True}),
-                GoalSpec(conditions={"food_in_belly": True}),
-            ),
-            mode="sequential",
+
+    def _goals(self) -> tuple[GoalSpec, GoalSpec]:
+        return (
+            GoalSpec(conditions={"unreachable_flag": True}),
+            GoalSpec(conditions={"food_in_belly": True}),
         )
-        graph = GoapGraph(actions).compile()
-        result = graph.invoke({"world_state": {}, "goal": mg})
+
+    def test_default_is_strict_and_reports_no_plan(self) -> None:
+        mg = MultiGoal(goals=self._goals(), mode="sequential")
+        assert mg.on_infeasible == "fail"
+        result = (
+            GoapGraph(self._actions()).compile().invoke({"world_state": {}, "goal": mg})
+        )
+        assert result["status"] == "no_plan"
+        assert result["execution_history"] == []
+        assert result.get("current_subgoal_index", 0) == 0
+        assert (
+            "unreachable_flag"
+            in result["no_plan_explanation"]["unreachable_conditions"]
+        )
+
+    def test_skip_opt_in_records_the_skip_and_finishes_partial(self) -> None:
+        mg = MultiGoal(goals=self._goals(), mode="sequential", on_infeasible="skip")
+        result = (
+            GoapGraph(self._actions()).compile().invoke({"world_state": {}, "goal": mg})
+        )
+        assert result["status"] == "partial"
+        assert [r["action_name"] for r in result["execution_history"]] == ["eat"]
+        assert result["skipped_subgoals"] == [0]
+        assert result["world_state"]["food_in_belly"] is True
+
+    def test_skip_with_nothing_skipped_is_goal_achieved(self) -> None:
+        mg = MultiGoal(
+            goals=(GoalSpec(conditions={"food_in_belly": True}),),
+            mode="sequential",
+            on_infeasible="skip",
+        )
+        result = (
+            GoapGraph(self._actions()).compile().invoke({"world_state": {}, "goal": mg})
+        )
         assert result["status"] == "goal_achieved"
-        names = [r.action_name for r in result["execution_history"]]
-        assert names == ["eat"]
-        # The unreachable sub-goal was skipped, not satisfied.
-        assert result["current_subgoal_index"] >= 1
+        assert result.get("skipped_subgoals", []) == []
 
     def test_all_infeasible_subgoals_yields_no_plan_status(self) -> None:
-        """When every sub-goal is unreachable, the invocation fails cleanly."""
-        mg = MultiGoal(
-            goals=(
-                GoalSpec(conditions={"a": True}),
-                GoalSpec(conditions={"b": True}),
-            ),
-            mode="sequential",
-        )
-        graph = GoapGraph(actions=[]).compile()
-        result = graph.invoke({"world_state": {}, "goal": mg})
-        # Every sub-goal is infeasible and no action establishes either.
-        # The previous strict-sequential behaviour emitted ``no_plan``;
-        # best-effort sequential preserves that terminal signal after
-        # exhausting the fallback chain.
-        assert result.get("status") == "no_plan"
+        for policy in ("fail", "skip"):
+            mg = MultiGoal(
+                goals=(
+                    GoalSpec(conditions={"impossible_a": True}),
+                    GoalSpec(conditions={"impossible_b": True}),
+                ),
+                mode="sequential",
+                on_infeasible=policy,  # type: ignore[arg-type]
+            )
+            result = (
+                GoapGraph(self._actions())
+                .compile()
+                .invoke({"world_state": {}, "goal": mg})
+            )
+            assert result.get("status") == "no_plan", policy
 
+    def test_invalid_policy_is_rejected(self) -> None:
+        import pytest
 
-# ---------------------------------------------------------------------------
-# Regression: non-sequential modes and single-goal paths unaffected
-# ---------------------------------------------------------------------------
+        with pytest.raises(ValueError, match="on_infeasible"):
+            MultiGoal(goals=self._goals(), on_infeasible="maybe")  # type: ignore[arg-type]
+
+    def test_policy_round_trips_through_the_codec(self) -> None:
+        mg = MultiGoal(goals=self._goals(), mode="sequential", on_infeasible="skip")
+        assert MultiGoal.from_dict(mg.to_dict()) == mg
+        assert mg.to_dict()["on_infeasible"] == "skip"
 
 
 class TestNoRegressionOnOtherModes:
@@ -147,6 +183,6 @@ class TestNoRegressionOnOtherModes:
         )
         graph = GoapGraph(actions).compile()
         result = graph.invoke({"world_state": {}, "goal": mg})
-        names = [r.action_name for r in result["execution_history"]]
+        names = [r["action_name"] for r in result["execution_history"]]
         assert "cheap_a" in names
         assert "costly_b" not in names

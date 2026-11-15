@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Callable, Literal, Mapping, Sequence
 
+from langgoap.state import require_hashable_values
 from langgoap.types import ObjectiveDirection, ReplanStrategy
 
 if TYPE_CHECKING:
@@ -53,6 +54,27 @@ class ConstraintSpec:
                 f"'hard' or 'soft', got {self.level!r}."
             )
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise to a JSON-native dict (inverse of :meth:`from_dict`)."""
+        return {
+            "key": self.key,
+            "max": self.max,
+            "min": self.min,
+            "weight": self.weight,
+            "level": self.level,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> ConstraintSpec:
+        """Reconstruct from the dict produced by :meth:`to_dict`."""
+        return cls(
+            key=data["key"],
+            max=data.get("max"),
+            min=data.get("min"),
+            weight=float(data.get("weight", 1.0)),
+            level=data.get("level", "hard"),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class SoftGoal:
@@ -86,11 +108,31 @@ class SoftGoal:
             )
         if self.weight < 0:
             raise ValueError(f"SoftGoal.weight must be >= 0, got {self.weight}")
+        require_hashable_values(
+            self.conditions, owner="SoftGoal", field_name="conditions"
+        )
 
     @property
     def label(self) -> str:
         """Return name if set, else a compact conditions string."""
         return self.name or str(dict(self.conditions))
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise to a JSON-native dict (inverse of :meth:`from_dict`)."""
+        return {
+            "conditions": dict(self.conditions),
+            "weight": self.weight,
+            "name": self.name,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> SoftGoal:
+        """Reconstruct from the dict produced by :meth:`to_dict`."""
+        return cls(
+            conditions=MappingProxyType(dict(data.get("conditions") or {})),
+            weight=float(data.get("weight", 1.0)),
+            name=data.get("name", ""),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,15 +153,60 @@ class GoalPolicy:
             observer gives up.  Guards against infinite replan loops
             when an action keeps failing or the world state never
             converges.  Set to ``0`` to disable the limit.
+        on_infeasible: What the planner does when the best plan it can
+            find violates a *hard* constraint (CSP status
+            ``INFEASIBLE``).  ``"fail"`` (default) rejects the plan: the
+            run ends with ``status="no_plan"`` and a
+            ``no_plan_explanation`` carrying the resource shortfalls, so
+            stuck handlers can relax the constraint.  ``"execute"`` keeps
+            the pre-0.2 advisory behaviour and runs the plan anyway; the
+            violation stays visible in ``plan.metadata.csp``.
+        blacklist_fallback: When every path to the goal needs a
+            blacklisted action, ``True`` lets the planner retry with the
+            full action set (re-admitting the failed action) and clear
+            the blacklist.  ``False`` (default) reports ``no_plan`` so a
+            permanently failing, human-denied, or guard-blocked action
+            is never re-run; use ``ActionSpec.max_retries`` or an
+            :class:`~langgoap.qos.ActionQos` for transient failures.
     """
 
     replan_strategy: ReplanStrategy = ReplanStrategy.ON_DEVIATION
     priority: int = 0
     max_replans: int = 10
+    on_infeasible: Literal["fail", "execute"] = "fail"
+    blacklist_fallback: bool = False
 
     def __post_init__(self) -> None:
         if self.max_replans < 0:
             raise ValueError("max_replans must be >= 0 (0 disables the limit)")
+        if self.on_infeasible not in ("fail", "execute"):
+            raise ValueError(
+                "GoalPolicy.on_infeasible must be 'fail' or 'execute', "
+                f"got {self.on_infeasible!r}."
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise to a JSON-native dict (inverse of :meth:`from_dict`)."""
+        return {
+            "replan_strategy": self.replan_strategy.value,
+            "priority": self.priority,
+            "max_replans": self.max_replans,
+            "on_infeasible": self.on_infeasible,
+            "blacklist_fallback": self.blacklist_fallback,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> GoalPolicy:
+        """Reconstruct from the dict produced by :meth:`to_dict`."""
+        return cls(
+            replan_strategy=ReplanStrategy(
+                data.get("replan_strategy", ReplanStrategy.ON_DEVIATION.value)
+            ),
+            priority=int(data.get("priority", 0)),
+            max_replans=int(data.get("max_replans", 10)),
+            on_infeasible=data.get("on_infeasible", "fail"),
+            blacklist_fallback=bool(data.get("blacklist_fallback", False)),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +249,9 @@ class GoalSpec:
             "conditions",
             MappingProxyType(dict(self.conditions)),
         )
+        require_hashable_values(
+            self.conditions, owner="GoalSpec", field_name="conditions"
+        )
         # Normalise objectives: plain dict → MappingProxyType, empty → None.
         if self.objectives is not None:
             obj_dict = dict(self.objectives)
@@ -192,6 +282,68 @@ class GoalSpec:
         if self.soft_goals:
             parts.append(f"soft_goals={self.soft_goals!r}")
         return f"GoalSpec({', '.join(parts)})"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise the declarative part of this goal to a JSON-native dict.
+
+        This is the form stored in :class:`~langgoap.graph.state.GoapState`
+        so that any LangGraph checkpointer can persist it.  Two fields are
+        Python callables and therefore not portable:
+
+        * a callable ``value`` is stored as ``None`` and restored as ``1.0``;
+        * ``metrics`` are recorded by ``name`` / ``weight`` / class name only
+          and are **not** reconstructed by :meth:`from_dict`.
+
+        Within one process LangGOAP keeps the original object reachable so
+        both survive a checkpoint round-trip; see
+        :func:`langgoap.graph.state.goal_from_state`.
+        """
+        objectives = (
+            {k: getattr(v, "value", v) for k, v in self.objectives.items()}
+            if self.objectives is not None
+            else None
+        )
+        return {
+            "kind": "goal",
+            "conditions": dict(self.conditions),
+            "policy": self.policy.to_dict(),
+            "objectives": objectives,
+            "constraints": [c.to_dict() for c in self.constraints],
+            "soft_goals": [sg.to_dict() for sg in self.soft_goals],
+            "metrics": [
+                {"name": m.name, "weight": m.weight, "type": type(m).__name__}
+                for m in self.metrics
+            ],
+            "value": None if callable(self.value) else self.value,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> GoalSpec:
+        """Reconstruct from the dict produced by :meth:`to_dict`.
+
+        ``metrics`` are not restored (their expressions are callables) and
+        a ``None`` ``value`` becomes the default ``1.0``.
+        """
+        objectives = data.get("objectives")
+        value = data.get("value")
+        return cls(
+            conditions=MappingProxyType(dict(data.get("conditions") or {})),
+            policy=GoalPolicy.from_dict(data.get("policy") or {}),
+            objectives=(
+                MappingProxyType(
+                    {k: ObjectiveDirection(v) for k, v in objectives.items()}
+                )
+                if objectives
+                else None
+            ),
+            constraints=tuple(
+                ConstraintSpec.from_dict(c) for c in data.get("constraints") or ()
+            ),
+            soft_goals=tuple(
+                SoftGoal.from_dict(sg) for sg in data.get("soft_goals") or ()
+            ),
+            value=1.0 if value is None else float(value),
+        )
 
     @classmethod
     def from_builder(
@@ -315,6 +467,13 @@ class MultiGoal:
       as the starting state for ``goals[1]``, and so on.  This is the
       right model when sub-goals represent successive stages of a
       workflow (e.g. "collect data → analyse → publish").
+      A sub-goal that is already satisfied is passed over without
+      planning.  A sub-goal that cannot be planned ends the run with
+      ``no_plan`` (``on_infeasible="fail"``, the default); with
+      ``on_infeasible="skip"`` the planner moves on to the next
+      sub-goal, records the index in ``GoapState.skipped_subgoals``,
+      and the run finishes with ``status="partial"`` instead of
+      ``"goal_achieved"`` (issue #35).
     * ``"any"`` — the planner plans each sub-goal independently and
       the observer picks the lowest-:class:`~langgoap.score.Score`
       feasible plan.  Useful when several possible goals are
@@ -333,11 +492,15 @@ class MultiGoal:
     Args:
         goals: Non-empty sequence of :class:`GoalSpec` children.
             Accepts tuples or lists; a list is coerced to a tuple.
-        mode: Either ``"sequential"`` or ``"any"``.
+        mode: Either ``"sequential"``, ``"any"`` or ``"best_value"``.
+        on_infeasible: Sequential mode only.  ``"fail"`` (default) stops
+            with ``no_plan`` at the first sub-goal that cannot be planned;
+            ``"skip"`` continues with the next one and reports ``partial``.
     """
 
     goals: tuple[GoalSpec, ...]
     mode: Literal["sequential", "any", "best_value"] = "sequential"
+    on_infeasible: Literal["fail", "skip"] = "fail"
 
     def __post_init__(self) -> None:
         if not isinstance(self.goals, tuple):
@@ -349,6 +512,11 @@ class MultiGoal:
                 "MultiGoal.mode must be 'sequential', 'any', or 'best_value'; "
                 f"got {self.mode!r}"
             )
+        if self.on_infeasible not in ("fail", "skip"):
+            raise ValueError(
+                "MultiGoal.on_infeasible must be 'fail' or 'skip'; "
+                f"got {self.on_infeasible!r}"
+            )
         for i, g in enumerate(self.goals):
             if not isinstance(g, GoalSpec):
                 raise ValueError(
@@ -356,3 +524,40 @@ class MultiGoal:
                     f"{type(g).__name__}. Nested MultiGoal (HTN-style "
                     "decomposition) is not supported in v0.1.0."
                 )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise to a JSON-native dict (inverse of :meth:`from_dict`)."""
+        return {
+            "kind": "multi",
+            "goals": [g.to_dict() for g in self.goals],
+            "mode": self.mode,
+            "on_infeasible": self.on_infeasible,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> MultiGoal:
+        """Reconstruct from the dict produced by :meth:`to_dict`."""
+        return cls(
+            goals=tuple(GoalSpec.from_dict(g) for g in data["goals"]),
+            mode=data.get("mode", "sequential"),
+            on_infeasible=data.get("on_infeasible", "fail"),
+        )
+
+
+def goal_from_dict(data: Mapping[str, Any]) -> GoalSpec | MultiGoal:
+    """Rebuild a :class:`GoalSpec` or :class:`MultiGoal` from its dict form.
+
+    Dispatches on the ``"kind"`` tag written by :meth:`GoalSpec.to_dict`
+    (``"goal"``), :meth:`MultiGoal.to_dict` (``"multi"``) and
+    :class:`~langgoap.planner.utility.NirvanaGoal` (``"nirvana"``); a dict
+    without the tag is treated as a single goal unless it carries a
+    ``"goals"`` list.
+    """
+    kind = data.get("kind")
+    if kind == "multi" or (kind is None and "goals" in data):
+        return MultiGoal.from_dict(data)
+    if kind == "nirvana":
+        from langgoap.planner.utility import NirvanaGoal
+
+        return NirvanaGoal.from_dict(data)
+    return GoalSpec.from_dict(data)
