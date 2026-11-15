@@ -10,6 +10,7 @@ wiring so the number cannot silently go stale again.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -96,7 +97,12 @@ class TestBadgeWorkflow:
 
 class TestMfcqiBadgeContract:
     def test_badge_json_has_the_fields_the_workflow_reads(self, tmp_path: Path) -> None:
-        """``mfcqi badge -f json`` must keep emitting ``message`` and ``color``."""
+        """``mfcqi badge -f json`` must keep emitting ``message`` and ``color``.
+
+        UTF-8 mode is forced for the child: mfcqi 0.0.6 prints a tick mark
+        after writing the JSON, which raises ``UnicodeEncodeError`` on a
+        cp1252 stdout (Windows runners) even though the file is complete.
+        """
         pytest.importorskip("mfcqi")
         pkg = tmp_path / "tiny"
         pkg.mkdir()
@@ -119,6 +125,7 @@ class TestMfcqiBadgeContract:
             capture_output=True,
             text=True,
             timeout=300,
+            env={**os.environ, "PYTHONUTF8": "1"},
         )
         assert (
             proc.returncode == 0
