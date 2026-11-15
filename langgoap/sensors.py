@@ -128,7 +128,7 @@ def run_sensors_sync(
     results: list[tuple[str, dict[str, Any]]] = []
     for sensor in sensors:
         try:
-            if not hasattr(sensor, "sense"):
+            if not isinstance(sensor, Sensor):
                 # AsyncSensor-only — skip in sync path with a warning.
                 logger.warning(
                     "Sensor %r is async-only; skipping in sync path. "

@@ -168,7 +168,10 @@ def run_guards_sync(
     """
     results: list[GuardResult] = []
     for guard in guards:
-        if not hasattr(guard, "check"):
+        if not isinstance(guard, ActionGuard):
+            # Async-only: ``isinstance`` against the runtime-checkable sync
+            # protocol narrows the union for the call below (mypy 2 no longer
+            # narrows on ``hasattr``).
             logger.warning(
                 "Guard %r is async-only; skipping in sync path. "
                 "Use run_guards_async to evaluate async guards.",
