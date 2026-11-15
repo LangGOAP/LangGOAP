@@ -390,7 +390,13 @@ default behaviours change; each has an explicit opt-in that restores the
   facts as preconditions, `require_human_approval=True` and a Pydantic
   form; a denied send or an invalid form is blacklisted and re-planned
   around, and a new process resumes a paused thread from the
-  checkpointer. Each refactor ships a condensed hermetic `before.py`,
+  checkpointer. `examples/screencast/weather_alert/` rewrites the
+  GenAI_Agents weather-disaster notebook: a router with an unreachable
+  branch, an `input()` approval node and a swallowed SMTP failure become a
+  sensor's facts as preconditions, `require_human_approval=True` on
+  `approve_alert`, an `ActionQos` retry with an SMS fallback, and a
+  `FunctionalStuckHandler` that relaxes the goal to "log the decision"
+  when the operator denies the alert. Each refactor ships a condensed hermetic `before.py`,
   `after.py`, `after_disrupted.py`, a generated and executed notebook
   rendered in the docs, and an integration test that pins the paths, the
   gates, the disruptions and the async path.
