@@ -204,7 +204,7 @@ class MulticastStuckHandler:
         for handler in self.handlers:
             handler_name = getattr(handler, "name", type(handler).__name__)
             tried_names.append(handler_name)
-            if not hasattr(handler, "handle_stuck"):
+            if not isinstance(handler, StuckHandler):
                 logger.warning(
                     "Stuck handler %r is async-only (ahandle_stuck) and cannot run "
                     "under GoapGraph.invoke(); use ainvoke() or add a sync "
