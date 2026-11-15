@@ -145,6 +145,14 @@ default behaviours change; each has an explicit opt-in that restores the
 
 ### Fixed
 
+- A typed-form answer survives the action it approved failing. The
+  pre-execution snapshot an executor keeps is taken after the
+  human-in-the-loop gate, so a failure's `world_state` (and the parallel
+  executor's wave abort) carries the answer, and `_check_form_approval`
+  reuses an answer under `human_input_key` that still validates against
+  the form model instead of interrupting again on the retry; a missing or
+  stale answer still prompts. A valid answer placed in the initial world
+  state is used without a prompt (#75).
 - **Anytime planning works (#23).** `plan(..., time_budget_ms=...)` runs
   weighted A* with a tightening weight schedule (`ANYTIME_WEIGHTS`, ending
   in plain optimal A*), so a complete, bounded-suboptimal plan exists early

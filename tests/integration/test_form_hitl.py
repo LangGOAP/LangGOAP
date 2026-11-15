@@ -262,3 +262,142 @@ class TestBackwardsCompat:
 
         # Default key is the action name.
         assert "confirm_delivery" in result["world_state"]
+
+
+# ---------------------------------------------------------------------------
+# #75 — the operator's answer survives an action failure and is not asked twice
+# ---------------------------------------------------------------------------
+
+_VALID_CONFIRMATION = {
+    "delivery_date": "2026-05-15",
+    "notes": "Leave at side door",
+    "signature_waiver": True,
+}
+
+
+def _flaky_confirm_actions(fail_times: int = 1) -> list[ActionSpec]:
+    """``confirm_delivery`` raises ``fail_times`` times, then succeeds.
+
+    ``max_retries`` allows one re-plan, so the second attempt runs the same
+    action again; it must reuse the operator's stored answer instead of
+    interrupting a second time.
+    """
+    calls = {"n": 0}
+
+    def dispatch(world_state: dict[str, Any]) -> dict[str, Any]:
+        calls["n"] += 1
+        if calls["n"] <= fail_times:
+            raise RuntimeError("carrier API timeout")
+        return {"dispatched": True}
+
+    def prepare(world_state: dict[str, Any]) -> dict[str, Any]:
+        return {"prepared": True}
+
+    return [
+        ActionSpec(name="prepare", effects={"prepared": True}, execute=prepare),
+        ActionSpec(
+            name="confirm_delivery",
+            preconditions={"prepared": True},
+            effects={"dispatched": True},
+            execute=dispatch,
+            require_human_approval=DeliveryConfirmation,
+            human_input_key="confirmation",
+            max_retries=1,
+        ),
+    ]
+
+
+def _goal_input() -> dict[str, Any]:
+    return {
+        "goal": GoalSpec(conditions={"dispatched": True}).to_dict(),
+        "world_state": {},
+    }
+
+
+class TestFormAnswerSurvivesFailure:
+    @pytest.mark.parametrize("executor", ["sequential", "parallel"])
+    def test_retry_reuses_the_answer_without_a_second_prompt(
+        self, executor: str
+    ) -> None:
+        graph = GoapGraph(_flaky_confirm_actions(), executor=executor).compile(  # type: ignore[arg-type]
+            checkpointer=MemorySaver()
+        )
+        config = {"configurable": {"thread_id": f"form-survives-{executor}"}}
+        graph.invoke(_goal_input(), config=config)
+
+        result = graph.invoke(Command(resume=_VALID_CONFIRMATION), config=config)
+
+        assert "__interrupt__" not in result, "the operator was asked a second time"
+        assert result["status"] == "goal_achieved"
+        assert result["world_state"]["confirmation"]["notes"] == "Leave at side door"
+        attempts = [
+            h
+            for h in result["execution_history"]
+            if h["action_name"] == "confirm_delivery"
+        ]
+        assert [h["success"] for h in attempts] == [False, True]
+
+    def test_answer_is_checkpointed_after_the_failure(self) -> None:
+        """Even before the retry runs, the failed step's checkpoint holds the answer."""
+        graph = GoapGraph(_flaky_confirm_actions(fail_times=5)).compile(
+            checkpointer=MemorySaver()
+        )
+        config = {"configurable": {"thread_id": "form-checkpointed"}}
+        graph.invoke(_goal_input(), config=config)
+
+        result = graph.invoke(Command(resume=_VALID_CONFIRMATION), config=config)
+
+        # max_retries=1 is exhausted by the persistent failure: the run ends
+        # without the goal, but the answer the operator gave is still there.
+        assert result["status"] != "goal_achieved"
+        assert result["world_state"]["confirmation"]["notes"] == "Leave at side door"
+        history = [snap.values for snap in graph.get_state_history(config)]
+        failed_steps = [
+            s
+            for s in history
+            if any(not h["success"] for h in s.get("execution_history", []))
+        ]
+        assert failed_steps and all(
+            "confirmation" in s["world_state"] for s in failed_steps
+        )
+
+    async def test_async_path_reuses_the_answer(self) -> None:
+        graph = GoapGraph(_flaky_confirm_actions()).compile(checkpointer=MemorySaver())
+        config = {"configurable": {"thread_id": "form-survives-async"}}
+        await graph.ainvoke(_goal_input(), config=config)
+
+        result = await graph.ainvoke(Command(resume=_VALID_CONFIRMATION), config=config)
+
+        assert "__interrupt__" not in result
+        assert result["status"] == "goal_achieved"
+
+    def test_prefilled_valid_answer_skips_the_prompt(self) -> None:
+        graph = GoapGraph(_confirm_delivery_actions()).compile(
+            checkpointer=MemorySaver()
+        )
+        config = {"configurable": {"thread_id": "form-prefilled"}}
+        result = graph.invoke(
+            {
+                "goal": GoalSpec(conditions={"dispatched": True}).to_dict(),
+                "world_state": {"confirmation": dict(_VALID_CONFIRMATION)},
+            },
+            config=config,
+        )
+
+        assert "__interrupt__" not in result
+        assert result["status"] == "goal_achieved"
+
+    def test_stored_answer_that_fails_validation_is_prompted_again(self) -> None:
+        graph = GoapGraph(_confirm_delivery_actions()).compile(
+            checkpointer=MemorySaver()
+        )
+        config = {"configurable": {"thread_id": "form-stale"}}
+        result = graph.invoke(
+            {
+                "goal": GoalSpec(conditions={"dispatched": True}).to_dict(),
+                "world_state": {"confirmation": {"bogus": 1}},
+            },
+            config=config,
+        )
+
+        assert _interrupted_payload(result)["type"] == "goap_action_form"
