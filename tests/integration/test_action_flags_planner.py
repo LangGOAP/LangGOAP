@@ -22,10 +22,11 @@ it after a checkpoint reload.
 
 from __future__ import annotations
 
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
 from langgoap.planner.astar import plan
-from langgoap.serde import LangGOAPSerializer
 from langgoap.state import PlanningState
 from tests.conftest import make_action as _action
 
@@ -133,10 +134,10 @@ class TestReadOnly:
             cost=1.0,
             read_only=True,
         )
-        serializer = LangGOAPSerializer()
+        serializer = JsonPlusSerializer()
 
-        kind, payload = serializer.dumps_typed(action)
-        restored = serializer.loads_typed((kind, payload))
+        kind, payload = serializer.dumps_typed(action.to_dict())
+        restored = ActionSpec.from_dict(serializer.loads_typed((kind, payload)))
 
         assert restored.name == "analyze_only"
         assert restored.read_only is True
@@ -190,8 +191,8 @@ class TestBothFlags:
             can_rerun=False,
             read_only=True,
         )
-        serializer = LangGOAPSerializer()
-        kind, payload = serializer.dumps_typed(action)
-        restored = serializer.loads_typed((kind, payload))
+        serializer = JsonPlusSerializer()
+        kind, payload = serializer.dumps_typed(action.to_dict())
+        restored = ActionSpec.from_dict(serializer.loads_typed((kind, payload)))
         assert restored.can_rerun is False
         assert restored.read_only is True

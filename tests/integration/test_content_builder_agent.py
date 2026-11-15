@@ -337,18 +337,44 @@ class TestQualityEnforcementTriggersEnumeration:
         assert plan.score.soft == DEEP_BLOG_QUALITY
         assert plan.score.is_feasible() is True
 
-    def test_primary_plan_is_infeasible_under_lower_floor(self) -> None:
-        # Sanity check: a quality floor of 5 is exactly met by the fast
-        # writer, so enumeration should *not* fire and the fast plan is
-        # returned feasible.
+    def test_maximize_objective_prefers_deep_writer_even_when_floor_is_met(
+        self,
+    ) -> None:
+        # A quality floor of 5 is exactly met by the fast writer, so the
+        # hard check passes.  The goal also declares ``quality_score ->
+        # MAXIMIZE``, and since issue #12 that preference is honoured
+        # whenever the primary plan is feasible: the pipeline compares the
+        # fast plan against its alternatives and CP-SAT picks the deep
+        # writer (quality 10 > 5).
         actions = content_builder_actions()
         start = PlanningState.from_dict(content_builder_start())
         plan = pipeline_plan(start, quality_blog_goal(min_quality=5.0), actions)
+        assert plan is not None
+        assert tuple(plan.action_names) == DEEP_BLOG_ACTIONS
+        meta = plan.metadata.csp
+        assert meta is not None
+        assert meta.status in (CSPStatus.FEASIBLE, CSPStatus.OPTIMAL)
+        assert meta.plans_evaluated > 1
+
+    def test_hard_floor_alone_keeps_the_fast_writer(self) -> None:
+        # Without a MAXIMIZE objective the floor is the only requirement,
+        # and a goal that states only hard limits is satisfied by the
+        # first feasible A* plan: no alternatives are compared.
+        from langgoap import ConstraintSpec, GoalSpec
+
+        actions = content_builder_actions()
+        start = PlanningState.from_dict(content_builder_start())
+        goal = GoalSpec(
+            conditions={"blog_live": True},
+            constraints=(ConstraintSpec(key="quality_score", min=5.0, level="hard"),),
+        )
+        plan = pipeline_plan(start, goal, actions)
         assert plan is not None
         assert tuple(plan.action_names) == FAST_BLOG_ACTIONS
         meta = plan.metadata.csp
         assert meta is not None
         assert meta.status in (CSPStatus.FEASIBLE, CSPStatus.OPTIMAL)
+        assert meta.plans_evaluated == 1
 
 
 # ---------------------------------------------------------------------------

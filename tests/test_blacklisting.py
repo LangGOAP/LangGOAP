@@ -23,7 +23,7 @@ from langgoap.graph.nodes import (
     _get_last_failed_action,
     _get_max_retries,
 )
-from langgoap.graph.state import ActionResult, GoapState
+from langgoap.graph.state import ActionResult, GoapState, plan_from_state
 from langgoap.planner.astar import plan as astar_plan
 from langgoap.state import PlanningState
 from langgoap.types import ReplanStrategy
@@ -358,13 +358,40 @@ class TestPlannerBlacklist:
         assert "direct" not in result.action_names
         assert result.action_names == ["step1", "step2"]
 
-    def test_blacklist_fallback_clears_blacklist(self) -> None:
-        """When blacklist makes goal unreachable, retry with all actions."""
+    def test_blacklist_fallback_opt_in_retries_with_all_actions(self) -> None:
+        """With ``blacklist_fallback=True`` an unreachable filtered set retries
+        with every action."""
         start = PlanningState.from_dict({})
         goal = GoalSpec(conditions={"x": True})
         only_action = _action("only", eff={"x": True})
 
-        # only_action is the only way; blacklisting it should trigger fallback
+        result = astar_plan(
+            start,
+            goal,
+            [only_action],
+            blacklisted_actions=["only"],
+            blacklist_fallback=True,
+        )
+        assert result is not None
+        assert result.action_names == ["only"]
+
+    def test_blacklist_fallback_is_off_by_default(self) -> None:
+        """Default: a blacklisted sole path means no plan (issue #15)."""
+        start = PlanningState.from_dict({})
+        goal = GoalSpec(conditions={"x": True})
+        only_action = _action("only", eff={"x": True})
+
+        assert GoalPolicy().blacklist_fallback is False
+        result = astar_plan(start, goal, [only_action], blacklisted_actions=["only"])
+        assert result is None
+
+    def test_blacklist_fallback_reads_goal_policy(self) -> None:
+        start = PlanningState.from_dict({})
+        goal = GoalSpec(
+            conditions={"x": True}, policy=GoalPolicy(blacklist_fallback=True)
+        )
+        only_action = _action("only", eff={"x": True})
+
         result = astar_plan(start, goal, [only_action], blacklisted_actions=["only"])
         assert result is not None
         assert result.action_names == ["only"]
@@ -382,13 +409,14 @@ class TestPlannerBlacklist:
         assert result_normal.action_names == result_empty.action_names
 
     def test_all_actions_blacklisted_fallback(self) -> None:
-        """All actions blacklisted → blacklist fallback retries with all."""
+        """All actions blacklisted → opt-in fallback retries with all."""
         start = PlanningState.from_dict({})
         goal = GoalSpec(conditions={"x": True})
         a = _action("a", eff={"x": True})
 
-        result = astar_plan(start, goal, [a], blacklisted_actions=["a"])
-        # Blacklist fallback means it should still find a plan
+        result = astar_plan(
+            start, goal, [a], blacklisted_actions=["a"], blacklist_fallback=True
+        )
         assert result is not None
         assert result.action_names == ["a"]
 
@@ -433,7 +461,7 @@ class TestPlannerNodeBlacklist:
 
         assert result["status"] == "executing"
         assert result["plan"] is not None
-        assert result["plan"].action_names == ["expensive"]
+        assert plan_from_state(result["plan"]).action_names == ["expensive"]
 
     def test_planner_no_blacklist_uses_cheapest(self) -> None:
         """Without blacklist, planner picks the cheapest action."""
@@ -447,10 +475,31 @@ class TestPlannerNodeBlacklist:
         }
         result = planner(state)
 
-        assert result["plan"].action_names == ["cheap"]
+        assert plan_from_state(result["plan"]).action_names == ["cheap"]
 
     def test_planner_blacklist_fallback_via_state(self) -> None:
-        """Planner triggers blacklist fallback when blacklist blocks the only path."""
+        """With the opt-in policy the planner re-admits the only path and
+        clears the blacklist, but keeps the failure history."""
+        only = _action("only", eff={"x": True})
+        planner = GoapPlanner(actions=[only])
+
+        state: GoapState = {
+            "world_state": {},
+            "goal": GoalSpec(
+                conditions={"x": True}, policy=GoalPolicy(blacklist_fallback=True)
+            ),
+            "blacklisted_actions": ["only"],
+            "action_failure_counts": {"only": 1},
+        }
+        result = planner(state)
+
+        assert result["status"] == "executing"
+        assert plan_from_state(result["plan"]).action_names == ["only"]
+        assert result["blacklisted_actions"] == []
+        # Failure counts are history, not a budget to reset (issue #15).
+        assert "action_failure_counts" not in result
+
+    def test_planner_default_reports_no_plan_for_blacklisted_sole_path(self) -> None:
         only = _action("only", eff={"x": True})
         planner = GoapPlanner(actions=[only])
 
@@ -461,13 +510,8 @@ class TestPlannerNodeBlacklist:
             "action_failure_counts": {"only": 1},
         }
         result = planner(state)
-
-        # Blacklist fallback should find the plan
-        assert result["status"] == "executing"
-        assert result["plan"].action_names == ["only"]
-        # Fallback clears blacklist and failure counts to give a fresh start
-        assert result["blacklisted_actions"] == []
-        assert result["action_failure_counts"] == {}
+        assert result["status"] == "no_plan"
+        assert result["plan"] is None
 
 
 # ---------------------------------------------------------------------------

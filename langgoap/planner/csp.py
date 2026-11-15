@@ -15,11 +15,12 @@ from __future__ import annotations
 
 import enum
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 from datetime import timedelta
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Iterable, Literal, Mapping
 
 from ortools.sat.python import cp_model as _cp_model
 
@@ -78,6 +79,29 @@ class ResourceUsage:
     satisfied: bool = True
     level: Literal["hard", "soft", "info"] = "info"
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise to a JSON-native dict (inverse of :meth:`from_dict`)."""
+        return {
+            "key": self.key,
+            "total": self.total,
+            "constraint_min": self.constraint_min,
+            "constraint_max": self.constraint_max,
+            "satisfied": self.satisfied,
+            "level": self.level,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> ResourceUsage:
+        """Reconstruct from the dict produced by :meth:`to_dict`."""
+        return cls(
+            key=data["key"],
+            total=float(data["total"]),
+            constraint_min=data.get("constraint_min"),
+            constraint_max=data.get("constraint_max"),
+            satisfied=bool(data.get("satisfied", True)),
+            level=data.get("level", "info"),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class ScheduleEntry:
@@ -94,6 +118,25 @@ class ScheduleEntry:
     start: timedelta
     duration: timedelta
     end: timedelta
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise to a JSON-native dict; durations are stored in seconds."""
+        return {
+            "action_name": self.action_name,
+            "start": self.start.total_seconds(),
+            "duration": self.duration.total_seconds(),
+            "end": self.end.total_seconds(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> ScheduleEntry:
+        """Reconstruct from the dict produced by :meth:`to_dict`."""
+        return cls(
+            action_name=data["action_name"],
+            start=timedelta(seconds=float(data["start"])),
+            duration=timedelta(seconds=float(data["duration"])),
+            end=timedelta(seconds=float(data["end"])),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +177,59 @@ class CSPMetadata:
                 "objective_values",
                 MappingProxyType(dict(self.objective_values)),
             )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise to a JSON-native dict (inverse of :meth:`from_dict`).
+
+        ``makespan`` is stored in seconds and ``explanation`` through its own
+        ``to_dict`` when it has one.
+        """
+        explanation = self.explanation
+        if hasattr(explanation, "to_dict"):
+            explanation = explanation.to_dict()
+        return {
+            "status": self.status.value,
+            "solver_time_ms": self.solver_time_ms,
+            "resource_usage": [u.to_dict() for u in self.resource_usage],
+            "objective_values": dict(self.objective_values),
+            "schedule": [e.to_dict() for e in self.schedule],
+            "makespan": (
+                self.makespan.total_seconds() if self.makespan is not None else None
+            ),
+            "plans_evaluated": self.plans_evaluated,
+            "scale_factor": self.scale_factor,
+            "explanation": explanation,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> CSPMetadata:
+        """Reconstruct from the dict produced by :meth:`to_dict`."""
+        from langgoap.planner.explain import InfeasibilityExplanation
+
+        explanation: Any = data.get("explanation")
+        if (
+            isinstance(explanation, Mapping)
+            and "conflicting_constraints" in explanation
+        ):
+            explanation = InfeasibilityExplanation.from_dict(explanation)
+        makespan = data.get("makespan")
+        return cls(
+            status=CSPStatus(data["status"]),
+            solver_time_ms=float(data.get("solver_time_ms", 0.0)),
+            resource_usage=tuple(
+                ResourceUsage.from_dict(u) for u in data.get("resource_usage") or ()
+            ),
+            objective_values=MappingProxyType(dict(data.get("objective_values") or {})),
+            schedule=tuple(
+                ScheduleEntry.from_dict(e) for e in data.get("schedule") or ()
+            ),
+            makespan=(
+                timedelta(seconds=float(makespan)) if makespan is not None else None
+            ),
+            plans_evaluated=int(data.get("plans_evaluated", 0)),
+            scale_factor=int(data.get("scale_factor", 1000)),
+            explanation=explanation,
+        )
 
     def __repr__(self) -> str:
         parts = [f"status={self.status.value!r}"]
@@ -503,6 +599,25 @@ def optimize_plans(
 
     t0 = time.monotonic()
     cp_model = _cp_model
+
+    # Hard feasibility is decided in exact float arithmetic, the same check
+    # :func:`validate_plan` applies, so the integer model can never select
+    # a plan that breaches a bound by less than one scaling tick (issue
+    # #26).  Candidates that fail are dropped before the model is built.
+    all_candidates = plans
+    feasible_plans = [
+        p
+        for p in plans
+        if _hard_feasible(compute_resource_totals(p.actions), goal.constraints)
+    ]
+    if not feasible_plans:
+        return all_candidates[0], CSPMetadata(
+            status=CSPStatus.INFEASIBLE,
+            solver_time_ms=(time.monotonic() - t0) * 1000,
+            plans_evaluated=len(all_candidates),
+            scale_factor=scale,
+        )
+    plans = feasible_plans
     model = cp_model.CpModel()
     n = len(plans)
 
@@ -538,7 +653,7 @@ def optimize_plans(
         return plans[0], CSPMetadata(
             status=CSPStatus.INFEASIBLE,
             solver_time_ms=elapsed,
-            plans_evaluated=n,
+            plans_evaluated=len(all_candidates),
             scale_factor=scale,
         )
 
@@ -559,9 +674,39 @@ def optimize_plans(
         solver_time_ms=elapsed,
         resource_usage=tuple(usage_list),
         objective_values=MappingProxyType(obj_values),
-        plans_evaluated=n,
+        plans_evaluated=len(all_candidates),
         scale_factor=scale,
     )
+
+
+def _scale_total(value: float, scale: int) -> int:
+    """Scale a resource total to the solver's integer grid (nearest tick)."""
+    return int(round(value * scale))
+
+
+def _loose_upper(bound: float, scale: int) -> int:
+    """Integer upper bound that never rejects a plan the float check accepts."""
+    return math.ceil(bound * scale)
+
+
+def _loose_lower(bound: float, scale: int) -> int:
+    """Integer lower bound that never rejects a plan the float check accepts."""
+    return math.floor(bound * scale)
+
+
+def _hard_feasible(
+    totals: dict[str, float], constraints: Iterable[ConstraintSpec]
+) -> bool:
+    """Exact float check of every hard constraint against *totals*."""
+    for c in constraints:
+        if c.level != "hard":
+            continue
+        total = totals.get(c.key, 0.0)
+        if c.max is not None and total > c.max:
+            return False
+        if c.min is not None and total < c.min:
+            return False
+    return True
 
 
 def _build_selection_vars(
@@ -581,8 +726,14 @@ def _build_selection_vars(
     model.add_exactly_one(selected)
     resource_vars: dict[str, Any] = {}
     for key in all_keys:
-        scaled_values = [int(res.get(key, 0.0) * scale) for res in plan_resources]
-        rv = model.new_int_var(0, max(scaled_values) + 1, f"resource_{key}")
+        scaled_values = [
+            _scale_total(res.get(key, 0.0), scale) for res in plan_resources
+        ]
+        # Signed domain: resource totals may be negative (net balances,
+        # refunds), which a ``[0, max]`` domain silently made infeasible.
+        rv = model.new_int_var(
+            min(scaled_values) - 1, max(scaled_values) + 1, f"resource_{key}"
+        )
         model.add(rv == sum(selected[i] * scaled_values[i] for i in range(n)))
         resource_vars[key] = rv
     return selected, resource_vars
@@ -630,20 +781,24 @@ def _wire_constraints(
             resource_vars[key] = model.new_int_var(0, 0, f"resource_{key}")
         rv = resource_vars[key]
         if constraint.level == "hard":
+            # Loose integer bounds: the exact float check in
+            # :func:`optimize_plans` already excluded violating candidates,
+            # so the integer model must never reject a plan the float path
+            # accepts (rounding a fractional bound could otherwise do so).
             if constraint.max is not None:
-                model.add(rv <= int(constraint.max * scale))
+                model.add(rv <= _loose_upper(constraint.max, scale))
             if constraint.min is not None:
-                model.add(rv >= int(constraint.min * scale))
+                model.add(rv >= _loose_lower(constraint.min, scale))
             continue
         # Soft bound: violations allowed but penalized.
         weight_scaled = max(int(constraint.weight * scale), 1)
         if constraint.max is not None:
             viol_max = model.new_int_var(0, big_m, f"soft_viol_max_{key}")
-            model.add(viol_max >= rv - int(constraint.max * scale))
+            model.add(viol_max >= rv - _scale_total(constraint.max, scale))
             soft_violation_terms.append(viol_max * weight_scaled)
         if constraint.min is not None:
             viol_min = model.new_int_var(0, big_m, f"soft_viol_min_{key}")
-            model.add(viol_min >= int(constraint.min * scale) - rv)
+            model.add(viol_min >= _scale_total(constraint.min, scale) - rv)
             soft_violation_terms.append(viol_min * weight_scaled)
     return soft_violation_terms
 
@@ -688,13 +843,18 @@ def _set_optimization_objective(
                     soft_goal_terms.append(-selected[i] * weight_scaled)
 
     combined_terms = objective_terms + soft_violation_terms + soft_goal_terms
+    cost_terms = [
+        selected[i] * int(plans[i].total_cost * scale) for i in range(len(plans))
+    ]
     if combined_terms:
-        model.minimize(sum(combined_terms))
+        # Preference terms dominate; plan cost breaks ties between plans
+        # that score identically on every objective, soft constraint, and
+        # soft goal.  ``big`` exceeds the largest possible cost term so the
+        # cost can never outweigh a one-tick preference difference.
+        big = sum(int(p.total_cost * scale) for p in plans) + 1
+        model.minimize(big * sum(combined_terms) + sum(cost_terms))
     else:
         # No objectives or soft violations — prefer lower total cost.
-        cost_terms = [
-            selected[i] * int(plans[i].total_cost * scale) for i in range(len(plans))
-        ]
         model.minimize(sum(cost_terms))
 
 

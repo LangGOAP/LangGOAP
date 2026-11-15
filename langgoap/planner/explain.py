@@ -14,7 +14,7 @@ QuickXplain (O(n log n) but optimal) is a future enhancement.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Mapping
 
 from langgoap.goals import ConstraintSpec, GoalSpec
 from langgoap.planner.csp import (
@@ -50,14 +50,37 @@ class ResourceShortfall:
     available_min: float | None = None
     overrun: float = 0.0
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise to a JSON-native dict (inverse of :meth:`from_dict`)."""
+        return {
+            "key": self.key,
+            "required": self.required,
+            "available_max": self.available_max,
+            "available_min": self.available_min,
+            "overrun": self.overrun,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> ResourceShortfall:
+        """Reconstruct from the dict produced by :meth:`to_dict`."""
+        return cls(
+            key=data["key"],
+            required=float(data["required"]),
+            available_max=data.get("available_max"),
+            available_min=data.get("available_min"),
+            overrun=float(data.get("overrun", 0.0)),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class InfeasibilityExplanation:
     """Explanation of why a plan is infeasible.
 
     Attributes:
-        conflicting_constraints: The Minimal Unsatisfiable Subset of
-            constraints that together cause infeasibility.
+        conflicting_constraints: Every hard constraint the plan violates.
+            Resource totals are fixed per plan, so each violated bound is
+            independently unsatisfiable and the set is its own minimal
+            unsatisfiable subset.
         resource_shortfalls: Per-resource breakdown of violations.
         suggestion: Human-readable suggestion for resolving the conflict.
     """
@@ -65,6 +88,31 @@ class InfeasibilityExplanation:
     conflicting_constraints: tuple[ConstraintSpec, ...]
     resource_shortfalls: tuple[ResourceShortfall, ...]
     suggestion: str
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise to a JSON-native dict (inverse of :meth:`from_dict`)."""
+        return {
+            "conflicting_constraints": [
+                c.to_dict() for c in self.conflicting_constraints
+            ],
+            "resource_shortfalls": [r.to_dict() for r in self.resource_shortfalls],
+            "suggestion": self.suggestion,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> InfeasibilityExplanation:
+        """Reconstruct from the dict produced by :meth:`to_dict`."""
+        return cls(
+            conflicting_constraints=tuple(
+                ConstraintSpec.from_dict(c)
+                for c in data.get("conflicting_constraints") or ()
+            ),
+            resource_shortfalls=tuple(
+                ResourceShortfall.from_dict(r)
+                for r in data.get("resource_shortfalls") or ()
+            ),
+            suggestion=data.get("suggestion", ""),
+        )
 
 
 def _check_feasibility(
@@ -114,10 +162,10 @@ def _build_shortfalls(
 
 def _build_suggestion(
     shortfalls: tuple[ResourceShortfall, ...],
-    mus: tuple[ConstraintSpec, ...],
+    violated: tuple[ConstraintSpec, ...],
 ) -> str:
-    """Generate a human-readable suggestion from shortfalls and MUS."""
-    if not shortfalls and not mus:
+    """Generate a human-readable suggestion from the shortfalls."""
+    if not shortfalls and not violated:
         return "No constraint violations detected."
 
     parts: list[str] = []
@@ -137,7 +185,7 @@ def _build_suggestion(
             )
 
     if not parts:
-        keys = [c.key for c in mus]
+        keys = [c.key for c in violated]
         parts.append(
             f"Constraints on {', '.join(keys)} are mutually unsatisfiable. "
             f"Relax at least one constraint to make the plan feasible."
@@ -156,25 +204,6 @@ def _is_violated(c: ConstraintSpec, totals: dict[str, float]) -> bool:
     return False
 
 
-def _greedy_mus(
-    violated: list[ConstraintSpec], totals: dict[str, float]
-) -> list[ConstraintSpec]:
-    """Greedy MUS: keep constraints whose removal would restore feasibility."""
-    mus: list[ConstraintSpec] = []
-    remaining = list(violated)
-    for candidate in list(violated):
-        without = [c for c in remaining if c is not candidate]
-        if _check_feasibility(totals, without):
-            # Removing this constraint makes it feasible → it's essential
-            mus.append(candidate)
-        else:
-            # Still infeasible without it → it's redundant
-            remaining = without
-    # If greedy didn't identify any (all are redundant to each other),
-    # fall back to the full violated set
-    return mus or violated
-
-
 def explain_infeasibility(
     plan: Plan,
     goal: GoalSpec,
@@ -182,9 +211,11 @@ def explain_infeasibility(
 ) -> InfeasibilityExplanation | None:
     """Analyze an INFEASIBLE plan and explain which constraints conflict.
 
-    Uses a greedy MUS approximation: iteratively removes hard constraints
-    and checks if the remaining set is still infeasible.  Constraints
-    whose removal makes the plan feasible are part of the MUS.
+    Resource totals of a fixed plan do not interact, so every violated hard
+    constraint is independently unsatisfiable: the minimal unsatisfiable
+    subset is exactly the set of violated constraints.  All of them are
+    reported, each with its own shortfall, so a plan over both its cost
+    and its token budget names both (issue #25).
 
     Args:
         plan: The infeasible plan.
@@ -204,12 +235,12 @@ def explain_infeasibility(
     if not violated:
         return None
 
-    mus_tuple = tuple(_greedy_mus(violated, totals))
-    shortfalls = _build_shortfalls(totals, mus_tuple)
+    violated_tuple = tuple(violated)
+    shortfalls = _build_shortfalls(totals, violated_tuple)
     return InfeasibilityExplanation(
-        conflicting_constraints=mus_tuple,
+        conflicting_constraints=violated_tuple,
         resource_shortfalls=shortfalls,
-        suggestion=_build_suggestion(shortfalls, mus_tuple),
+        suggestion=_build_suggestion(shortfalls, violated_tuple),
     )
 
 

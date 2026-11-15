@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import pytest
 
+from langgoap.graph.state import plan_from_state
 from langgoap.planner.types import Plan, PlanningState
 
 # ---------------------------------------------------------------------------
@@ -154,7 +155,7 @@ class TestCSPScoresMetrics:
         graph = GoapGraph(actions).compile()
         result = graph.invoke({"world_state": {}, "goal": goal})
         assert result["status"] == "goal_achieved"
-        plan = result["plan"]
+        plan = plan_from_state(result["plan"])
         # After CSP re-scoring the soft term must carry the metric penalty.
         assert plan.score.soft == pytest.approx(-7.0)
 

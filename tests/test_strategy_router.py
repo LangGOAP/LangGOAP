@@ -495,3 +495,263 @@ class TestStrategyRouterEndToEnd:
         assert len(plan.actions) >= 1
         for a in plan.actions:
             assert a.name in {"north", "south", "east", "west"}
+
+
+# --- replan contract (issue #10) ---------------------------------------------
+
+
+class TestRouterReplanContract:
+    """``StrategyRouter.plan`` must accept the advisory repair kwargs that
+    ``GoapPlanner`` forwards on every replan (``prior_plan`` /
+    ``current_step``), otherwise the first replan through a router raises
+    ``TypeError``.  Regression tests for issue #10.
+    """
+
+    def _router(self) -> "StrategyRouter":
+        from langgoap.planner.router import RuleBasedClassifier, StrategyRouter
+
+        return StrategyRouter(
+            strategies={"astar": AStarStrategy()},
+            classifier=RuleBasedClassifier(),
+        )
+
+    def test_plan_accepts_prior_plan_and_current_step(self) -> None:
+        router = self._router()
+        actions = _actions(1)
+        start = PlanningState.from_dict({})
+        prior = router.plan(start, _goal(), actions)
+        assert prior is not None
+        again = router.plan(
+            start,
+            _goal(),
+            actions,
+            blacklisted_actions=[],
+            prior_plan=prior,
+            current_step=0,
+        )
+        assert again is not None
+        assert again.action_names == prior.action_names
+
+    def test_repair_kwargs_are_forwarded_only_when_prior_plan_set(self) -> None:
+        from langgoap.planner.router import StrategyRouter
+
+        seen: list[dict] = []
+
+        class _Recorder:
+            def plan(self, start, goal, actions, *, blacklisted_actions=None, **kw):
+                seen.append(dict(kw))
+                return Plan(actions=())
+
+        router = StrategyRouter(
+            strategies={"astar": _Recorder()}, classifier=lambda f: "astar"
+        )
+        start = PlanningState.from_dict({})
+        router.plan(start, _goal(), _actions(1))
+        prior = Plan(actions=())
+        router.plan(start, _goal(), _actions(1), prior_plan=prior, current_step=2)
+        assert seen[0] == {}
+        assert seen[1] == {"prior_plan": prior, "current_step": 2}
+
+    def test_router_inside_graph_survives_a_replan(self) -> None:
+        """End-to-end: a router-driven graph must replan after an action fails."""
+        from langgoap.graph.builder import GoapGraph
+        from langgoap.planner.router import RuleBasedClassifier, StrategyRouter
+        from langgoap.planner.strategy import TwoPhasePipelineStrategy
+
+        calls = {"n": 0}
+
+        def flaky(ws: dict) -> dict:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("first call fails")
+            return {"b": True}
+
+        actions = [
+            ActionSpec(name="a_fast", effects={"b": True}, cost=1.0, execute=flaky),
+            ActionSpec(
+                name="a_slow",
+                effects={"b": True},
+                cost=5.0,
+                execute=lambda ws: {"b": True},
+            ),
+            ActionSpec(
+                name="finish",
+                preconditions={"b": True},
+                effects={"done": True},
+                execute=lambda ws: {"done": True},
+            ),
+        ]
+        router = StrategyRouter(
+            strategies={
+                "astar": AStarStrategy(),
+                "csp-pipeline": TwoPhasePipelineStrategy(),
+                "mcts": MCTSStrategy(),
+            },
+            classifier=RuleBasedClassifier(),
+        )
+        result = GoapGraph(actions=actions, strategy=router).invoke(
+            goal=GoalSpec(conditions={"done": True}), world_state={}
+        )
+        assert result["status"] == "goal_achieved"
+        assert result["replan_count"] == 1
+        assert "a_fast" in result["blacklisted_actions"]
+
+
+class TestStrategyProtocolConformance:
+    """Every shipped strategy must accept the full ``PlanningStrategy.plan``
+    keyword surface, including the advisory repair kwargs."""
+
+    @staticmethod
+    def _strategies() -> list[PlanningStrategy]:
+        from langgoap.planner.repair import RepairStrategy
+        from langgoap.planner.router import RuleBasedClassifier, StrategyRouter
+        from langgoap.planner.strategy import (
+            AnytimePlanningStrategy,
+            LazyDecompositionStrategy,
+            TwoPhasePipelineStrategy,
+        )
+        from langgoap.planner.utility import UtilityStrategy
+
+        return [
+            AStarStrategy(),
+            TwoPhasePipelineStrategy(),
+            LazyDecompositionStrategy(lookahead=1),
+            AnytimePlanningStrategy(time_budget_ms=5_000),
+            RepairStrategy(),
+            UtilityStrategy(),
+            MCTSStrategy(),
+            StrategyRouter(
+                strategies={"astar": AStarStrategy()},
+                classifier=RuleBasedClassifier(),
+            ),
+        ]
+
+    @pytest.mark.parametrize(
+        "strategy", _strategies.__func__(), ids=lambda s: type(s).__name__
+    )
+    def test_plan_accepts_repair_kwargs(self, strategy: PlanningStrategy) -> None:
+        actions = _actions(1)
+        start = PlanningState.from_dict({})
+        prior = Plan(actions=tuple(actions))
+        result = strategy.plan(
+            start,
+            _goal(),
+            actions,
+            blacklisted_actions=[],
+            prior_plan=prior,
+            current_step=0,
+        )
+        assert result is None or isinstance(result, Plan)
+
+
+# ---------------------------------------------------------------------------
+# Horizon estimate from a relaxed plan (issue #24)
+# ---------------------------------------------------------------------------
+
+
+def _chain(length: int) -> list[ActionSpec]:
+    """``s0 -> s1 -> ... -> s<length>``: a deterministic chain of ``length`` steps."""
+    actions = [
+        ActionSpec(name="step_1", preconditions={}, effects={"s1": True}, cost=1.0)
+    ]
+    for i in range(2, length + 1):
+        actions.append(
+            ActionSpec(
+                name=f"step_{i}",
+                preconditions={f"s{i - 1}": True},
+                effects={f"s{i}": True},
+                cost=1.0,
+            )
+        )
+    return actions
+
+
+def _noise(n: int) -> list[ActionSpec]:
+    """Unrelated actions that inflate the catalog without touching the goal."""
+    return [
+        ActionSpec(
+            name=f"noise_{i}", preconditions={}, effects={f"n{i}": True}, cost=1.0
+        )
+        for i in range(n)
+    ]
+
+
+class TestHorizonEstimate:
+    def test_horizon_is_the_relaxed_plan_depth(self) -> None:
+        from langgoap.planner.router import extract_features
+
+        f = extract_features(PlanningState.from_dict({}), _goal(s5=True), _chain(5))
+        assert f.horizon_estimate == 5
+
+    def test_unrelated_actions_do_not_inflate_the_horizon(self) -> None:
+        from langgoap.planner.router import extract_features
+
+        catalog = _chain(5) + _noise(30)
+        f = extract_features(PlanningState.from_dict({}), _goal(s5=True), catalog)
+        assert f.action_count == 35
+        assert f.horizon_estimate == 5
+
+    def test_satisfied_goal_has_zero_horizon(self) -> None:
+        from langgoap.planner.router import extract_features
+
+        f = extract_features(
+            PlanningState.from_dict({"s5": True}), _goal(s5=True), _chain(5)
+        )
+        assert f.horizon_estimate == 0
+
+    def test_unreachable_goal_horizon_is_at_least_the_catalog_size(self) -> None:
+        from langgoap.planner.router import extract_features
+
+        f = extract_features(
+            PlanningState.from_dict({}), _goal(missing=True), _chain(5)
+        )
+        assert f.horizon_estimate >= f.action_count
+
+    def test_dynamic_effects_count_by_declared_keys(self) -> None:
+        from langgoap.planner.router import extract_features
+
+        dyn = ActionSpec(
+            name="dyn",
+            preconditions={"s1": True},
+            effects=lambda ws: {"s2": True},
+            effect_keys=frozenset({"s2"}),
+        )
+        f = extract_features(
+            PlanningState.from_dict({}), _goal(s2=True), [_chain(1)[0], dyn]
+        )
+        assert f.horizon_estimate == 2
+
+    def test_default_classifier_keeps_astar_for_short_chains_over_big_catalogs(
+        self,
+    ) -> None:
+        from langgoap.planner.router import RuleBasedClassifier, extract_features
+
+        f = extract_features(
+            PlanningState.from_dict({}), _goal(s5=True), _chain(5) + _noise(30)
+        )
+        assert RuleBasedClassifier()(f) == "astar"
+
+    def test_default_classifier_still_promotes_deep_chains_over_big_catalogs(
+        self,
+    ) -> None:
+        from langgoap.planner.router import RuleBasedClassifier, extract_features
+
+        f = extract_features(
+            PlanningState.from_dict({}), _goal(s25=True), _chain(25) + _noise(10)
+        )
+        assert f.action_count >= 30 and f.horizon_estimate >= 20
+        assert RuleBasedClassifier()(f) == "mcts"
+
+    def test_router_solves_a_short_chain_in_a_big_catalog(self) -> None:
+        from langgoap.planner.router import RuleBasedClassifier, StrategyRouter
+
+        router = StrategyRouter(
+            strategies={"astar": AStarStrategy(), "mcts": MCTSStrategy()},
+            classifier=RuleBasedClassifier(),
+        )
+        result = router.plan(
+            PlanningState.from_dict({}), _goal(s5=True), _chain(5) + _noise(30)
+        )
+        assert router.last_chosen == "astar"
+        assert result is not None
+        assert result.action_names == [f"step_{i}" for i in range(1, 6)]

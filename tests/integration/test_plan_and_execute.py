@@ -213,6 +213,9 @@ class TestPlanAndExecuteGoapified:
                 effects={"has_search_results": True},
                 cost=1.0,
                 execute=flaky_search,
+                # Sole producer of search results: one planner-level retry
+                # covers the transient timeout without blacklisting it.
+                max_retries=1,
             ),
             ActionSpec(
                 name="extract_facts",

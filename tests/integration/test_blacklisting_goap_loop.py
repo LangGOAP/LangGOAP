@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from langgoap.actions import ActionSpec
-from langgoap.goals import GoalSpec
+from langgoap.goals import GoalPolicy, GoalSpec
 from langgoap.graph.builder import GoapGraph
 from tests.conftest import make_action as _action
 
@@ -133,9 +133,9 @@ class TestBlacklistingGoapLoop:
         # Replanning count: 3 failures → 3 replans, plus 1 to switch to action_b
         assert result["replan_count"] >= 3
 
-    def test_blacklist_fallback_retries_only_action(self) -> None:
-        """Only one action can achieve goal → blacklisted → fallback clears blacklist → retried."""
-        # Action fails once, then succeeds on second attempt
+    def test_blacklist_fallback_opt_in_retries_only_action(self) -> None:
+        """Only one action can achieve the goal, it fails once, and the goal
+        opted in to ``blacklist_fallback``: the planner re-admits it."""
         action = _make_flaky(
             "only_action",
             eff={"x": True},
@@ -145,7 +145,9 @@ class TestBlacklistingGoapLoop:
 
         graph = GoapGraph(actions=[action])
         result = graph.invoke(
-            goal=GoalSpec(conditions={"x": True}),
+            goal=GoalSpec(
+                conditions={"x": True}, policy=GoalPolicy(blacklist_fallback=True)
+            ),
             world_state={},
         )
 
@@ -153,15 +155,50 @@ class TestBlacklistingGoapLoop:
         assert result["world_state"]["x"] is True
         assert result["replan_count"] >= 1
 
-        # Should have at least one failure and one success
         failures = [h for h in result["execution_history"] if not h.success]
         successes = [h for h in result["execution_history"] if h.success]
         assert len(failures) >= 1
         assert len(successes) >= 1
 
-        # Blacklist fallback should have cleared the blacklist and failure counts
+        # The fallback clears the blacklist but the failure history survives.
         assert result.get("blacklisted_actions", []) == []
-        assert result.get("action_failure_counts", {}) == {}
+        assert result.get("action_failure_counts", {}) == {"only_action": 1}
+
+    def test_default_blacklisted_sole_path_ends_as_no_plan(self) -> None:
+        """Default policy: a failed sole-path action is not re-run (issue #15).
+        The planner reports ``no_plan`` after the single failure instead of
+        looping until ``max_replans``."""
+        action = _make_flaky("only_action", eff={"x": True}, fail_times=99, cost=1.0)
+        result = GoapGraph(actions=[action]).invoke(
+            goal=GoalSpec(conditions={"x": True}), world_state={}
+        )
+        assert result["status"] == "no_plan"
+        assert len(result["execution_history"]) == 1
+        assert result["blacklisted_actions"] == ["only_action"]
+        assert result["action_failure_counts"] == {"only_action": 1}
+
+    def test_default_does_not_loop_when_max_replans_is_unlimited(self) -> None:
+        """``max_replans=0`` disables the replan limit; without the fallback
+        a permanently failing sole path still terminates after one attempt."""
+        action = _make_flaky("only_action", eff={"x": True}, fail_times=99, cost=1.0)
+        result = GoapGraph(actions=[action]).invoke(
+            goal=GoalSpec(conditions={"x": True}, policy=GoalPolicy(max_replans=0)),
+            world_state={},
+        )
+        assert result["status"] == "no_plan"
+        assert len(result["execution_history"]) == 1
+
+    def test_max_retries_is_the_way_to_retry_a_sole_path(self) -> None:
+        """A transient failure on a sole path is handled by ``max_retries``,
+        not by the fallback."""
+        action = _make_flaky(
+            "only_action", eff={"x": True}, fail_times=1, cost=1.0, max_retries=1
+        )
+        result = GoapGraph(actions=[action]).invoke(
+            goal=GoalSpec(conditions={"x": True}), world_state={}
+        )
+        assert result["status"] == "goal_achieved"
+        assert result["blacklisted_actions"] == []
 
     async def test_blacklist_with_async_actions(self) -> None:
         """Blacklist switching works with ainvoke() and async actions."""

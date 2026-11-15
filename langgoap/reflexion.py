@@ -61,6 +61,13 @@ def _reflection_from_dict(d: dict[str, Any]) -> "Reflection":
     )
 
 
+def _entry_field(entry: Any, name: str, default: Any = None) -> Any:
+    """Read a field from an execution-history entry (object or JSON dict)."""
+    if isinstance(entry, dict):
+        return entry.get(name, default)
+    return getattr(entry, name, default)
+
+
 @dataclass(frozen=True, slots=True)
 class Reflection:
     """A verbal reflection on an execution failure.
@@ -332,7 +339,7 @@ class ReflexionTracer:
                 # Extract action name and error from execution_history
                 history = result.get("execution_history", [])
                 for entry in history:
-                    if hasattr(entry, "success") and not entry.success:
+                    if not _entry_field(entry, "success", True):
                         action_name = getattr(entry, "action_name", "unknown")
                         error = (
                             getattr(entry, "error", "unknown error") or "unknown error"
@@ -349,6 +356,37 @@ class ReflexionTracer:
         pass
 
     def on_sensor_complete(self, sensor_name: str, updates: Any) -> None:
+        pass
+
+    # Hooks the tracer does not act on but must implement so it is a
+    # complete :class:`~langgoap.tracing.PlanningTracer` (issue #36).
+
+    def on_action_retry(
+        self, action: Any, attempt: int, exception: BaseException, backoff_ms: float
+    ) -> None:
+        pass
+
+    def on_strategy_chosen(self, strategy_name: str) -> None:
+        pass
+
+    def on_search_expand(
+        self,
+        node_id: int,
+        state: Any,
+        g: float,
+        h: float,
+        f: float,
+        parent_id: int | None,
+        action_name: str | None,
+    ) -> None:
+        pass
+
+    def on_search_dead_end(self, reason: str, detail: dict[str, Any]) -> None:
+        pass
+
+    def on_search_complete(
+        self, nodes_explored: int, duration_ms: float, found: bool
+    ) -> None:
         pass
 
     # ------------------------------------------------------------------
@@ -381,7 +419,7 @@ class ReflexionTracer:
             if status == "action_failed":
                 history_entries = result.get("execution_history", [])
                 for entry in history_entries:
-                    if hasattr(entry, "success") and not entry.success:
+                    if not _entry_field(entry, "success", True):
                         action_name = getattr(entry, "action_name", "unknown")
                         error = (
                             getattr(entry, "error", "unknown error") or "unknown error"
@@ -403,6 +441,34 @@ class ReflexionTracer:
         pass
 
     async def aon_sensor_complete(self, sensor_name: str, updates: Any) -> None:
+        pass
+
+    async def aon_action_retry(
+        self, action: Any, attempt: int, exception: BaseException, backoff_ms: float
+    ) -> None:
+        pass
+
+    async def aon_strategy_chosen(self, strategy_name: str) -> None:
+        pass
+
+    async def aon_search_expand(
+        self,
+        node_id: int,
+        state: Any,
+        g: float,
+        h: float,
+        f: float,
+        parent_id: int | None,
+        action_name: str | None,
+    ) -> None:
+        pass
+
+    async def aon_search_dead_end(self, reason: str, detail: dict[str, Any]) -> None:
+        pass
+
+    async def aon_search_complete(
+        self, nodes_explored: int, duration_ms: float, found: bool
+    ) -> None:
         pass
 
 

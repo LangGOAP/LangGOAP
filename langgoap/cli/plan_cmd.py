@@ -39,10 +39,23 @@ logger = logging.getLogger(__name__)
 @click.option(
     "-s",
     "--strategy",
-    type=click.Choice(["astar", "pipeline", "mcts"]),
-    default="astar",
+    type=click.Choice(["auto", "astar", "pipeline", "mcts"]),
+    default="auto",
     show_default=True,
-    help="Planning strategy.",
+    help=(
+        "Planning strategy. 'auto' routes to the CSP pipeline when the goal "
+        "carries constraints, objectives or soft goals and to A* otherwise; "
+        "the other names force that strategy."
+    ),
+)
+@click.option(
+    "--run/--no-run",
+    default=False,
+    show_default=True,
+    help=(
+        "Execute the plan through the GOAP graph (runs every action's "
+        "execute callable). By default the command only plans."
+    ),
 )
 @click.option(
     "-o",
@@ -58,12 +71,16 @@ def plan(
     world_state_ref: str | None,
     fmt: str,
     strategy: str,
+    run: bool,
     output_path: str | None,
 ) -> None:
     """Plan a sequence of actions to achieve a goal.
 
     ACTIONS_REF and GOAL_REF are Python module:variable references
     (e.g. my_module:ACTIONS, my_module:GOAL).
+
+    Planning is side-effect free: no action's ``execute`` callable runs
+    unless ``--run`` is given.
     """
     try:
         actions_list = load_actions(actions_ref)
@@ -72,22 +89,35 @@ def plan(
     except (ValueError, TypeError, ImportError, AttributeError) as exc:
         raise click.ClickException(str(exc)) from exc
 
+    strategy_name = _effective_strategy_name(strategy, goal)
     strategy_obj = _resolve_strategy(strategy)
 
-    from langgoap.graph.builder import GoapGraph
+    result: dict[str, Any]
+    if run:
+        from langgoap.graph.builder import GoapGraph
 
-    graph = GoapGraph(actions=actions_list, strategy=strategy_obj)
-    result = graph.invoke(goal=goal, world_state=ws)
+        graph = GoapGraph(actions=actions_list, strategy=strategy_obj)
+        result = dict(graph.invoke(goal=goal, world_state=ws))
+    else:
+        planned = _plan_only(strategy_obj, actions_list, goal, ws)
+        result = {
+            "plan": planned,
+            "status": "planned" if planned is not None else "no_plan",
+        }
+    result["strategy"] = strategy_name
 
     status = result.get("status", "unknown")
-    result_plan = result.get("plan")
+    result_plan: Plan | None = result.get("plan")
 
     if status == "no_plan" or result_plan is None:
         click.echo(f"No plan found (status={status}).", err=True)
         _auto_explain(actions_list, goal, ws)
         sys.exit(1)
 
-    output = _render_plan(result_plan, fmt, dict(result))
+    try:
+        output = _render_plan(result_plan, fmt, result)
+    except ValueError as exc:
+        raise click.ClickException(f"cannot render the plan as {fmt!r}: {exc}") from exc
     if output_path:
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(output)
@@ -96,10 +126,44 @@ def plan(
         click.echo(output)
 
 
+def _effective_strategy_name(name: str, goal: Any) -> str:
+    """Name the strategy that will actually run for *name* and *goal*."""
+    if name != "auto":
+        return name
+    from langgoap.planner.pipeline import needs_csp
+
+    return "pipeline" if needs_csp(goal) else "astar"
+
+
+def _plan_only(
+    strategy_obj: Any, actions_list: list[Any], goal: Any, ws: dict[str, Any]
+) -> Any:
+    """Plan without executing anything (the default ``langgoap plan`` mode)."""
+    from langgoap.graph.nodes._helpers import _planning_keys
+    from langgoap.state import PlanningState
+
+    start = PlanningState.from_dict(ws, keys=_planning_keys(actions_list, goal))
+    if strategy_obj is not None:
+        return strategy_obj.plan(start, goal, actions_list)
+    from langgoap.planner.pipeline import needs_csp
+
+    if needs_csp(goal):
+        from langgoap.planner.pipeline import plan as pipeline_plan
+
+        return pipeline_plan(start, goal, actions_list)
+    from langgoap.planner.astar import plan as astar_plan
+
+    return astar_plan(start, goal, actions_list)
+
+
 def _resolve_strategy(name: str) -> Any:
-    """Resolve a strategy name to a strategy instance."""
+    """Resolve a strategy name to a strategy instance (``None`` = auto routing)."""
+    if name == "auto":
+        return None
     if name == "astar":
-        return None  # default
+        from langgoap.planner.strategy import AStarStrategy
+
+        return AStarStrategy()
     if name == "pipeline":
         from langgoap.planner.strategy import TwoPhasePipelineStrategy
 
@@ -125,6 +189,7 @@ def _render_plan(plan_obj: "Plan", fmt: str, result: dict[str, Any]) -> str:
         return json.dumps(
             {
                 "status": result.get("status"),
+                "strategy": result.get("strategy"),
                 "actions": plan_obj.action_names,
                 "total_cost": plan_obj.total_cost,
                 "steps": len(plan_obj),

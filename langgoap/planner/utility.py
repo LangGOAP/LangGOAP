@@ -27,10 +27,10 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Mapping
 
 from langgoap.actions import ActionSpec
-from langgoap.goals import GoalSpec
+from langgoap.goals import GoalPolicy, GoalSpec
 from langgoap.planner.types import Plan, PlanMetadata
 from langgoap.score import SimpleScore
 from langgoap.state import PlanningState
@@ -63,6 +63,36 @@ class NirvanaGoal(GoalSpec):
         kwargs.setdefault("conditions", {})
         super().__init__(**kwargs)
 
+    def __repr__(self) -> str:
+        parts: list[str] = []
+        if self.policy != GoalPolicy():
+            parts.append(f"policy={self.policy!r}")
+        if self.objectives:
+            parts.append(f"objectives={dict(self.objectives)!r}")
+        if self.constraints:
+            parts.append(f"constraints={self.constraints!r}")
+        if self.soft_goals:
+            parts.append(f"soft_goals={self.soft_goals!r}")
+        return f"NirvanaGoal({', '.join(parts)})"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise with ``kind="nirvana"`` so rehydration keeps the marker type."""
+        data = super().to_dict()
+        data["kind"] = "nirvana"
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> NirvanaGoal:
+        """Reconstruct from :meth:`to_dict` output (conditions stay empty)."""
+        base = GoalSpec.from_dict(data)
+        return cls(
+            policy=base.policy,
+            objectives=base.objectives,
+            constraints=base.constraints,
+            soft_goals=base.soft_goals,
+            value=base.value,
+        )
+
 
 def is_nirvana(goal: Any) -> bool:
     """Return True iff ``goal`` is a :class:`NirvanaGoal` instance.
@@ -90,7 +120,7 @@ def _resolve_utility(action: ActionSpec, state: dict[str, Any]) -> float:
 
 def _net_value(action: ActionSpec, state: PlanningState) -> float:
     """Embabel's ``Action.netValue(state)`` analog: utility − cost."""
-    state_dict = state.to_dict()
+    state_dict = state.as_context()
     return _resolve_utility(action, state_dict) - action.get_cost(state_dict)
 
 
@@ -145,7 +175,7 @@ class UtilityStrategy:
         # ``sortedByDescending`` then ``firstOrNull`` semantics.
         best = max(applicable, key=lambda a: _net_value(a, start))
 
-        start_dict = start.to_dict()
+        start_dict = start.as_context()
         end_state = start.apply(best.get_effects(start_dict))
         cost = best.get_cost(start_dict)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0

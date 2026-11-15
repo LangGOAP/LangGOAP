@@ -234,12 +234,42 @@ class TestProjectJobSchedulingSoftBudget:
         assert csp is not None
         assert csp.status in (CSPStatus.FEASIBLE, CSPStatus.OPTIMAL)
 
-        budget_usage = next(u for u in csp.resource_usage if u.key == "budget")
+        usage = {u.key: u for u in csp.resource_usage}
+        budget_usage = usage["budget"]
         assert budget_usage.level == "soft"
+        # A soft cap is a preference (issue #12): the pipeline compares the
+        # primary plan against its single-blacklist alternatives and picks
+        # the best trade-off between the MINIMIZE duration objective and
+        # the weighted budget overflow.  No alternative meets the cap of
+        # 20, so the chosen plan is still in violation, but by less than
+        # the primary's 32.
         assert budget_usage.satisfied is False
-        assert budget_usage.total == PRIMARY_BUDGET
+        assert budget_usage.total < PRIMARY_BUDGET
+        assert budget_usage.total > 20.0
 
-        # soft = -duration(11) - overflow(32 - 20 = 12) = -23
+        # soft = -duration_total - overflow(budget_total - 20)
+        duration_total = usage["duration_hours"].total
+        overflow = budget_usage.total - 20.0
         assert isinstance(plan_obj.score, HardSoftScore)
         assert plan_obj.score.hard == 0.0
-        assert plan_obj.score.soft == -(PRIMARY_DURATION_HOURS + 12.0)
+        assert plan_obj.score.soft == pytest.approx(-(duration_total + overflow))
+
+    def test_soft_budget_primary_plan_alone_would_be_penalized(self) -> None:
+        """Scoring semantics independent of selection: validating the
+        primary (fast) plan against the soft cap records the overflow."""
+        from langgoap.planner.csp import validate_plan
+        from langgoap.planner.pipeline import _score_from_csp
+
+        actions = project_job_scheduling_actions()
+        primary = pipeline_plan(
+            PlanningState.from_dict(project_job_scheduling_start()),
+            project_job_scheduling_goal(minimize_duration=False, max_budget=1_000),
+            actions,
+        )
+        assert primary is not None
+        goal = project_job_scheduling_goal(max_budget=20, max_budget_level="soft")
+        meta = validate_plan(primary, goal)
+        score = _score_from_csp(primary, goal, meta)
+        # soft = -duration(11) - overflow(32 - 20 = 12) = -23
+        assert score.hard == 0.0
+        assert score.soft == -(PRIMARY_DURATION_HOURS + 12.0)

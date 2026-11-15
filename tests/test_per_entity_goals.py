@@ -138,5 +138,5 @@ class TestPerEntityPlannerIntegration:
         result = graph.invoke({"world_state": {}, "goal": mg})
         assert result["status"] == "goal_achieved"
         # The cheaper "rescue_a" branch should win on cost parity with any-mode.
-        names = [r.action_name for r in result["execution_history"]]
+        names = [r["action_name"] for r in result["execution_history"]]
         assert "rescue_a" in names

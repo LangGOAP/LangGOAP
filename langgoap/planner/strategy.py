@@ -244,7 +244,7 @@ class LazyDecompositionStrategy:
         sim_state = start
         total_cost = 0.0
         for a in truncated_actions:
-            sim_dict = sim_state.to_dict()
+            sim_dict = sim_state.as_context()
             total_cost += a.get_cost(sim_dict)
             sim_state = sim_state.apply(a.get_effects(sim_dict))
             expected.append(sim_state)
@@ -262,22 +262,24 @@ class LazyDecompositionStrategy:
 class AnytimePlanningStrategy:
     """Return the best plan found within a wall-clock time budget.
 
-    Wraps an inner strategy (default: :class:`AStarStrategy`) and applies
-    a hard deadline.  When the inner strategy finishes before the budget
-    expires, the result is returned immediately.  When it exceeds the
-    budget, the best complete plan found so far is returned (which may be
-    ``None`` if no complete plan was discovered before the deadline).
+    With the default inner strategy (A*) the deadline is enforced natively:
+    :func:`langgoap.planner.astar.plan` runs weighted A* with a tightening
+    weight schedule, so a complete plan exists early and is improved while
+    the budget lasts, and the best complete plan found so far is returned
+    on expiry (see :data:`langgoap.planner.astar.ANYTIME_WEIGHTS`).
 
-    For :class:`AStarStrategy`, anytime behaviour is natively supported via
-    the ``time_budget_ms`` constructor parameter.  This strategy is more
-    useful when wrapping black-box strategies that do not expose a budget
-    knob — it uses :mod:`concurrent.futures` to enforce the deadline.
+    Any other ``inner`` strategy is a black box: it runs in a worker thread
+    and, when it exceeds the budget, this strategy returns ``None``
+    immediately with a :class:`RuntimeWarning`.  Python cannot interrupt a
+    running thread, so the inner strategy keeps running in the background
+    until it finishes on its own; prefer strategies that accept a budget
+    themselves (``AStarStrategy(time_budget_ms=...)``, ``MCTSStrategy``
+    iteration limits) when the planning problem is large.
 
     Args:
         time_budget_ms: Wall-clock budget in milliseconds.
-        inner:          Strategy to wrap.  Defaults to
-                        :class:`AStarStrategy` (which natively handles the
-                        budget more efficiently).
+        inner: Strategy to wrap.  ``None`` (default) or an
+            :class:`AStarStrategy` uses the native anytime A* path.
     """
 
     def __init__(
@@ -301,11 +303,26 @@ class AnytimePlanningStrategy:
         prior_plan: Plan | None = None,
         current_step: int = 0,
     ) -> Plan | None:
-        import concurrent.futures
+        if isinstance(self._inner, AStarStrategy):
+            # A* honours the deadline itself and returns the best complete
+            # plan found; no thread is needed and nothing is left running.
+            return astar_plan(
+                start,
+                goal,
+                actions,
+                blacklisted_actions=blacklisted_actions,
+                time_budget_ms=self._budget_ms,
+            )
 
-        # Forward repair kwargs only when meaningful so legacy inner
-        # strategies that predate the widened Protocol keep working.
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        import concurrent.futures
+        import warnings
+
+        pool = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="langgoap-anytime"
+        )
+        try:
+            # Forward repair kwargs only when meaningful so legacy inner
+            # strategies that predate the widened Protocol keep working.
             if prior_plan is not None:
                 future = pool.submit(
                     self._inner.plan,
@@ -327,8 +344,19 @@ class AnytimePlanningStrategy:
             try:
                 return future.result(timeout=self._budget_ms / 1000.0)
             except concurrent.futures.TimeoutError:
-                future.cancel()
+                warnings.warn(
+                    f"AnytimePlanningStrategy: inner strategy "
+                    f"{type(self._inner).__name__} exceeded the "
+                    f"{self._budget_ms:g} ms budget; returning None. A "
+                    "black-box strategy cannot be interrupted, so it keeps "
+                    "running in a background thread until it finishes.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
                 return None
+        finally:
+            # Never block the caller on the worker; drop queued work.
+            pool.shutdown(wait=False, cancel_futures=True)
 
 
 __all__ = [

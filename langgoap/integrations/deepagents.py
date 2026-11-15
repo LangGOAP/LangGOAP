@@ -67,11 +67,12 @@ def format_goap_result(result: dict[str, Any]) -> str:
         lines.append("Executed actions:")
         for entry in history:
             if isinstance(entry, dict):
-                name = entry.get("action", "?")
+                name = entry.get("action_name", "?")
                 ok = entry.get("success", "?")
-                lines.append(f"  - {name} (success={ok})")
             else:
-                lines.append(f"  - {entry}")
+                name = getattr(entry, "action_name", entry)
+                ok = getattr(entry, "success", "?")
+            lines.append(f"  - {name} (success={ok})")
 
     world_state = result.get("world_state")
     if world_state:

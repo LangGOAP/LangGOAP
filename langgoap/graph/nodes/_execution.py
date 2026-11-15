@@ -9,6 +9,7 @@ validation.  Kept module-private so the ``executor.py`` and
 from __future__ import annotations
 
 import random
+from collections.abc import Mapping
 from typing import Any
 
 from langgraph.types import interrupt
@@ -28,7 +29,7 @@ def _apply_result(
     *,
     transition_model: TransitionModel | None = None,
     rng: random.Random | None = None,
-) -> None:
+) -> bool:
     """Merge an action's return value into world_state in place.
 
     If the callable returned a dict, its contents overwrite matching keys \u2014
@@ -37,15 +38,21 @@ def _apply_result(
     provided) or ``action.get_effects`` (the pre-``TransitionModel``
     default).  Dynamic effects are resolved against ``world_state`` before
     merging in both paths.
+
+    Returns:
+        ``True`` when a user-returned dict was applied.  Only that case is
+        checked against the declared effects by :func:`_build_success`
+        (issue #31); effects the runtime applied itself are its own view.
     """
     if isinstance(raw_result, dict):
         world_state.update(raw_result)
-        return
+        return True
     if transition_model is not None:
         sample_rng = rng if rng is not None else random.Random()
         world_state.update(transition_model.sample(world_state, action, sample_rng))
-        return
+        return False
     world_state.update(action.get_effects(world_state))
+    return False
 
 
 def _build_success(
@@ -53,10 +60,21 @@ def _build_success(
     current_step: int,
     state_before: dict[str, Any],
     world_state: dict[str, Any],
+    *,
+    check_effects: bool = False,
 ) -> dict[str, Any]:
     """Build the success return dict for the executor.
 
-    When ``action.effect_validator`` rejects the post-state, the executor
+    Effects are validated when the action declares an ``effect_validator``
+    (its verdict is final) or, with ``check_effects`` set because ``execute``
+    returned a dict, by the default rule: the returned dict must set every
+    declared effect key.  A returned dict is authoritative for the world
+    state, so a declared effect it never sets is a no-op the planner would
+    re-plan into until ``max_replans``; it is an ``action_failed`` instead
+    (issue #31).  Opt out per action with
+    ``effect_validator=lambda pre, post: True``.
+
+    When validation rejects the post-state, the executor
     rolls the world state back to the snapshot taken before the action
     ran.  This is critical: a validator's purpose is to detect actions
     that did not actually accomplish what they claimed, and a rejection
@@ -68,10 +86,27 @@ def _build_success(
     ``ActionResult.state_after`` for diagnostics.
     """
     state_after = dict(world_state)
-    if action.effect_validator is not None and not action.validate_effects(
-        state_before, state_after
-    ):
-        logger.warning("Action %r effect validation failed", action.name)
+    rejected = False
+    error = "Effect validation failed"
+    if action.effect_validator is not None:
+        rejected = not action.validate_effects(state_before, state_after)
+    elif check_effects:
+        # Default rule for a returned dict: every declared effect *key* must
+        # be addressed.  Values may differ from the declaration (a declared
+        # ``{"computed": 0}`` is a planning placeholder for a runtime
+        # number); a value that drifts from the plan's expectation is the
+        # observer's deviation check to handle, a key that is never set is
+        # a no-op the planner would re-plan into forever (issue #31).
+        expected = action.get_effects(state_before)
+        missing = [k for k in expected if k not in state_after]
+        if missing:
+            rejected = True
+            error = (
+                "Effect validation failed: execute() returned a dict that does not "
+                f"set the declared effect key(s) {missing!r}"
+            )
+    if rejected:
+        logger.warning("Action %r %s", action.name, error)
         return {
             "status": "action_failed",
             "world_state": state_before,
@@ -81,7 +116,7 @@ def _build_success(
                     success=False,
                     state_before=state_before,
                     state_after=state_after,
-                    error="Effect validation failed",
+                    error=error,
                 )
             ],
         }
@@ -122,11 +157,27 @@ def _build_failure(
     }
 
 
+def _blacklisting_counts(
+    action: ActionSpec, failure_counts: Mapping[str, int] | None
+) -> dict[str, int]:
+    """Merge ``action`` at ``max_retries + 1`` into the existing counts.
+
+    A policy decision (guard block, human denial, invalid form) must
+    blacklist the action immediately, but it must not erase the retry
+    budgets other actions have already spent (issue #33).
+    """
+    merged = dict(failure_counts or {})
+    merged[action.name] = action.max_retries + 1
+    return merged
+
+
 def _build_guard_block(
     action: ActionSpec,
     guard_results: list[GuardResult],
     state_before: dict[str, Any],
     world_state: dict[str, Any],
+    *,
+    failure_counts: Mapping[str, int] | None = None,
 ) -> dict[str, Any]:
     """Build a failure result dict for a BLOCK-severity guard failure.
 
@@ -143,7 +194,7 @@ def _build_guard_block(
         state_before,
         world_state,
     )
-    result["action_failure_counts"] = {action.name: action.max_retries + 1}
+    result["action_failure_counts"] = _blacklisting_counts(action, failure_counts)
     return result
 
 
@@ -181,6 +232,8 @@ def _check_human_approval(
     action: ActionSpec,
     world_state: dict[str, Any],
     state_before: dict[str, Any],
+    *,
+    failure_counts: Mapping[str, int] | None = None,
 ) -> dict[str, Any] | None:
     """Gate execution behind a human-approval interrupt when required.
 
@@ -199,7 +252,9 @@ def _check_human_approval(
         return None
 
     if _is_form_model(requirement):
-        return _check_form_approval(action, world_state, state_before)
+        return _check_form_approval(
+            action, world_state, state_before, failure_counts=failure_counts
+        )
 
     resume_value = interrupt(
         {
@@ -227,7 +282,7 @@ def _check_human_approval(
         state_before,
         world_state,
     )
-    result["action_failure_counts"] = {action.name: action.max_retries + 1}
+    result["action_failure_counts"] = _blacklisting_counts(action, failure_counts)
     return result
 
 
@@ -235,6 +290,8 @@ def _check_form_approval(
     action: ActionSpec,
     world_state: dict[str, Any],
     state_before: dict[str, Any],
+    *,
+    failure_counts: Mapping[str, int] | None = None,
 ) -> dict[str, Any] | None:
     """Typed-form HITL gate.  See :func:`_check_human_approval`."""
     from pydantic import BaseModel, ValidationError
@@ -258,6 +315,7 @@ def _check_form_approval(
             "form payload missing or wrong shape",
             state_before,
             world_state,
+            failure_counts=failure_counts,
         )
     try:
         if isinstance(resume_value, BaseModel):
@@ -270,6 +328,7 @@ def _check_form_approval(
             f"form payload failed validation: {exc.errors()!r}",
             state_before,
             world_state,
+            failure_counts=failure_counts,
         )
 
     # Approved \u2014 merge the validated form (as JSON-friendly dict) into
@@ -287,6 +346,8 @@ def _build_form_invalid_failure(
     reason: str,
     state_before: dict[str, Any],
     world_state: dict[str, Any],
+    *,
+    failure_counts: Mapping[str, int] | None = None,
 ) -> dict[str, Any]:
     """Build a failure result for a rejected typed-form HITL submission."""
     result = _build_failure(
@@ -295,7 +356,7 @@ def _build_form_invalid_failure(
         state_before,
         world_state,
     )
-    result["action_failure_counts"] = {action.name: action.max_retries + 1}
+    result["action_failure_counts"] = _blacklisting_counts(action, failure_counts)
     return result
 
 

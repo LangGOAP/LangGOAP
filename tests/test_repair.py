@@ -537,3 +537,130 @@ class TestRepairStrategy:
         assert captured[0]["current_step"] == 0
         assert captured[1]["prior_plan"] is prior
         assert captured[1]["current_step"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Failed / single-use actions are never reused as the prefix (issue #14)
+# ---------------------------------------------------------------------------
+
+
+class TestRepairSkipsFailedAndSpentActions:
+    def _domain(self):
+        from tests.conftest import make_action
+
+        a = make_action("a", eff={"a": True})
+        b = make_action("b", pre={"a": True}, eff={"b": True})
+        b_alt = make_action("b_alt", pre={"a": True}, eff={"b": True}, cost=2.0)
+        c = make_action("c", pre={"b": True}, eff={"done": True})
+        return a, b, b_alt, c
+
+    def test_blacklisted_first_remaining_action_is_not_reused(self) -> None:
+        from langgoap.planner.repair import repair_plan
+
+        a, b, b_alt, c = self._domain()
+        original = Plan(actions=(a, b, c))
+        # ``a`` ran, ``b`` failed and was blacklisted; current_step still
+        # points at ``b``.
+        state = PlanningState.from_dict({"a": True})
+        result = repair_plan(
+            original,
+            state,
+            GoalSpec(conditions={"done": True}),
+            [a, b, b_alt, c],
+            current_step=1,
+            blacklisted_actions=["b"],
+        )
+        assert result.repaired_plan is not None
+        assert result.repaired_plan.action_names == ["b_alt", "c"]
+        assert result.repair_applied is False
+        assert result.valid_prefix_length == 0
+
+    def test_single_use_action_that_already_ran_is_not_reused(self) -> None:
+        from langgoap.planner.repair import repair_plan
+
+        once = ActionSpec(name="once", effects={"x": True}, can_rerun=False)
+        again = ActionSpec(
+            name="again", preconditions={"x": True}, effects={"done": True}
+        )
+        # Plan executed ``once`` (step 0) but the world drifted and lost ``x``;
+        # the stale plan still lists ``once`` again at the current step.
+        original = Plan(actions=(once, once, again))
+        state = PlanningState.from_dict({})
+        result = repair_plan(
+            original,
+            state,
+            GoalSpec(conditions={"done": True}),
+            [once, again],
+            current_step=1,
+        )
+        # The prefix walk stops at the spent action; the suffix A* must
+        # also plan without it, so no plan exists.
+        assert result.valid_prefix_length == 0
+
+    def test_strategy_returns_suffix_directly_for_astar_inner(self) -> None:
+        from langgoap.planner.repair import RepairStrategy
+        from langgoap.planner.strategy import AStarStrategy
+
+        calls = {"n": 0}
+
+        class _CountingAStar(AStarStrategy):
+            def plan(self, *args, **kwargs):  # type: ignore[override]
+                calls["n"] += 1
+                return super().plan(*args, **kwargs)
+
+        a, b, b_alt, c = self._domain()
+        strategy = RepairStrategy(inner=_CountingAStar())
+        prior = Plan(actions=(a, b, c))
+        result = strategy.plan(
+            PlanningState.from_dict({"a": True}),
+            GoalSpec(conditions={"done": True}),
+            [a, b, b_alt, c],
+            blacklisted_actions=["b"],
+            prior_plan=prior,
+            current_step=1,
+        )
+        assert result is not None
+        assert result.action_names == ["b_alt", "c"]
+        # The inner strategy was not invoked a second time for an identical search.
+        assert calls["n"] == 0
+
+    def test_graph_level_repair_reaches_the_alternative(self) -> None:
+        from langgoap import GoalPolicy, GoapGraph
+        from langgoap.planner.repair import RepairStrategy
+
+        calls = {"b": 0, "b_alt": 0}
+
+        def boom(ws):
+            calls["b"] += 1
+            raise RuntimeError("b down")
+
+        def alt(ws):
+            calls["b_alt"] += 1
+            return {"b": True}
+
+        actions = [
+            ActionSpec(name="a", effects={"a": True}, execute=lambda ws: {"a": True}),
+            ActionSpec(
+                name="b", preconditions={"a": True}, effects={"b": True}, execute=boom
+            ),
+            ActionSpec(
+                name="b_alt",
+                preconditions={"a": True},
+                effects={"b": True},
+                cost=2.0,
+                execute=alt,
+            ),
+            ActionSpec(
+                name="c",
+                preconditions={"b": True},
+                effects={"done": True},
+                execute=lambda ws: {"done": True},
+            ),
+        ]
+        result = GoapGraph(actions, strategy=RepairStrategy()).invoke(
+            goal=GoalSpec(conditions={"done": True}, policy=GoalPolicy(max_replans=5)),
+            world_state={},
+        )
+        assert result["status"] == "goal_achieved"
+        assert result["replan_count"] == 1
+        assert calls == {"b": 1, "b_alt": 1}

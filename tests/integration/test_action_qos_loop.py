@@ -195,7 +195,7 @@ class TestActionQosSync:
         # Successful executor result has no explicit status field — it's
         # the failure path that sets ``status="action_failed"``.
         assert result.get("status") != "action_failed"
-        assert result["execution_history"][0].success is True
+        assert result["execution_history"][0]["success"] is True
         # Exactly two retries fired — between attempts 1→2 and 2→3.
         assert len(rec.retries) == 2
         assert [r["attempt"] for r in rec.retries] == [1, 2]

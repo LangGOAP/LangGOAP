@@ -20,7 +20,7 @@ from langgraph.types import Command
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec, MultiGoal
 from langgoap.graph.nodes._helpers import _planning_keys, logger
-from langgoap.graph.state import ActionResult, GoapState
+from langgoap.graph.state import ActionResult, GoapState, rehydrate_state
 from langgoap.history import (
     ExecutionRecord,
     StoreExecutionHistory,
@@ -104,8 +104,11 @@ def _route_multi_goal(
     the remaining alternatives.
     """
     idx = state.get("current_subgoal_index", 0)
+    # A sequential run that skipped unreachable stages (``on_infeasible=
+    # "skip"``) did not achieve the composite goal; say so (issue #35).
+    final_status = "partial" if state.get("skipped_subgoals") else "goal_achieved"
     if idx >= len(raw_goal.goals):
-        return Command(goto=END, update={"status": "goal_achieved"})
+        return Command(goto=END, update={"status": final_status})
     current_sub = raw_goal.goals[idx]
     if not _is_goal_satisfied(current_sub, world_state):
         return None
@@ -122,7 +125,7 @@ def _route_multi_goal(
                 "action_failure_counts": {},
             },
         )
-    return Command(goto=END, update={"status": "goal_achieved"})
+    return Command(goto=END, update={"status": final_status})
 
 
 def _route_replan_limit(goal: GoalSpec, state: GoapState) -> Command[str] | None:
@@ -220,6 +223,7 @@ class GoapObserver:
         return None
 
     def __call__(self, state: GoapState) -> Command[str]:
+        state = rehydrate_state(state, self._actions)
         cmd = self._route(state)
         self._fire_sync_tracer(state, cmd)
         self._maybe_record_sync(state, cmd)
@@ -227,6 +231,7 @@ class GoapObserver:
 
     async def acall(self, state: GoapState) -> Command[str]:
         """Async variant \u2014 mirrors :meth:`__call__` but fires async hooks."""
+        state = rehydrate_state(state, self._actions)
         cmd = self._route(state)
         await self._fire_async_tracer(state, cmd)
         await self._maybe_record_async(state, cmd)

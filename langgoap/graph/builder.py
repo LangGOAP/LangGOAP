@@ -7,7 +7,7 @@ and observer nodes wired together for the GOAP execution loop.
 from __future__ import annotations
 
 import random
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Mapping, cast
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import RunnableConfig, RunnableLambda
@@ -20,12 +20,16 @@ from langgoap.actions import ActionSpec
 from langgoap.conditions import AsyncConditionResolver, ConditionResolver
 from langgoap.goals import GoalSpec, MultiGoal
 from langgoap.graph.nodes import GoapExecutor, GoapObserver, GoapPlanner
-from langgoap.graph.state import GoapState
+from langgoap.graph.state import (
+    GoapState,
+    GoapStateChannels,
+    goal_to_state,
+    rehydrate_state,
+)
 from langgoap.guards import ActionGuard, AsyncActionGuard
 from langgoap.history import StoreExecutionHistory
 from langgoap.planner.transitions import TransitionModel
 from langgoap.sensors import AsyncSensor, Sensor
-from langgoap.serde import install_langgoap_serde
 from langgoap.tracing import PlanningTracer
 
 if TYPE_CHECKING:
@@ -142,10 +146,12 @@ class GoapGraph:
 
         Args:
             checkpointer: Optional LangGraph checkpointer for persistence.
-                When provided, the checkpointer's serde is swapped for a
-                LangGOAP-aware subclass (see :mod:`langgoap.serde`) so that
-                frozen dataclasses using ``MappingProxyType`` fields
-                round-trip through msgpack correctly.
+                Any ``BaseCheckpointSaver`` works unchanged with its stock
+                serializer: :class:`~langgoap.graph.state.GoapState` is
+                JSON-native.  When a checkpointer is attached, build the
+                input with :meth:`initial_state` (or pass ``goal.to_dict()``)
+                because LangGraph serialises the raw input before the
+                state reducers run.
             store: Optional LangGraph store for shared state.
             interrupt_before: Optional list of node names to interrupt
                 before.  Forwarded to ``StateGraph.compile``.  Use
@@ -158,30 +164,7 @@ class GoapGraph:
         Returns:
             A compiled StateGraph ready for invocation.
         """
-        # Install LangGOAP's MappingProxyType-aware serde on the
-        # checkpointer so frozen dataclasses serialize cleanly.  Skipped
-        # silently when no checkpointer is provided — no-ops don't need
-        # a custom serde because state never hits disk.
-        # isinstance narrows Checkpointer (= BaseCheckpointSaver | None |
-        # Literal[False]) to BaseCheckpointSaver, satisfying install_langgoap_serde's
-        # parameter type without a cast or type: ignore.
-        if isinstance(checkpointer, BaseCheckpointSaver):
-            # Harvest user-defined Pydantic form classes referenced from
-            # ActionSpec.require_human_approval so the LangGOAP serde's
-            # allowlist permits them through msgpack round-trip.  Without
-            # this, the checkpointer would block deserialization and the
-            # form-binding gate would silently disappear after a resume.
-            extras: list[type] = []
-            for action in self.actions:
-                req = getattr(action, "require_human_approval", None)
-                if isinstance(req, type):
-                    extras.append(req)
-            install_langgoap_serde(
-                checkpointer,
-                extra_allowed_types=tuple(extras),
-            )
-
-        builder = StateGraph(GoapState)
+        builder = StateGraph(GoapStateChannels)
 
         # All three nodes are wrapped with RunnableLambda so LangGraph
         # dispatches to the async variant under ``ainvoke`` and the sync
@@ -240,6 +223,34 @@ class GoapGraph:
             compile_kwargs["interrupt_after"] = interrupt_after
         return builder.compile(**compile_kwargs)
 
+    def initial_state(
+        self,
+        goal: GoalSpec | MultiGoal | dict[str, Any],
+        world_state: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Build the JSON-native input for a compiled graph.
+
+        Use this (rather than ``{"goal": GoalSpec(...)}``) whenever the
+        compiled graph has a checkpointer attached: LangGraph serialises the
+        raw input before the ``goal`` reducer can convert the object.
+
+        Args:
+            goal: A :class:`~langgoap.goals.GoalSpec`,
+                :class:`~langgoap.goals.MultiGoal`, or an already
+                serialised goal dict.
+            world_state: Initial world state (defaults to an empty dict).
+        """
+        return {"goal": goal_to_state(goal), "world_state": dict(world_state or {})}
+
+    def rehydrate(self, state: Mapping[str, Any]) -> GoapState:
+        """Return *state* with typed ``goal``, ``plan`` and ``execution_history``.
+
+        Plan actions are rebound by name to this graph's action list so
+        their callables are restored.  Accepts the dict returned by
+        ``compiled.invoke`` or ``compiled.get_state(config).values``.
+        """
+        return rehydrate_state(state, self.actions)
+
     def invoke(
         self,
         goal: GoalSpec | MultiGoal,
@@ -261,16 +272,12 @@ class GoapGraph:
 
         Returns:
             The final :class:`~langgoap.graph.state.GoapState` after the
-            GOAP loop completes.
+            GOAP loop completes, rehydrated so ``goal``, ``plan`` and
+            ``execution_history`` are typed objects (see :meth:`rehydrate`).
         """
         compiled = self.compile()
-        input_state: GoapState = {
-            "goal": goal,
-            "world_state": world_state or {},
-        }
-        # The compiled graph's invoke() is typed as returning dict[str, Any];
-        # cast to GoapState because we own the graph's output schema entirely.
-        return cast(GoapState, compiled.invoke(input_state, config=config))
+        result = compiled.invoke(self.initial_state(goal, world_state), config=config)
+        return self.rehydrate(result)
 
     async def ainvoke(
         self,
@@ -291,14 +298,14 @@ class GoapGraph:
 
         Returns:
             The final :class:`~langgoap.graph.state.GoapState` after the
-            GOAP loop completes.
+            GOAP loop completes, rehydrated so ``goal``, ``plan`` and
+            ``execution_history`` are typed objects (see :meth:`rehydrate`).
         """
         compiled = self.compile()
-        input_state: GoapState = {
-            "goal": goal,
-            "world_state": world_state or {},
-        }
-        return cast(GoapState, await compiled.ainvoke(input_state, config=config))
+        result = await compiled.ainvoke(
+            self.initial_state(goal, world_state), config=config
+        )
+        return self.rehydrate(result)
 
     def invoke_nl(
         self,

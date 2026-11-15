@@ -318,3 +318,109 @@ class TestAdvanceBeforePlanIsNoOp:
         some_state = PlanningState.from_dict({"x": 1})
         strategy.advance(_counter_action(), some_state)
         assert strategy._carryover_root is None
+
+
+# --- Reuse respects a changed blacklist and is per-thread (issue #28) ---
+
+
+def _branching_actions() -> list[ActionSpec]:
+    """``a`` opens the way; ``c`` (cheap) and ``b`` (dear) both finish."""
+    return [
+        ActionSpec(name="a", effects={"mid": True}, cost=1.0),
+        ActionSpec(
+            name="c", preconditions={"mid": True}, effects={"done": True}, cost=1.0
+        ),
+        ActionSpec(
+            name="b", preconditions={"mid": True}, effects={"done": True}, cost=3.0
+        ),
+    ]
+
+
+class TestReuseHonoursBlacklist:
+    def test_blacklisted_action_is_pruned_from_the_carried_over_tree(self) -> None:
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+        )
+
+        goal = GoalSpec(conditions={"done": True})
+        start = PlanningState.from_dict({})
+        strategy = MCTSStrategy(
+            exploration=MCTSExploration(iterations=200, rollout_depth=4, seed=11),
+            reuse=MCTSReuseConfig(reuse_tree=True, tree_reuse_decay=1.0),
+        )
+        actions = _branching_actions()
+        first = strategy.plan(start, goal, actions)
+        assert first is not None and first.action_names[0] == "a"
+        observed = PlanningState.from_dict({"mid": True})
+        strategy.advance(actions[0], observed)
+
+        # ``c`` failed at run time and is now blacklisted; the reused tree
+        # must not hand it back.
+        second = strategy.plan(observed, goal, actions, blacklisted_actions=["c"])
+        assert second is not None
+        assert "c" not in second.action_names
+        assert second.action_names == ["b"]
+
+    def test_carryover_is_keyed_on_blacklist_as_well_as_state(self) -> None:
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+        )
+
+        goal = GoalSpec(conditions={"done": True})
+        start = PlanningState.from_dict({})
+        strategy = MCTSStrategy(
+            exploration=MCTSExploration(iterations=64, rollout_depth=4, seed=11),
+            reuse=MCTSReuseConfig(reuse_tree=True, tree_reuse_decay=1.0),
+        )
+        actions = _branching_actions()
+        strategy.plan(start, goal, actions)
+        observed = PlanningState.from_dict({"mid": True})
+        strategy.advance(actions[0], observed)
+        root = strategy._last_root
+        strategy.plan(observed, goal, actions, blacklisted_actions=["c"])
+        reused = strategy._last_root
+        assert all(
+            child.action is None or child.action.name != "c"
+            for child in reused.children
+        )
+        assert all(chance.action.name != "c" for chance in reused.chance_children)
+        assert all(a.name != "c" for a in reused.untried_actions)
+        del root
+
+
+class TestReuseStateIsPerThread:
+    def test_other_threads_do_not_see_this_threads_tree(self) -> None:
+        import threading
+
+        from langgoap.planner.mcts import (
+            MCTSExploration,
+            MCTSReuseConfig,
+            MCTSStrategy,
+        )
+
+        goal = GoalSpec(conditions={"done": True})
+        strategy = MCTSStrategy(
+            exploration=MCTSExploration(iterations=32, rollout_depth=4, seed=1),
+            reuse=MCTSReuseConfig(reuse_tree=True, tree_reuse_decay=1.0),
+        )
+        actions = _branching_actions()
+        results: dict[str, Any] = {}
+
+        def worker() -> None:
+            plan_obj = strategy.plan(PlanningState.from_dict({}), goal, actions)
+            strategy.advance(actions[0], PlanningState.from_dict({"mid": True}))
+            results["plan"] = plan_obj
+            results["carryover"] = strategy._carryover_root
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join()
+        assert results["plan"] is not None
+        assert results["carryover"] is not None, "the worker thread kept its carryover"
+        # The main thread never planned: it must not inherit the worker's tree.
+        assert strategy._carryover_root is None
+        assert strategy._last_root is None

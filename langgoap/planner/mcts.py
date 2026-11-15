@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import math
 import random
+import threading
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -261,7 +262,7 @@ class RandomRollout:
             if not applicable:
                 break
             chosen = self.rng.choice(applicable)
-            cursor = cursor.apply(chosen.get_effects(cursor.to_dict()))
+            cursor = cursor.apply(chosen.get_effects(cursor.as_context()))
             if cursor.satisfies(goal.conditions):
                 return 1.0
         return _shape_reward(cursor, goal, heuristic=self.scalar_heuristic)
@@ -299,11 +300,11 @@ class HeuristicRollout:
                 break
 
             def _score(a: ActionSpec) -> tuple[int, int]:
-                next_state = cursor.apply(a.get_effects(cursor.to_dict()))
+                next_state = cursor.apply(a.get_effects(cursor.as_context()))
                 return (_heuristic(next_state, goal), -len(a.preconditions))
 
             chosen = min(applicable, key=_score)
-            cursor = cursor.apply(chosen.get_effects(cursor.to_dict()))
+            cursor = cursor.apply(chosen.get_effects(cursor.as_context()))
         return _shape_reward(cursor, goal, heuristic=self.scalar_heuristic)
 
 
@@ -347,12 +348,12 @@ class StochasticRollout:
                 # Score successors by *expected* outcome so the rollout's
                 # choice rule is noise-free; only the realised transition
                 # is sampled.
-                expected_effects = self.model.expected(cursor.to_dict(), a)
+                expected_effects = self.model.expected(cursor.as_context(), a)
                 next_state = cursor.apply(dict(expected_effects))
                 return (_heuristic(next_state, goal), -len(a.preconditions))
 
             chosen = min(applicable, key=_score)
-            sampled_effects = self.model.sample(cursor.to_dict(), chosen, self.rng)
+            sampled_effects = self.model.sample(cursor.as_context(), chosen, self.rng)
             cursor = cursor.apply(dict(sampled_effects))
         return _shape_reward(cursor, goal, heuristic=self.scalar_heuristic)
 
@@ -477,16 +478,38 @@ class MCTSStrategy:
     # default rollout policy threads it through so UCB1 statistics
     # gain a continuous gradient on sparse-goal problems.
     scalar_heuristic: ScalarHeuristic | None = None
-    # Post-search handle on the root of the last tree expanded by
-    # :meth:`plan`.  Exposed so tests and observability hooks can
-    # inspect chance-layer structure; ``None`` until ``plan`` has been
-    # called with a non-trivial start state.
-    _last_root: "MCTSNode | None" = None
-    # Carryover root promoted by :meth:`advance` after the previous
-    # plan's first action was executed; consumed by the next
-    # :meth:`plan` call when ``reuse_tree`` is on and its state matches
-    # the supplied ``start``.
-    _carryover_root: "MCTSNode | None" = None
+    # Search handles live in thread-local storage so one strategy instance
+    # shared by concurrent graphs (threads) keeps one tree per thread and
+    # callers never see each other's roots (issue #28).  Tree reuse is a
+    # per-episode feature: ``plan`` -> execute -> ``advance`` -> ``plan``
+    # must happen on the same thread.
+    _tls: Any = field(
+        default_factory=threading.local, init=False, repr=False, compare=False
+    )
+
+    @property
+    def _last_root(self) -> "MCTSNode | None":
+        """Root of the last tree expanded by :meth:`plan` on this thread.
+
+        Exposed so tests and observability hooks can inspect chance-layer
+        structure; ``None`` until ``plan`` has been called with a
+        non-trivial start state.
+        """
+        return getattr(self._tls, "last_root", None)
+
+    @_last_root.setter
+    def _last_root(self, node: "MCTSNode | None") -> None:
+        self._tls.last_root = node
+
+    @property
+    def _carryover_root(self) -> "MCTSNode | None":
+        """Root promoted by :meth:`advance`, consumed by the next :meth:`plan`
+        on this thread when ``reuse_tree`` is on and its state matches."""
+        return getattr(self._tls, "carryover_root", None)
+
+    @_carryover_root.setter
+    def _carryover_root(self, node: "MCTSNode | None") -> None:
+        self._tls.carryover_root = node
 
     def plan(
         self,
@@ -525,20 +548,27 @@ class MCTSStrategy:
                 score=SimpleScore(scalar=0.0),
             )
 
-        filtered_actions = [
-            a
-            for a in actions
-            if not blacklisted_actions or a.name not in blacklisted_actions
-        ]
+        blacklist = set(blacklisted_actions or ())
+        filtered_actions = [a for a in actions if a.name not in blacklist]
         rng = random.Random(self.exploration.seed)
         policy: RolloutPolicy = self.rollout_policy or self._default_rollout(rng)
 
-        if (
-            self.reuse.reuse_tree
-            and self._carryover_root is not None
-            and self._carryover_root.state == start
-        ):
-            root = self._carryover_root
+        carryover = self._carryover_root
+        if self.reuse.reuse_tree and carryover is not None and carryover.state == start:
+            root = carryover
+            # The carried-over tree was grown under the previous call's
+            # action set: drop every branch through a now-blacklisted
+            # action and recompute the frontier against the current set
+            # (issue #28).
+            if blacklist:
+                _prune_blacklisted(root, blacklist)
+            expanded = {c.action.name for c in root.children if c.action is not None}
+            expanded.update(cn.action.name for cn in root.chance_children)
+            root.untried_actions = [
+                a
+                for a in _applicable_actions(start, filtered_actions)
+                if a.name not in expanded
+            ]
         else:
             root = MCTSNode(state=start)
             root.untried_actions = _applicable_actions(start, filtered_actions)
@@ -854,7 +884,7 @@ def _path_cost(node: MCTSNode) -> float:
             pre = cur.parent
             while pre is not None and not isinstance(pre, MCTSNode):
                 pre = pre.parent
-            world = pre.state.to_dict() if pre is not None else {}
+            world = pre.state.as_context() if pre is not None else {}
             total += float(cur.action.get_cost(world))
         cur = cur.parent
     return total
@@ -909,7 +939,7 @@ def _expand(
     # Pop a random untried action for diversity under the fixed seed.
     idx = rng.randrange(len(node.untried_actions))
     action = node.untried_actions.pop(idx)
-    expected_effects = model.expected(node.state.to_dict(), action)
+    expected_effects = model.expected(node.state.as_context(), action)
     next_state = node.state.apply(dict(expected_effects))
     child = MCTSNode(state=next_state, parent=node, action=action)
     child.untried_actions = _applicable_actions(next_state, actions)
@@ -917,6 +947,27 @@ def _expand(
         child.is_terminal = True
     node.children.append(child)
     return child
+
+
+def _prune_blacklisted(node: MCTSNode, names: set[str]) -> None:
+    """Remove every subtree reached through an action in *names*.
+
+    Ancestors keep the visit counts those subtrees contributed; the
+    statistics are already decayed by tree reuse and are re-estimated by
+    the next search, so the stale evidence is harmless.
+    """
+    node.children = [
+        c for c in node.children if c.action is None or c.action.name not in names
+    ]
+    node.chance_children = [
+        cn for cn in node.chance_children if cn.action.name not in names
+    ]
+    node.untried_actions = [a for a in node.untried_actions if a.name not in names]
+    for child in node.children:
+        _prune_blacklisted(child, names)
+    for chance in node.chance_children:
+        for grandchild in chance.children_by_key.values():
+            _prune_blacklisted(grandchild, names)
 
 
 def _state_key(state: PlanningState) -> int:
@@ -975,7 +1026,7 @@ def _select_stochastic(
         if not cursor.chance_children:
             return cursor
         chance = max(cursor.chance_children, key=lambda cn: ucb1(cn, c=c))
-        sampled_effects = model.sample(cursor.state.to_dict(), chance.action, rng)
+        sampled_effects = model.sample(cursor.state.as_context(), chance.action, rng)
         next_state = cursor.state.apply(dict(sampled_effects))
         key = _state_key(next_state)
         existing = chance.children_by_key.get(key)
@@ -1019,7 +1070,7 @@ def _expand_stochastic(
     action = node.untried_actions.pop(idx)
     chance = ChanceNode(action=action, parent=node)
     node.chance_children.append(chance)
-    sampled_effects = model.sample(node.state.to_dict(), action, rng)
+    sampled_effects = model.sample(node.state.as_context(), action, rng)
     next_state = node.state.apply(dict(sampled_effects))
     child = MCTSNode(state=next_state, parent=chance, action=action)
     child.untried_actions = _applicable_actions(next_state, actions)
@@ -1060,24 +1111,28 @@ def _extract_plan(
     # Chance-node ancestors are skipped \u2014 they have no ``state`` of
     # their own, only an action and aggregate statistics.
     rev_actions: list[ActionSpec] = []
-    rev_states: list[PlanningState] = []
     cursor: "MCTSNode | ChanceNode | None" = best_leaf
     while cursor is not None and cursor.parent is not None:
         if isinstance(cursor, MCTSNode):
             assert cursor.action is not None  # non-root decision nodes carry an action
             rev_actions.append(cursor.action)
-            rev_states.append(cursor.state)
         cursor = cursor.parent
     rev_actions.reverse()
-    rev_states.reverse()
+    # The tree's decision nodes hold *sampled* successors under a
+    # stochastic model.  A plan's expected states must be the
+    # deterministic ``model.expected`` replay, otherwise the observer
+    # compares the live world against planner noise (issue #27).
     total_cost = 0.0
     sim = start
+    expected_states: list[PlanningState] = []
     for a in rev_actions:
-        total_cost += a.get_cost(sim.to_dict())
-        sim = sim.apply(dict(model.expected(sim.to_dict(), a)))
+        world = sim.as_context()
+        total_cost += a.get_cost(world)
+        sim = sim.apply(dict(model.expected(world, a)))
+        expected_states.append(sim)
     return Plan(
         actions=tuple(rev_actions),
-        expected_states=tuple(rev_states),
+        expected_states=tuple(expected_states),
         total_cost=total_cost,
         metadata=PlanMetadata(),
         score=SimpleScore(scalar=total_cost),
