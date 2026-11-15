@@ -155,6 +155,30 @@ default behaviours change; each has an explicit opt-in that restores the
 
 ### Fixed
 
+- **A typed form that fails validation is asked again, not blacklisted.**
+  A resume payload rejected by the Pydantic model (or one of the wrong
+  shape, such as `True`) was recorded as a `human_form_invalid` failure
+  with the failure count pre-set past `max_retries`, so a typo in a form
+  blacklisted the action and, with no alternative, ended the run in
+  `no_plan`. It is an input error, not a decision: the executor now raises
+  the interrupt again with `attempt`, `validation_errors` (`loc` / `msg` /
+  `type` per error) and `rejected_payload` in the payload, and the
+  corrected submission goes through. A form can now be declined
+  explicitly: `False`, or `{"approved": False, "reason": ...}` when the
+  model has no `approved` field, is recorded and blacklisted exactly like
+  a denied boolean gate (`human_approval_denied`), which the form gate
+  previously had no way to express.
+- **Every bookkeeping key is present in every result.** LangGraph returns
+  only the channels a run wrote to, so `result["blacklisted_actions"]`
+  and `result["action_failure_counts"]` raised `KeyError` precisely when
+  nothing had gone wrong (and `replan_reason`, `skipped_subgoals`,
+  `reflection_context`, `current_subgoal_index`, `no_plan_explanation`
+  likewise). The defaults now live in one table,
+  `langgoap.graph.state.STATE_DEFAULTS`: `GoapGraph.initial_state` seeds
+  them, the planner fills any that an input built by hand
+  (`{"goal": ..., "world_state": ...}`) left out, and `rehydrate_state`
+  fills them on the way out, so typed access is total in sync and async
+  runs and after a resume in a new process.
 - A typed-form answer survives the action it approved failing. The
   pre-execution snapshot an executor keeps is taken after the
   human-in-the-loop gate, so a failure's `world_state` (and the parallel
