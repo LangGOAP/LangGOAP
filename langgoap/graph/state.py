@@ -45,6 +45,7 @@ warning.
 
 from __future__ import annotations
 
+import copy
 import logging
 import threading
 import uuid
@@ -254,10 +255,40 @@ def history_from_state(entries: Iterable[Any]) -> list[ActionResult]:
     return [_as_action_result(e) for e in entries]
 
 
+#: Default value of every bookkeeping channel.  LangGraph returns only the
+#: channels a run wrote to, so without these a happy-path result had no
+#: ``blacklisted_actions`` key precisely because nothing had gone wrong.
+#: :meth:`GoapGraph.initial_state <langgoap.graph.builder.GoapGraph.initial_state>`
+#: seeds them, the planner fills any that are missing on its first pass (for
+#: inputs built by hand), and :func:`rehydrate_state` fills them on the way
+#: out.  ``goal``, ``world_state``, ``plan``, ``status`` and
+#: ``wall_clock_started_at`` are owned by the caller or the planner and have
+#: no default.  Read-only: use :func:`state_defaults` for fresh copies.
+STATE_DEFAULTS: Mapping[str, Any] = {
+    "current_step": 0,
+    "execution_history": [],
+    "replan_count": 0,
+    "replan_reason": None,
+    "blacklisted_actions": [],
+    "action_failure_counts": {},
+    "current_subgoal_index": 0,
+    "skipped_subgoals": [],
+    "no_plan_explanation": None,
+    "reflection_context": [],
+}
+
+
+def state_defaults() -> dict[str, Any]:
+    """Return fresh copies of :data:`STATE_DEFAULTS` (no shared mutables)."""
+    return {key: copy.deepcopy(value) for key, value in STATE_DEFAULTS.items()}
+
+
 def rehydrate_state(state: Mapping[str, Any], actions: ActionsLike = None) -> GoapState:
     """Return a copy of *state* with typed ``goal``, ``plan`` and history.
 
-    Keys that are absent stay absent; keys already holding typed objects
+    Bookkeeping keys that are absent are filled from
+    :data:`STATE_DEFAULTS`; ``goal``, ``world_state``, ``plan`` and
+    ``status`` stay absent when absent.  Keys already holding typed objects
     pass through.  *actions* is the live action list (or ``name -> spec``
     mapping) used to rebind plan actions.
     """
@@ -268,6 +299,8 @@ def rehydrate_state(state: Mapping[str, Any], actions: ActionsLike = None) -> Go
         out["plan"] = plan_from_state(out["plan"], actions)
     if "execution_history" in out:
         out["execution_history"] = history_from_state(out["execution_history"] or [])
+    for key, default in state_defaults().items():
+        out.setdefault(key, default)
     return cast(GoapState, out)
 
 
@@ -444,5 +477,7 @@ __all__ = [
     "plan_to_state",
     "rehydrate_state",
     "serialize_updates",
+    "STATE_DEFAULTS",
+    "state_defaults",
     "successful_action_names",
 ]

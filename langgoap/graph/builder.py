@@ -31,6 +31,7 @@ from langgoap.graph.state import (
     GoapStateChannels,
     goal_to_state,
     rehydrate_state,
+    state_defaults,
 )
 from langgoap.guards import ActionGuard, AsyncActionGuard
 from langgoap.history import StoreExecutionHistory
@@ -267,13 +268,23 @@ class GoapGraph:
         compiled graph has a checkpointer attached: LangGraph serialises the
         raw input before the ``goal`` reducer can convert the object.
 
+        Every bookkeeping channel (``blacklisted_actions``,
+        ``action_failure_counts``, ``replan_count``, ...) is seeded from
+        :data:`~langgoap.graph.state.STATE_DEFAULTS`, so the result of the
+        run carries every key of the schema even when nothing was ever
+        written to it.
+
         Args:
             goal: A :class:`~langgoap.goals.GoalSpec`,
                 :class:`~langgoap.goals.MultiGoal`, or an already
                 serialised goal dict.
             world_state: Initial world state (defaults to an empty dict).
         """
-        return {"goal": goal_to_state(goal), "world_state": dict(world_state or {})}
+        return {
+            "goal": goal_to_state(goal),
+            "world_state": dict(world_state or {}),
+            **state_defaults(),
+        }
 
     def rehydrate(self, state: Mapping[str, Any]) -> GoapState:
         """Return *state* with typed ``goal``, ``plan`` and ``execution_history``.
