@@ -23,13 +23,14 @@ jobs:
       - name: Get package version
         id: get-version
         run: |
-          VERSION=$(python -c "
-          try:
-              import tomllib
-          except ModuleNotFoundError:
-              import tomli as tomllib
-          print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])
-          ")
+          VERSION=$(python - <<'PY'
+          import pathlib
+          import re
+
+          text = pathlib.Path("langgoap/_version.py").read_text(encoding="utf-8")
+          print(re.search(r"__version__\s*=\s*['\"]([^'\"]+)['\"]", text).group(1))
+          PY
+          )
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Package version: $VERSION"
 
@@ -47,7 +48,7 @@ jobs:
 
           if [ "$VERSION" != "$RELEASE_VERSION" ]; then
             echo "❌ Error: Package version ($VERSION) does not match release version ($RELEASE_VERSION)"
-            echo "Please update the version in pyproject.toml to match the release tag"
+            echo "Please update __version__ in langgoap/_version.py to match the release tag"
             exit 1
           fi
 
