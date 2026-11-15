@@ -10,7 +10,7 @@ working unchanged.  The implementations live in:
 * :mod:`langgoap.graph.nodes._helpers` \u2014 cross-module helpers
   (``_planning_keys``, ``_is_better_plan``).
 * :mod:`langgoap.graph.nodes._execution` \u2014 executor result
-  builders (``_apply_result``, ``_build_*``, ``_is_approved``,
+  builders (``_apply_result``, ``_build_*``, ``_approval_decision``,
   ``_check_human_approval``, ``_prepare_execution``).
 * :mod:`langgoap.graph.nodes.planner` \u2014 :class:`GoapPlanner`.
 * :mod:`langgoap.graph.nodes.executor` \u2014 :class:`GoapExecutor` and
@@ -27,11 +27,11 @@ from __future__ import annotations
 # (e.g. ``test_graph_nodes.py``) import them directly.
 from langgoap.graph.nodes._execution import (
     _apply_result,
+    _approval_decision,
     _build_failure,
     _build_guard_block,
     _build_success,
     _check_human_approval,
-    _is_approved,
     _prepare_execution,
 )
 from langgoap.graph.nodes._helpers import (
@@ -70,7 +70,7 @@ __all__ = [
     "_build_success",
     "_build_failure",
     "_build_guard_block",
-    "_is_approved",
+    "_approval_decision",
     "_check_human_approval",
     "_prepare_execution",
     "_get_last_failed_action",

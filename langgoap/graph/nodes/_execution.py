@@ -288,25 +288,36 @@ def _build_guard_block(
     return result
 
 
-def _is_approved(resume_value: Any) -> bool:
-    """Interpret a ``Command(resume=...)`` value as an approval decision.
+def _approval_decision(resume_value: Any) -> str:
+    """Interpret a ``Command(resume=...)`` value for a boolean gate.
 
-    The resume value sent by the human client is interpreted generously:
+    A boolean gate asks a yes/no question, so only an explicit boolean is a
+    decision:
 
-    - ``None`` \u2192 approved (implicit: resume with no payload = continue)
-    - ``True`` \u2192 approved
-    - ``False`` \u2192 denied
-    - ``{"approved": True}`` \u2192 approved
-    - ``{"approved": False}`` \u2192 denied
-    - Any other truthy value \u2192 approved
+    * ``True`` or ``{"approved": True, ...}`` -> ``"approved"``
+    * ``False`` or ``{"approved": False, "reason": ...}`` -> ``"denied"``
+    * anything else -> ``"invalid"``: ``None``, a string (``"no"`` used to
+      count as approval), a number, a list, a dict without ``approved`` or
+      with a non-boolean ``approved``.  The caller asks again.
     """
-    if resume_value is None or resume_value is True:
-        return True
+    if resume_value is True:
+        return "approved"
     if resume_value is False:
-        return False
+        return "denied"
     if isinstance(resume_value, dict):
-        return bool(resume_value.get("approved", True))
-    return bool(resume_value)
+        approved = resume_value.get("approved")
+        if approved is True:
+            return "approved"
+        if approved is False:
+            return "denied"
+    return "invalid"
+
+
+_APPROVAL_SHAPE_ERROR = {
+    "loc": [],
+    "msg": "resume with True or False, or {'approved': bool, 'reason': str}",
+    "type": "wrong_shape",
+}
 
 
 def _is_form_model(value: Any) -> bool:
@@ -346,20 +357,39 @@ def _check_human_approval(
             action, world_state, state_before, failure_counts=failure_counts
         )
 
-    resume_value = interrupt(
-        {
-            "type": "goap_action_approval",
-            "action": action.name,
-            "preconditions": dict(action.preconditions),
-            "effects": dict(action.get_effects(world_state)),
-            "world_state": dict(world_state),
+    payload: dict[str, Any] = {
+        "type": "goap_action_approval",
+        "action": action.name,
+        "preconditions": dict(action.preconditions),
+        "effects": dict(action.get_effects(world_state)),
+        "world_state": dict(world_state),
+        "attempt": 1,
+    }
+    while True:
+        resume_value = interrupt(payload)
+        decision = _approval_decision(resume_value)
+        if decision != "invalid":
+            break
+        # Not an answer to a yes/no question: ask again and say why, rather
+        # than guess.  Each round needs a human resume, so nothing loops on
+        # its own.
+        logger.info(
+            "Action %r: approval answer %d not understood (%r); asking again",
+            action.name,
+            payload["attempt"],
+            resume_value,
+        )
+        payload = {
+            **payload,
+            "attempt": payload["attempt"] + 1,
+            "validation_errors": [dict(_APPROVAL_SHAPE_ERROR)],
+            "rejected_payload": resume_value,
         }
-    )
 
-    if _is_approved(resume_value):
+    if decision == "approved":
         return None
 
-    # Denied \u2014 build a failure result.  Pre-set the failure count to
+    # Denied: build a failure result.  Pre-set the failure count to
     # max_retries + 1 so the observer's blacklist threshold trips on the
     # first denial regardless of max_retries (a human denial is a
     # deliberate decision, not a transient flake).
@@ -425,6 +455,7 @@ def _check_form_approval(
         "form_schema": model_cls.model_json_schema(),
         "model_name": model_cls.__name__,
         "preconditions": dict(action.preconditions),
+        "effects": dict(action.get_effects(world_state)),
         "world_state": dict(world_state),
         "attempt": 1,
     }
@@ -546,7 +577,7 @@ __all__ = [
     "_build_success",
     "_build_failure",
     "_build_guard_block",
-    "_is_approved",
+    "_approval_decision",
     "_check_human_approval",
     "_prepare_execution",
 ]
