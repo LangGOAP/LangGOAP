@@ -266,4 +266,30 @@ class TestSpentActionsAreExplainedAsSpent:
 
         explanation = updates["no_plan_explanation"]
         assert "spent_actions" not in explanation
+        assert "denied_actions" not in explanation
         assert "max_retries" in explanation["suggestion"]
+
+    def test_denied_action_is_explained_as_a_decision(self) -> None:
+        """An operator's denial is not a transient failure: retries and QoS
+        are the wrong advice, and the explanation must name the denial."""
+        buy = make_action("buy", eff={"bought": True})
+        denial = ActionResult(
+            action_name="buy",
+            success=False,
+            error="human_approval_denied: budget frozen",
+            state_before={},
+            state_after={},
+        )
+        updates = GoapPlanner([buy])(
+            self._state(action_failure_counts={"buy": 1}, execution_history=[denial])
+        )
+
+        explanation = updates["no_plan_explanation"]
+        assert explanation["denied_actions"] == ["buy"]
+        assert "spent_actions" not in explanation
+        suggestion = explanation["suggestion"]
+        assert "denied" in suggestion and "buy" in suggestion
+        assert "budget frozen" in suggestion
+        assert "stuck handler" in suggestion
+        assert "max_retries" not in suggestion
+        assert "transient" not in suggestion

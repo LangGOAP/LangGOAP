@@ -186,6 +186,13 @@ useful.
 
 ### Fixed
 
+- **An operator's denial is explained as a denial.** When every remaining
+  path to the goal needs an action a human declined, the no-plan
+  explanation advised raising `max_retries` or attaching an `ActionQos`
+  "for transient failures". It now lists the action under
+  `denied_actions` with the operator's reason and points at the things
+  that apply: an alternative action, a stuck handler that relaxes the
+  goal, or running again once the decision changes.
 - The `no_plan` explanation distinguishes actions blacklisted after
   failures from `can_rerun=False` actions that already ran: the latter are
   listed under `spent_actions` with advice to add an alternative or allow a
