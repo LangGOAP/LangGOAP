@@ -15,7 +15,7 @@ jobs:
       version: ${{ steps.get-version.outputs.version }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install tomli for version parsing
         run: pip install tomli
@@ -75,11 +75,11 @@ jobs:
         os: [ubuntu-latest, macos-latest]
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # No caching - we want to catch any dependency issues
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -165,10 +165,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -253,10 +253,10 @@ jobs:
     environment: release
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Download build artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: test-dist
           path: dist/
@@ -283,16 +283,16 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Download build artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: test-dist
           path: dist/
 
       - name: Update release with PyPI links
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           VERSION: ${{ needs.verify-version.outputs.version }}
         with:

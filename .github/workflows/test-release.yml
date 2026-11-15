@@ -19,10 +19,10 @@ jobs:
       version: ${{ steps.check-version.outputs.version }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -70,9 +70,9 @@ jobs:
     environment: release
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: test-dist
           path: dist/
@@ -99,11 +99,11 @@ jobs:
         python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # No caching here — we want maximal sensitivity to dependency-spec gaps.
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
 
