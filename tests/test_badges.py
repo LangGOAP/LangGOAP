@@ -104,7 +104,7 @@ class TestMfcqiBadgeContract:
             '"""Tiny package."""\n\n\ndef add(a: int, b: int) -> int:\n    """Add."""\n    return a + b\n'
         )
         out = tmp_path / "badge.json"
-        subprocess.run(
+        proc = subprocess.run(
             [
                 sys.executable,
                 "-m",
@@ -116,10 +116,13 @@ class TestMfcqiBadgeContract:
                 "-o",
                 str(out),
             ],
-            check=True,
             capture_output=True,
+            text=True,
             timeout=300,
         )
+        assert (
+            proc.returncode == 0
+        ), f"mfcqi badge failed:\n{proc.stdout}\n{proc.stderr}"
         badge = json.loads(out.read_text())
         assert badge["schemaVersion"] == 1
         assert re.fullmatch(r"\d\.\d\d( \(\w+\))?", badge["message"]), badge["message"]
