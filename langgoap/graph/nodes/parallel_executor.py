@@ -27,7 +27,12 @@ from langgoap.graph.nodes.executor import (
     _execute_with_retries_sync,
     async_execute_action,
 )
-from langgoap.graph.state import ActionResult, GoapState
+from langgoap.graph.state import (
+    ActionResult,
+    GoapState,
+    rehydrate_state,
+    serialize_updates,
+)
 from langgoap.guards import (
     ActionGuard,
     AsyncActionGuard,
@@ -71,6 +76,12 @@ def _find_parallel_group(
 
         deps = build_dependency_graph(plan_actions)
 
+    # A human-approval gate pauses the graph with ``interrupt()``.  It must
+    # never share a wave: siblings launched alongside it would run their
+    # side effects before the interrupt and run them again after resume.
+    if plan_actions[current_step].require_human_approval:
+        return [current_step]
+
     group: list[int] = [current_step]
     group_set: set[int] = {current_step}
 
@@ -78,10 +89,41 @@ def _find_parallel_group(
         # Stop if j depends on any action already in the group.
         if any(d in group_set for d in deps[j]):
             break
+        if plan_actions[j].require_human_approval:
+            break
         group.append(j)
         group_set.add(j)
 
     return group
+
+
+def _abort_wave(
+    failure: dict[str, Any],
+    *,
+    world_state: dict[str, Any],
+    completed: list[ActionResult],
+) -> dict[str, Any]:
+    """Return a wave-level failure that keeps what the completed siblings did.
+
+    ``failure`` is the per-action failure dict (``action_failed`` status,
+    possibly with ``action_failure_counts`` from a guard block or HITL
+    denial).  The returned dict carries the merged ``world_state`` with
+    every completed sibling's effects applied and an ``execution_history``
+    that lists the completed siblings before the failure record, so the
+    planner sees them as executed (and auto-blacklists ``can_rerun=False``
+    ones) instead of running them again on the next plan (issue #16).
+    """
+    out = dict(failure)
+    out["world_state"] = world_state
+    out["execution_history"] = list(completed) + list(
+        failure.get("execution_history", [])
+    )
+    return out
+
+
+def _delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+    """Keys ``after`` added or changed relative to ``before``."""
+    return {k: v for k, v in after.items() if k not in before or before[k] != v}
 
 
 class ParallelGoapExecutor:
@@ -158,6 +200,11 @@ class ParallelGoapExecutor:
     # ------------------------------------------------------------------
 
     def __call__(self, state: GoapState) -> dict[str, Any]:
+        return serialize_updates(
+            self._call_typed(rehydrate_state(state, self._actions))
+        )
+
+    def _call_typed(self, state: GoapState) -> dict[str, Any]:
         prep = _prepare_execution(state)
         if isinstance(prep, dict):
             return prep
@@ -183,15 +230,28 @@ class ParallelGoapExecutor:
                 guard_results = run_guards_sync(self._guards, action, merged_world)
                 if has_blocking_failure(guard_results):
                     result = _build_guard_block(
-                        action, guard_results, state_before, merged_world
+                        action,
+                        guard_results,
+                        state_before,
+                        merged_world,
+                        failure_counts=state.get("action_failure_counts", {}),
                     )
                     self._tracer.on_action_complete(result)
-                    return result
+                    return _abort_wave(
+                        result, world_state=state_before, completed=all_results
+                    )
 
-            denial = _check_human_approval(action, merged_world, state_before)
+            denial = _check_human_approval(
+                action,
+                merged_world,
+                state_before,
+                failure_counts=state.get("action_failure_counts", {}),
+            )
             if denial is not None:
                 self._tracer.on_action_complete(denial)
-                return denial
+                return _abort_wave(
+                    denial, world_state=state_before, completed=all_results
+                )
 
             try:
                 raw = _execute_with_retries_sync(
@@ -200,22 +260,31 @@ class ParallelGoapExecutor:
                     tracer=self._tracer,
                     rng=self._rng,
                 )
-                _apply_result(
+                returned_dict = _apply_result(
                     raw,
                     action,
                     merged_world,
                     transition_model=self._transition_model,
                     rng=self._rng,
                 )
-                action_result = _build_success(action, idx, state_before, merged_world)
+                action_result = _build_success(
+                    action, idx, state_before, merged_world, check_effects=returned_dict
+                )
             except Exception as exc:
                 action_result = _build_failure(action, exc, state_before, merged_world)
                 self._tracer.on_action_complete(action_result)
-                return action_result
+                return _abort_wave(
+                    action_result, world_state=state_before, completed=all_results
+                )
 
             self._tracer.on_action_complete(action_result)
-            if "execution_history" in action_result:
-                all_results.extend(action_result["execution_history"])
+            if action_result.get("status") == "action_failed":
+                # Effect validation rejected the action; ``_build_success``
+                # already rolled its world state back to ``state_before``.
+                return _abort_wave(
+                    action_result, world_state=state_before, completed=all_results
+                )
+            all_results.extend(action_result["execution_history"])
 
         return {
             "world_state": merged_world,
@@ -228,6 +297,11 @@ class ParallelGoapExecutor:
     # ------------------------------------------------------------------
 
     async def acall(self, state: GoapState) -> dict[str, Any]:
+        return serialize_updates(
+            await self._acall_typed(rehydrate_state(state, self._actions))
+        )
+
+    async def _acall_typed(self, state: GoapState) -> dict[str, Any]:
         """Async variant \u2014 executes the wave actions concurrently via asyncio.gather."""
         prep = _prepare_execution(state)
         if isinstance(prep, dict):
@@ -253,12 +327,21 @@ class ParallelGoapExecutor:
                 )
                 if has_blocking_failure(guard_results):
                     result = _build_guard_block(
-                        action, guard_results, state_before, ws_snapshot
+                        action,
+                        guard_results,
+                        state_before,
+                        ws_snapshot,
+                        failure_counts=state.get("action_failure_counts", {}),
                     )
                     await self._tracer.aon_action_complete(result)
                     return result
 
-            denial = _check_human_approval(action, ws_snapshot, state_before)
+            denial = _check_human_approval(
+                action,
+                ws_snapshot,
+                state_before,
+                failure_counts=state.get("action_failure_counts", {}),
+            )
             if denial is not None:
                 await self._tracer.aon_action_complete(denial)
                 return denial
@@ -270,14 +353,16 @@ class ParallelGoapExecutor:
                     tracer=self._tracer,
                     rng=self._rng,
                 )
-                _apply_result(
+                returned_dict = _apply_result(
                     raw,
                     action,
                     ws_snapshot,
                     transition_model=self._transition_model,
                     rng=self._rng,
                 )
-                result = _build_success(action, idx, state_before, ws_snapshot)
+                result = _build_success(
+                    action, idx, state_before, ws_snapshot, check_effects=returned_dict
+                )
             except Exception as exc:
                 result = _build_failure(action, exc, state_before, ws_snapshot)
 
@@ -290,24 +375,31 @@ class ParallelGoapExecutor:
             )
         )
 
-        # Check for any failures
-        for r in raw_results:
-            if isinstance(r, dict) and r.get("status") == "action_failed":
-                return r  # abort wave, let observer handle replanning
-
-        # Merge all effects into a single world_state update
+        # Merge each *successful* member's delta (not its full snapshot:
+        # a sibling's stale copy of a key must never overwrite another
+        # sibling's change) and collect their history records.
         merged_world = dict(world_state)
-        all_results: list[ActionResult] = []
+        completed: list[ActionResult] = []
+        failure: dict[str, Any] | None = None
         for r in raw_results:
+            if r.get("status") == "action_failed":
+                if failure is None:
+                    failure = r  # first failure in wave order wins
+                continue
             if "world_state" in r:
-                merged_world.update(r["world_state"])
+                merged_world.update(_delta(world_state, r["world_state"]))
             if "execution_history" in r:
-                all_results.extend(r["execution_history"])
+                completed.extend(r["execution_history"])
+
+        if failure is not None:
+            # Abort the wave but keep what the other members did, so the
+            # planner does not run them again (issue #16).
+            return _abort_wave(failure, world_state=merged_world, completed=completed)
 
         return {
             "world_state": merged_world,
             "current_step": max(group) + 1,
-            "execution_history": all_results,
+            "execution_history": completed,
         }
 
 

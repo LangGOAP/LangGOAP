@@ -18,7 +18,7 @@ from langgoap.graph.nodes._execution import (
     _prepare_execution,
 )
 from langgoap.graph.nodes._helpers import logger
-from langgoap.graph.state import GoapState
+from langgoap.graph.state import GoapState, rehydrate_state, serialize_updates
 from langgoap.guards import (
     ActionGuard,
     AsyncActionGuard,
@@ -101,6 +101,13 @@ class GoapExecutor:
         return self._actions.get(action.name, action)
 
     def __call__(self, state: GoapState) -> dict[str, Any]:
+        # Channel values are JSON-native: rehydrate on entry and
+        # serialise the update on exit.
+        return serialize_updates(
+            self._call_typed(rehydrate_state(state, self._actions))
+        )
+
+    def _call_typed(self, state: GoapState) -> dict[str, Any]:
         prep = _prepare_execution(state)
         if isinstance(prep, dict):
             return prep
@@ -122,7 +129,11 @@ class GoapExecutor:
             guard_results = run_guards_sync(self._guards, action, world_state)
             if has_blocking_failure(guard_results):
                 result = _build_guard_block(
-                    action, guard_results, state_before, world_state
+                    action,
+                    guard_results,
+                    state_before,
+                    world_state,
+                    failure_counts=state.get("action_failure_counts", {}),
                 )
                 self._tracer.on_action_complete(result)
                 return result
@@ -130,7 +141,12 @@ class GoapExecutor:
         # Human-in-the-loop gate: interrupt() raises GraphInterrupt on
         # first pass (checkpointer persists state); returns the resume
         # payload on the second pass.
-        denial = _check_human_approval(action, world_state, state_before)
+        denial = _check_human_approval(
+            action,
+            world_state,
+            state_before,
+            failure_counts=state.get("action_failure_counts", {}),
+        )
         if denial is not None:
             self._tracer.on_action_complete(denial)
             return denial
@@ -142,14 +158,20 @@ class GoapExecutor:
                 tracer=self._tracer,
                 rng=self._rng,
             )
-            _apply_result(
+            returned_dict = _apply_result(
                 raw,
                 action,
                 world_state,
                 transition_model=self._transition_model,
                 rng=self._rng,
             )
-            result = _build_success(action, current_step, state_before, world_state)
+            result = _build_success(
+                action,
+                current_step,
+                state_before,
+                world_state,
+                check_effects=returned_dict,
+            )
         except Exception as e:
             result = _build_failure(action, e, state_before, world_state)
         self._tracer.on_action_complete(result)
@@ -164,6 +186,11 @@ class GoapExecutor:
         3. ``action.execute`` via ``loop.run_in_executor`` (sync in thread)
         4. No callable \u2014 declared effects applied
         """
+        return serialize_updates(
+            await self._acall_typed(rehydrate_state(state, self._actions))
+        )
+
+    async def _acall_typed(self, state: GoapState) -> dict[str, Any]:
         prep = _prepare_execution(state)
         if isinstance(prep, dict):
             return prep
@@ -184,12 +211,21 @@ class GoapExecutor:
             guard_results = await run_guards_async(self._guards, action, world_state)
             if has_blocking_failure(guard_results):
                 result = _build_guard_block(
-                    action, guard_results, state_before, world_state
+                    action,
+                    guard_results,
+                    state_before,
+                    world_state,
+                    failure_counts=state.get("action_failure_counts", {}),
                 )
                 await self._tracer.aon_action_complete(result)
                 return result
 
-        denial = _check_human_approval(action, world_state, state_before)
+        denial = _check_human_approval(
+            action,
+            world_state,
+            state_before,
+            failure_counts=state.get("action_failure_counts", {}),
+        )
         if denial is not None:
             await self._tracer.aon_action_complete(denial)
             return denial
@@ -201,14 +237,20 @@ class GoapExecutor:
                 tracer=self._tracer,
                 rng=self._rng,
             )
-            _apply_result(
+            returned_dict = _apply_result(
                 raw,
                 action,
                 world_state,
                 transition_model=self._transition_model,
                 rng=self._rng,
             )
-            result = _build_success(action, current_step, state_before, world_state)
+            result = _build_success(
+                action,
+                current_step,
+                state_before,
+                world_state,
+                check_effects=returned_dict,
+            )
         except Exception as e:
             result = _build_failure(action, e, state_before, world_state)
         await self._tracer.aon_action_complete(result)

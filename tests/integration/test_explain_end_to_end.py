@@ -60,11 +60,39 @@ def test_pipeline_feasible_plan_no_explanation() -> None:
 
 
 def test_graph_invoke_with_infeasible_constraints() -> None:
-    """Full graph invocation with infeasible constraints still completes.
+    """Full graph invocation with infeasible constraints ends as no_plan.
 
-    The CSP layer is advisory — INFEASIBLE plans are still executed.
-    The explanation is attached to the plan metadata.
+    Hard constraints are enforced by default (issue #13).  The
+    infeasibility explanation is surfaced through ``no_plan_explanation``
+    so stuck handlers and callers can act on the shortfall.
     """
+    calls: list[str] = []
+    action = ActionSpec(
+        name="act",
+        effects={"done": True},
+        resources={"cost": 10.0},
+        execute=lambda ws: calls.append("act") or {"done": True},
+    )
+    goal = GoalSpec(
+        conditions={"done": True},
+        constraints=(ConstraintSpec(key="cost", max=5.0, level="hard"),),
+    )
+    graph = GoapGraph(actions=[action])
+    result = graph.invoke(goal=goal, world_state={})
+
+    assert result["status"] == "no_plan"
+    assert calls == []
+    expl = result["no_plan_explanation"]
+    assert expl["infeasible_plan"] == ["act"]
+    assert expl["resource_shortfalls"][0]["key"] == "cost"
+    assert expl["resource_shortfalls"][0]["overrun"] == pytest.approx(5.0)
+
+
+def test_graph_invoke_with_infeasible_constraints_execute_opt_in() -> None:
+    """``on_infeasible="execute"`` runs the plan and keeps the explanation
+    attached to the plan metadata."""
+    from langgoap.goals import GoalPolicy
+
     action = ActionSpec(
         name="act",
         effects={"done": True},
@@ -74,16 +102,17 @@ def test_graph_invoke_with_infeasible_constraints() -> None:
     goal = GoalSpec(
         conditions={"done": True},
         constraints=(ConstraintSpec(key="cost", max=5.0, level="hard"),),
+        policy=GoalPolicy(on_infeasible="execute"),
     )
     graph = GoapGraph(actions=[action])
     result = graph.invoke(goal=goal, world_state={})
 
-    # The goal is achieved despite the INFEASIBLE CSP status
     assert result["status"] == "goal_achieved"
     plan = result.get("plan")
     assert plan is not None
-    if plan.metadata.csp is not None:
-        assert plan.metadata.csp.explanation is not None
+    assert plan.metadata.csp is not None
+    assert plan.metadata.csp.status == CSPStatus.INFEASIBLE
+    assert plan.metadata.csp.explanation is not None
 
 
 def test_explanation_serializes_in_ascii_output() -> None:

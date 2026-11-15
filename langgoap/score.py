@@ -30,6 +30,7 @@ on :class:`Score` (see :mod:`langgoap._score_base`).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any, Mapping
 
 from langgoap._score_base import Score
 
@@ -47,6 +48,10 @@ class SimpleScore(Score):
     """
 
     scalar: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise to a JSON-native dict; see :func:`score_from_dict`."""
+        return {"type": "simple", "scalar": self.scalar}
 
     @property
     def value(self) -> float:
@@ -79,6 +84,10 @@ class HardSoftScore(Score):
 
     hard: float = 0.0
     soft: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise to a JSON-native dict; see :func:`score_from_dict`."""
+        return {"type": "hard_soft", "hard": self.hard, "soft": self.soft}
 
     @property
     def value(self) -> float:
@@ -116,6 +125,14 @@ class BendableScore(Score):
     hard_levels: tuple[float, ...] = field(default_factory=tuple)
     soft_levels: tuple[float, ...] = field(default_factory=tuple)
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise to a JSON-native dict; see :func:`score_from_dict`."""
+        return {
+            "type": "bendable",
+            "hard_levels": list(self.hard_levels),
+            "soft_levels": list(self.soft_levels),
+        }
+
     def __post_init__(self) -> None:
         if not isinstance(self.hard_levels, tuple):
             object.__setattr__(self, "hard_levels", tuple(self.hard_levels))
@@ -151,7 +168,30 @@ class BendableScore(Score):
         )
 
 
+def score_from_dict(data: Mapping[str, Any]) -> Score:
+    """Rebuild a :class:`Score` from the dict written by its ``to_dict``.
+
+    Dispatches on the ``"type"`` tag (``"simple"``, ``"hard_soft"``,
+    ``"bendable"``).  An empty or untagged dict yields ``SimpleScore(0.0)``
+    so plans serialised before scoring still rehydrate.
+    """
+    kind = data.get("type")
+    if kind == "hard_soft":
+        return HardSoftScore(
+            hard=float(data.get("hard", 0.0)), soft=float(data.get("soft", 0.0))
+        )
+    if kind == "bendable":
+        return BendableScore(
+            hard_levels=tuple(float(x) for x in data.get("hard_levels", ())),
+            soft_levels=tuple(float(x) for x in data.get("soft_levels", ())),
+        )
+    if kind not in (None, "simple"):
+        raise ValueError(f"Unknown score type {kind!r} in {data!r}")
+    return SimpleScore(scalar=float(data.get("scalar", 0.0)))
+
+
 __all__ = [
+    "score_from_dict",
     "Score",
     "SimpleScore",
     "HardSoftScore",

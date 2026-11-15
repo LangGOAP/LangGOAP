@@ -179,9 +179,11 @@ class TestGoalInterpreterAnthropic:
             pytest.skip("ANTHROPIC_API_KEY not set in .env")
         from langchain_anthropic import ChatAnthropic
 
+        # ``temperature`` is rejected by current Claude models
+        # ("temperature: Extra inputs are not permitted"); structured output
+        # is deterministic enough for these assertions without it.
         return ChatAnthropic(
             model="claude-haiku-4-5",
-            temperature=0,
             anthropic_api_key=key,  # type: ignore[call-arg]
         )
 

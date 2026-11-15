@@ -58,7 +58,7 @@ The snippet below wraps four LangChain tools and asks LangGOAP to publish an art
 ```python
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
-from langgoap import create_goap_agent
+from langgoap import create_goap_agent, rehydrate_state
 
 # A small counter so the demo can simulate the cheap writer flaking out
 # on its first N invocations.  Flip `fail_fast_n_times` to 1 to see the
@@ -130,6 +130,9 @@ result = agent.invoke(
         "goal": agent.goap_goal,
     }
 )
+# A compiled graph returns plain JSON state (so any checkpointer can store it);
+# rehydrate it to get Plan and ActionResult objects back.
+result = rehydrate_state(result, agent.goap_actions)
 ```
 
 `agent` is a compiled LangGraph graph. Use it with streaming,
@@ -202,12 +205,26 @@ you need without rewriting your action definitions.
   reasoning mode among many. Quickstart:
   [`examples/basics/goap_subgraph.ipynb`](examples/basics/goap_subgraph.ipynb).
 
+All three on-ramps accept the same `GoapGraph` options (`tracer`,
+`strategy`, `history`, `sensors`, `guards`, `resolvers`,
+`transition_model`, `stuck_handlers`, `termination_policies`, …), so
+nothing forces a rewrite to the full API as a project grows.
+`goapify_tool` exposes every declarative `ActionSpec` field, and
+`create_goap_agent` takes per-tool maps for `qos`,
+`require_human_approval`, `human_input_key`, `can_rerun`, `read_only`,
+`utility` and `metadata`; the compiled agent carries `goap_goal` and
+`goap_actions` so a JSON result can be rehydrated with
+`rehydrate_state(result, agent.goap_actions)`. `add_goap_subgraph`
+registers sync and async node variants and forwards the parent's
+`RunnableConfig`, so a parent checkpointer, callbacks and
+human-approval interrupts work inside the sub-graph.
+
 ## Features
 
 ### Planning
 
 - **Cost-aware planner** — finds the cheapest sequence of tool calls that reaches your goal, using a classical A* search over the action set. You supply per-action costs, optional effect validators that double-check what each tool actually changed, and per-action retry budgets.
-- **Constraint-aware refinement** — when the goal carries hard caps (budgets, time windows) or objectives to minimize/maximize, the candidate plan is handed to OR-Tools CP-SAT, which refines or replaces it to satisfy them.
+- **Constraint-aware refinement** — when the goal carries hard caps (budgets, time windows) or objectives to minimize/maximize, the candidate plan is handed to OR-Tools CP-SAT, which refines or replaces it to satisfy them. Preferences (objectives, soft constraints, soft goals) compare the A\* plan against alternative plans and pick the best one, with total cost as the tie-breaker; a plan that violates a hard cap is reported as `no_plan` with the resource shortfalls unless the goal opts in with `GoalPolicy(on_infeasible="execute")`.
 - **Pluggable strategies** — A* is the default, but the `PlanningStrategy` Protocol lets you swap in Monte-Carlo Tree Search (`MCTSStrategy`, better for stochastic worlds), constraint-first solving (`CSPRefinementStrategy`), utility-based ranking (`UtilityStrategy`), interruptible "best plan so far" search (`AnytimePlanningStrategy`), or in-place repair after execution failures (`RepairStrategy`).
 - **Automatic strategy selection** — `StrategyRouter` inspects the problem (hard constraints, stochasticity, branching factor) and dispatches to the right strategy. Routing is a pure function of the problem, so the same inputs always pick the same strategy.
 - **Expected-value vs. sampled dynamics** — a `TransitionModel` separates *declared* effects (what a tool says it changes) from *sampled* effects (what actually happens). The planner reasons about expected outcomes while MCTS rollouts and the graph runtime see the real sampled world.
@@ -222,12 +239,13 @@ you need without rewriting your action definitions.
 
 - **The plan _is_ a `StateGraph`** — `GoapGraph` compiles a real LangGraph graph with planner / executor / observer nodes. Each node has sync and async variants so tracer hooks fire from both `.invoke()` and `.ainvoke()`.
 - **Replanning memory** — `StoreExecutionHistory` persists each step's outcome in any LangGraph `BaseStore` (`InMemoryStore`, `AsyncPostgresStore`, your own). Keyed by tool name, so the planner can avoid actions that already failed in this run. No vector embeddings required.
-- **Multi-goal decomposition** — `MultiGoal` sequences a list of subgoals into a single executable plan, in `sequential` order or `any`-of mode (succeed when any subgoal is satisfied).
+- **Multi-goal decomposition** — `MultiGoal` sequences a list of subgoals into a single executable plan, in `sequential` order (strict: an unreachable stage ends the run with `no_plan`; opt into `on_infeasible="skip"` to continue and finish `partial`), `any`-of mode (succeed when any subgoal is satisfied), or `best_value` mode.
 - **Plan visualization** — render any plan as a Mermaid diagram (`render_mermaid`), Gantt chart (`render_mermaid_gantt`, `render_ascii_gantt`), GraphViz DOT graph (`render_dot`), or ASCII tree (`render_ascii`); `visualize` is the top-level dispatcher. Pure Python — no binary dependencies for Mermaid or ASCII output.
 
 ### Reliability and recovery
 
 - **Per-action retry and idempotency** — `ActionQos` declares the retry policy and idempotency hints for each action (`FIRE_ONCE` for actions that must never repeat, `can_rerun` for safe retries, `read_only` for actions that don't mutate the world).
+- **Predictable failure handling** — a failed action is retried up to `ActionSpec.max_retries` times and then blacklisted, and the planner routes around it. When no path to the goal remains, the run ends with `status="no_plan"` and an explanation naming the blacklisted actions and the knobs that would unblock it; `GoalPolicy(blacklist_fallback=True)` opts back into re-admitting the failed action and planning through it again.
 - **Human-in-the-loop approval** — `require_human_approval` pauses execution at a chosen action and asks for input via LangGraph's `interrupt()`. Pass a Pydantic `BaseModel` to collect a typed form (validated on resume) or `True` for a plain approve/deny gate.
 - **Stuck handlers** — when planning fails to find a path, `MulticastStuckHandler` runs an ordered chain of recovery handlers that can patch the world state, swap in a relaxed goal, or escalate to a human. The first handler that returns `REPLAN` wins.
 - **Early-termination policies** — stop a run that's getting too expensive or running too long: cap by dollars (`MaxCostPolicy`), wall-clock time (`MaxWallClockPolicy`), LLM calls (`MaxLLMCallsPolicy`), tokens (`MaxTokensPolicy`), or actions executed (`MaxActionsPolicy`). Combine them with `FirstOfPolicy` (any cap trips) or `AllOfPolicy` (all caps must trip).
@@ -239,7 +257,7 @@ you need without rewriting your action definitions.
 
 ### Checkpointing
 
-- **Resume from anywhere** — pause a run (because of an `interrupt()`, a crash, or a deliberate stop) and resume it later from the saved checkpoint. All three LangGraph backends are supported and tested: in-memory (`MemorySaver`), Postgres (`AsyncPostgresSaver`), and Redis (`RedisSaver` / `AsyncRedisSaver`). A custom `ormsgpack` serializer round-trips LangGOAP's frozen dataclasses, `MappingProxyType`, `frozenset`, `timedelta`, and `tuple` correctly. Install with `pip install langgoap[checkpoint-postgres]` or `pip install langgoap[checkpoint-redis]`.
+- **Resume from anywhere** — pause a run (because of an `interrupt()`, a crash, or a deliberate stop) and resume it later from the saved checkpoint. The graph state is plain JSON (`GoapStateChannels`), so **any** LangGraph checkpointer works with its stock serializer and LangGOAP ships no serializer of its own; in-memory (`MemorySaver`), Postgres (`PostgresSaver` / `AsyncPostgresSaver`), and Redis (`RedisSaver` / `AsyncRedisSaver`) are tested. The backend extras are plain pass-throughs: `pip install langgoap[checkpoint-postgres]` or `pip install langgoap[checkpoint-redis]`. Because LangGraph persists the raw input, build a checkpointed run's input with `GoapGraph.initial_state(goal, world_state)` (or pass `goal.to_dict()`), and turn a compiled graph's JSON result back into `Plan` / `ActionResult` objects with `GoapGraph.rehydrate(result)`; `GoapGraph.invoke` does both for you.
 
 ### Natural-language goals
 
@@ -247,7 +265,7 @@ you need without rewriting your action definitions.
 
 ### CLI and deployment
 
-- **`langgoap` CLI** — inspect and run plans from the terminal: `plan` (search and print a plan), `actions` (list discovered actions), `explain` (explain why an action was or wasn't picked), `visualize` (render a plan), and `deploy-init` (scaffold a deployment). Loads actions, goals, and world state from `module:variable` references so existing Python code can stay where it is.
+- **`langgoap` CLI** — inspect and run plans from the terminal: `plan` (search and print a plan without executing anything; add `--run` to execute it, `-s auto|astar|pipeline|mcts` to pick the strategy), `actions` (list discovered actions), `explain` (explain why an action was or wasn't picked), `visualize` (render a plan), and `deploy-init` (scaffold a deployment). Loads actions, goals, and world state from `module:variable` references so existing Python code can stay where it is.
 - **LangGraph deployment scaffold** — `scaffold_deployment` (and `langgoap deploy-init`) generates a complete `langgraph dev`-ready directory in one command. Every `langgraph` deployment automatically serves an `/mcp` endpoint, so a LangGOAP graph becomes an MCP tool for any compatible client with no extra wiring.
 
 ### DeepAgents and tool interop

@@ -193,7 +193,9 @@ class TestPlanCmd:
         )
         assert result.exit_code == 0
         data = json.loads(result.output)
-        assert data["status"] == "goal_achieved"
+        # ``plan`` only plans (issue #40); ``--run`` reports the graph status.
+        assert data["status"] == "planned"
+        assert data["strategy"] == "astar"
         assert "gather" in data["actions"]
         assert "process" in data["actions"]
 
@@ -392,3 +394,144 @@ class TestVersionFlag:
         result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
         assert "langgoap" in result.output
+
+
+# ---------------------------------------------------------------------------
+# ``plan`` plans; ``--run`` executes; renderers fail cleanly (issue #40)
+# ---------------------------------------------------------------------------
+
+
+def _write_side_effect_module(tmp_path: Path) -> Path:
+    """Actions whose ``execute`` leaves a file behind, to detect execution."""
+    mod = tmp_path / "cli_fixture.py"
+    marker = (tmp_path / "executed.marker").as_posix()
+    mod.write_text(textwrap.dedent(f"""\
+        from pathlib import Path
+
+        from langgoap.actions import ActionSpec
+        from langgoap.goals import ConstraintSpec, GoalSpec
+
+        MARKER = Path({marker!r})
+
+        def _touch(ws):
+            MARKER.write_text("ran")
+            return {{"done": True}}
+
+        ACTIONS = [
+            ActionSpec(name="gather", effects={{"data": True}}, cost=1.0,
+                       resources={{"cost_usd": 1.0}}),
+            ActionSpec(name="process", preconditions={{"data": True}},
+                       effects={{"done": True}}, cost=1.0, execute=_touch,
+                       resources={{"cost_usd": 1.0}}),
+            ActionSpec(name="dynamic", effects={{"other": True}},
+                       cost=lambda ws: 2.0),
+        ]
+
+        GOAL = GoalSpec(conditions={{"done": True}})
+        CAPPED_GOAL = GoalSpec(
+            conditions={{"done": True}},
+            constraints=(ConstraintSpec(key="cost_usd", max=10.0),),
+        )
+        """))
+    return mod
+
+
+class TestPlanCmdPlansOnly:
+    def test_plan_does_not_execute_actions(self, cli_env: Path) -> None:
+        from langgoap.cli.main import cli
+
+        _write_side_effect_module(cli_env)
+        result = CliRunner().invoke(
+            cli,
+            ["plan", "cli_fixture:ACTIONS", "cli_fixture:GOAL"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.output
+        assert "process" in result.output
+        assert not (cli_env / "executed.marker").exists(), "plan must not run executors"
+
+    def test_run_flag_executes_actions(self, cli_env: Path) -> None:
+        from langgoap.cli.main import cli
+
+        _write_side_effect_module(cli_env)
+        result = CliRunner().invoke(
+            cli,
+            ["plan", "cli_fixture:ACTIONS", "cli_fixture:GOAL", "--run", "-f", "json"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.output
+        assert (cli_env / "executed.marker").exists()
+        assert json.loads(result.output)["status"] == "goal_achieved"
+
+    def test_json_output_names_the_strategy_that_ran(self, cli_env: Path) -> None:
+        from langgoap.cli.main import cli
+
+        _write_side_effect_module(cli_env)
+        runner = CliRunner()
+        explicit = runner.invoke(
+            cli,
+            [
+                "plan",
+                "cli_fixture:ACTIONS",
+                "cli_fixture:CAPPED_GOAL",
+                "-s",
+                "astar",
+                "-f",
+                "json",
+            ],
+            catch_exceptions=False,
+        )
+        auto = runner.invoke(
+            cli,
+            [
+                "plan",
+                "cli_fixture:ACTIONS",
+                "cli_fixture:CAPPED_GOAL",
+                "-s",
+                "auto",
+                "-f",
+                "json",
+            ],
+            catch_exceptions=False,
+        )
+        assert explicit.exit_code == 0 and auto.exit_code == 0
+        assert json.loads(explicit.output)["strategy"] == "astar"
+        assert json.loads(auto.output)["strategy"] == "pipeline"
+
+    def test_default_strategy_is_auto(self, cli_env: Path) -> None:
+        from langgoap.cli.main import cli
+
+        result = CliRunner().invoke(cli, ["plan", "--help"])
+        assert "[default: auto]" in result.output
+
+    def test_gantt_without_schedule_is_a_clean_error(self, cli_env: Path) -> None:
+        from langgoap.cli.main import cli
+
+        _write_side_effect_module(cli_env)
+        result = CliRunner().invoke(
+            cli, ["plan", "cli_fixture:ACTIONS", "cli_fixture:GOAL", "-f", "gantt"]
+        )
+        assert result.exit_code != 0
+        assert "Traceback" not in result.output
+        assert "schedule" in result.output.lower()
+
+
+class TestActionsCmdDynamicCost:
+    def test_callable_cost_renders_as_dyn(self, cli_env: Path) -> None:
+        from langgoap.cli.main import cli
+
+        _write_side_effect_module(cli_env)
+        table = CliRunner().invoke(
+            cli, ["actions", "cli_fixture:ACTIONS"], catch_exceptions=False
+        )
+        assert table.exit_code == 0, table.output
+        assert "dyn" in table.output
+        as_json = CliRunner().invoke(
+            cli,
+            ["actions", "cli_fixture:ACTIONS", "-f", "json"],
+            catch_exceptions=False,
+        )
+        assert as_json.exit_code == 0, as_json.output
+        entries = {e["name"]: e for e in json.loads(as_json.output)}
+        assert entries["dynamic"]["cost"] == "dyn"
+        assert entries["gather"]["cost"] == 1.0

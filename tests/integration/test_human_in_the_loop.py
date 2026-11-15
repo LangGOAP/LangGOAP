@@ -85,7 +85,7 @@ class TestHumanApprovalSync:
 
         # First invoke — executes step_a, then hits interrupt at step_b
         result = compiled.invoke(
-            {"goal": _make_goal(), "world_state": {}},
+            graph.initial_state(_make_goal()),
             config=config,
         )
 
@@ -120,7 +120,7 @@ class TestHumanApprovalSync:
 
         # First invoke — hits interrupt at step_b
         compiled.invoke(
-            {"goal": _make_goal(), "world_state": {}},
+            graph.initial_state(_make_goal()),
             config=config,
         )
 
@@ -137,7 +137,7 @@ class TestHumanApprovalSync:
         assert "step_b" in result.get("blacklisted_actions", [])
         # Verify step_b_alt was used (check execution history)
         history = result.get("execution_history", [])
-        action_names = [h.action_name for h in history]
+        action_names = [h["action_name"] for h in history]
         assert "step_b_alt" in action_names
 
     def test_deny_decisive_ignores_max_retries(self) -> None:
@@ -149,7 +149,7 @@ class TestHumanApprovalSync:
 
         # First invoke — hits interrupt at step_b
         compiled.invoke(
-            {"goal": _make_goal(), "world_state": {}},
+            graph.initial_state(_make_goal()),
             config=config,
         )
 
@@ -171,7 +171,7 @@ class TestHumanApprovalSync:
         config = _thread_config()
 
         compiled.invoke(
-            {"goal": _make_goal(), "world_state": {}},
+            graph.initial_state(_make_goal()),
             config=config,
         )
 
@@ -205,7 +205,7 @@ class TestHumanApprovalAsync:
         config = _thread_config()
 
         await compiled.ainvoke(
-            {"goal": _make_goal(), "world_state": {}},
+            graph.initial_state(_make_goal()),
             config=config,
         )
 
@@ -228,7 +228,7 @@ class TestHumanApprovalAsync:
         config = _thread_config()
 
         await compiled.ainvoke(
-            {"goal": _make_goal(), "world_state": {}},
+            graph.initial_state(_make_goal()),
             config=config,
         )
 
@@ -252,7 +252,7 @@ class TestHumanApprovalNoApprovalNeeded:
         config = _thread_config()
 
         result = compiled.invoke(
-            {"goal": _make_goal(), "world_state": {}},
+            graph.initial_state(_make_goal()),
             config=config,
         )
 

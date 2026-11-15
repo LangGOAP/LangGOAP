@@ -93,7 +93,7 @@ class TestFormBindingHitlSync:
 
         result = graph.invoke(
             {
-                "goal": GoalSpec(conditions={"dispatched": True}),
+                "goal": GoalSpec(conditions={"dispatched": True}).to_dict(),
                 "world_state": {},
             },
             config=config,
@@ -118,7 +118,7 @@ class TestFormBindingHitlSync:
         # First call: hits the form interrupt before confirm_delivery runs.
         graph.invoke(
             {
-                "goal": GoalSpec(conditions={"dispatched": True}),
+                "goal": GoalSpec(conditions={"dispatched": True}).to_dict(),
                 "world_state": {},
             },
             config=config,
@@ -162,7 +162,7 @@ class TestFormBindingHitlSync:
 
         graph.invoke(
             {
-                "goal": GoalSpec(conditions={"dispatched": True}),
+                "goal": GoalSpec(conditions={"dispatched": True}).to_dict(),
                 "world_state": {},
             },
             config=config,
@@ -179,11 +179,11 @@ class TestFormBindingHitlSync:
         assert "dispatched" not in result["world_state"]
         # Failure surfaces as a structured error in execution_history.
         history = result["execution_history"]
-        confirm_history = [h for h in history if h.action_name == "confirm_delivery"]
+        confirm_history = [h for h in history if h["action_name"] == "confirm_delivery"]
         assert confirm_history, "confirm_delivery should appear in history"
         last = confirm_history[-1]
-        assert last.success is False
-        assert "form" in (last.error or "").lower()
+        assert last["success"] is False
+        assert "form" in (last["error"] or "").lower()
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +213,7 @@ class TestBackwardsCompat:
 
         result = graph.invoke(
             {
-                "goal": GoalSpec(conditions={"dispatched": True}),
+                "goal": GoalSpec(conditions={"dispatched": True}).to_dict(),
                 "world_state": {},
             },
             config=config,
@@ -245,7 +245,7 @@ class TestBackwardsCompat:
 
         graph.invoke(
             {
-                "goal": GoalSpec(conditions={"dispatched": True}),
+                "goal": GoalSpec(conditions={"dispatched": True}).to_dict(),
                 "world_state": {},
             },
             config=config,

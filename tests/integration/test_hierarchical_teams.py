@@ -242,7 +242,13 @@ class TestHierarchicalTeamsGoapified:
         assert result["status"] == "no_plan"
 
     def test_agent_failure_triggers_replan(self) -> None:
-        """When a team member fails, observer triggers replanning."""
+        """When a team member fails, observer triggers replanning.
+
+        The scraper is the only route to ``has_detailed_content``, so it
+        declares ``max_retries=1``: the first failure replans and retries
+        instead of blacklisting the sole path (which would end the run in
+        ``no_plan`` under the default no-fallback policy).
+        """
         call_count = {"scraper": 0}
 
         def flaky_scraper(ws: dict[str, Any]) -> dict[str, Any]:
@@ -263,6 +269,7 @@ class TestHierarchicalTeamsGoapified:
                 preconditions={"has_search_results": True},
                 effects={"has_detailed_content": True},
                 execute=flaky_scraper,
+                max_retries=1,
             ),
             ActionSpec(
                 name="note_taker_agent",

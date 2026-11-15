@@ -68,7 +68,8 @@ def _render_table(actions_list: list[Any], verbose: bool) -> str:
     for a in actions_list:
         pre = dict(a.preconditions) if a.preconditions else {}
         eff = dict(a.effects) if a.effects else {}
-        line = f"{a.name:<{name_w}}  {a.cost:>{cost_w}.1f}  {pre!s:<13}  {eff!s}"
+        cost = "dyn" if callable(a.cost) else f"{a.cost:.1f}"
+        line = f"{a.name:<{name_w}}  {cost:>{cost_w}}  {pre!s:<13}  {eff!s}"
         lines.append(line)
 
         if verbose:
@@ -89,7 +90,7 @@ def _render_json(actions_list: list[Any], verbose: bool) -> str:
     for a in actions_list:
         entry: dict[str, Any] = {
             "name": a.name,
-            "cost": a.cost,
+            "cost": "dyn" if callable(a.cost) else a.cost,
             "preconditions": dict(a.preconditions) if a.preconditions else {},
             "effects": dict(a.effects) if a.effects else {},
         }

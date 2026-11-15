@@ -8,9 +8,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import timedelta
 from types import MappingProxyType
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from langgoap.qos import ActionQos
+from langgoap.state import require_hashable_values
 from langgoap.types import CostFunction
 
 EffectFunction = Callable[[Mapping[str, Any]], Mapping[str, Any]]
@@ -115,6 +116,11 @@ class ActionSpec:
             object.__setattr__(
                 self, "preconditions", MappingProxyType(dict(self.preconditions))
             )
+        require_hashable_values(
+            self.preconditions,
+            owner=f"ActionSpec({self.name!r})",
+            field_name="preconditions",
+        )
         # Deserialization path: the serializer emits ``effects=None`` for
         # callable effects (functions are not portable).  When
         # ``effect_keys`` is present, we know the original action was
@@ -160,10 +166,93 @@ class ActionSpec:
                 object.__setattr__(
                     self, "effects", MappingProxyType(dict(self.effects))
                 )
+            require_hashable_values(
+                self.effects,
+                owner=f"ActionSpec({self.name!r})",
+                field_name="effects",
+            )
         for attr in ("resources", "metadata"):
             val = getattr(self, attr)
             if val is not None and not isinstance(val, MappingProxyType):
                 object.__setattr__(self, attr, MappingProxyType(dict(val)))
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise the *declarative* part of this action to a JSON-native dict.
+
+        Callables are not portable, so ``execute``, ``aexecute``,
+        ``effect_validator`` and a dynamic ``effects`` / ``cost`` /
+        ``utility`` are recorded as ``None`` (dynamic effects keep their
+        ``effect_keys``), a typed-form ``require_human_approval`` class is
+        recorded as ``True``, and ``qos.retryable_exceptions`` is recorded by
+        class name only.  The graph nodes never read callables from a
+        checkpoint: they rebind the action by ``name`` from the live action
+        list given at compile time.  ``duration`` is stored in seconds.
+        """
+        return {
+            "name": self.name,
+            "preconditions": dict(self.preconditions),
+            "effects": (
+                None
+                if self.has_dynamic_effects
+                else dict(cast(Mapping[str, Any], self.effects))
+            ),
+            "effect_keys": (
+                sorted(self.effect_keys) if self.effect_keys is not None else None
+            ),
+            "cost": None if callable(self.cost) else self.cost,
+            "max_retries": self.max_retries,
+            "qos": self.qos.to_dict() if self.qos is not None else None,
+            "can_rerun": self.can_rerun,
+            "read_only": self.read_only,
+            "utility": (
+                None if self.utility is None or callable(self.utility) else self.utility
+            ),
+            "require_human_approval": bool(self.require_human_approval),
+            "human_input_key": self.human_input_key,
+            "resources": dict(self.resources) if self.resources is not None else None,
+            "duration": (
+                self.duration.total_seconds() if self.duration is not None else None
+            ),
+            "metadata": dict(self.metadata) if self.metadata is not None else None,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> ActionSpec:
+        """Reconstruct a callable-free action from :meth:`to_dict` output.
+
+        A ``None`` ``cost`` (the original was a cost function) becomes the
+        default ``1.0``; dynamic effects come back as the unresolved
+        sentinel that :meth:`get_effects` reports clearly.  Prefer binding
+        the stored name to the live :class:`ActionSpec` when one exists
+        (see :meth:`langgoap.planner.types.Plan.from_dict`).
+        """
+        effect_keys = data.get("effect_keys")
+        cost = data.get("cost")
+        duration = data.get("duration")
+        qos = data.get("qos")
+        return cls(
+            name=data["name"],
+            preconditions=dict(data.get("preconditions") or {}),
+            # ``None`` + ``effect_keys`` is the documented deserialisation path for
+            # dynamic effects (see ``__post_init__``).
+            effects=(
+                cast(Any, None)
+                if effect_keys is not None
+                else dict(data.get("effects") or {})
+            ),
+            effect_keys=frozenset(effect_keys) if effect_keys is not None else None,
+            cost=1.0 if cost is None else cost,
+            max_retries=int(data.get("max_retries", 0)),
+            qos=ActionQos.from_dict(qos) if qos is not None else None,
+            can_rerun=bool(data.get("can_rerun", True)),
+            read_only=bool(data.get("read_only", False)),
+            utility=data.get("utility"),
+            require_human_approval=bool(data.get("require_human_approval", False)),
+            human_input_key=data.get("human_input_key"),
+            resources=data.get("resources"),
+            duration=timedelta(seconds=duration) if duration is not None else None,
+            metadata=data.get("metadata"),
+        )
 
     @property
     def has_dynamic_effects(self) -> bool:

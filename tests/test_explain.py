@@ -96,33 +96,34 @@ def test_single_violated_hard_constraint() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_subsumed_constraint_excluded_from_mus() -> None:
-    """The tighter of two overlapping constraints is excluded from the MUS.
+def test_overlapping_constraints_on_one_key_are_both_reported() -> None:
+    """Two violated bounds on the same key are both conflicts.
 
-    With cost=20 and constraints max=5 (tighter) and max=10 (looser), both are
-    individually violated.  The greedy MUS algorithm iterates in declaration
-    order: it checks whether removing max=5 still leaves the set infeasible
-    (it does, because max=10 alone is still violated at cost=20), so max=5 is
-    marked *redundant* and dropped from the working set.  Then removing max=10
-    from the remaining singleton {max=10} yields an empty feasible set, so
-    max=10 is marked *essential*.  The returned MUS is exactly {max=10}.
+    With cost=20 and hard maxima of 5 and 10, both constraints are violated
+    and *both* must be relaxed before the plan can run, so both are listed
+    with their own shortfall.  (The former greedy minimal-unsatisfiable-
+    subset pass kept only the looser bound, which told users relaxing one
+    constraint would suffice when it would not; issue #25.)
     """
     a1 = _make_action("act", resources={"cost": 20.0})
     plan = _make_plan(a1)
     goal = GoalSpec(
         conditions={"act_done": True},
         constraints=(
-            ConstraintSpec(key="cost", max=5.0, level="hard"),  # tighter — redundant
-            ConstraintSpec(key="cost", max=10.0, level="hard"),  # looser  — essential
+            ConstraintSpec(key="cost", max=5.0, level="hard"),
+            ConstraintSpec(key="cost", max=10.0, level="hard"),
         ),
     )
     meta = CSPMetadata(status=CSPStatus.INFEASIBLE)
 
     explanation = explain_infeasibility(plan, goal, meta)
     assert explanation is not None
-    # Greedy MUS: exactly one constraint — the looser max=10 (essential).
-    assert len(explanation.conflicting_constraints) == 1
-    assert explanation.conflicting_constraints[0].max == 10.0
+    assert sorted(c.max for c in explanation.conflicting_constraints) == [5.0, 10.0]
+    assert sorted(sf.overrun for sf in explanation.resource_shortfalls) == [10.0, 15.0]
+    assert (
+        "limit is 5" in explanation.suggestion
+        and "limit is 10" in explanation.suggestion
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -475,3 +476,63 @@ def test_explain_no_plan_stored_in_goapstate() -> None:
     assert expl_dict is not None
     assert "impossible" in expl_dict.get("unreachable_conditions", [])
     assert "impossible" in expl_dict.get("suggestion", "")
+
+
+# ---------------------------------------------------------------------------
+# Independently violated constraints are all reported (issue #25)
+# ---------------------------------------------------------------------------
+
+
+class TestMultipleViolatedConstraints:
+    def _explanation(self) -> InfeasibilityExplanation:
+        plan_obj = _make_plan(
+            _make_action("a", resources={"cost_usd": 20.0, "tokens": 300.0}),
+        )
+        goal = GoalSpec(
+            conditions={"a_done": True},
+            constraints=(
+                ConstraintSpec(key="cost_usd", max=10.0),
+                ConstraintSpec(key="tokens", max=100.0),
+                ConstraintSpec(key="quality", min=0.0),  # satisfied, must not appear
+            ),
+        )
+        meta = validate_plan(plan_obj, goal)
+        assert meta.status == CSPStatus.INFEASIBLE
+        expl = explain_infeasibility(plan_obj, goal, meta)
+        assert expl is not None
+        return expl
+
+    def test_every_violated_constraint_is_a_conflict(self) -> None:
+        expl = self._explanation()
+        assert {c.key for c in expl.conflicting_constraints} == {"cost_usd", "tokens"}
+
+    def test_every_violated_constraint_has_a_shortfall(self) -> None:
+        expl = self._explanation()
+        shortfalls = {sf.key: sf for sf in expl.resource_shortfalls}
+        assert set(shortfalls) == {"cost_usd", "tokens"}
+        assert shortfalls["cost_usd"].overrun == 10.0
+        assert shortfalls["tokens"].overrun == 200.0
+
+    def test_suggestion_names_every_violated_resource(self) -> None:
+        expl = self._explanation()
+        assert "cost_usd" in expl.suggestion and "tokens" in expl.suggestion
+        assert "quality" not in expl.suggestion
+
+    def test_mermaid_note_lists_every_shortfall(self) -> None:
+        from langgoap.planner.csp import CSPMetadata
+        from langgoap.viz.mermaid import render_mermaid
+
+        expl = self._explanation()
+        plan_obj = _make_plan(
+            _make_action("a", resources={"cost_usd": 20.0, "tokens": 300.0})
+        )
+        plan_obj = Plan(
+            actions=plan_obj.actions,
+            expected_states=plan_obj.expected_states,
+            total_cost=plan_obj.total_cost,
+            metadata=PlanMetadata(
+                csp=CSPMetadata(status=CSPStatus.INFEASIBLE, explanation=expl)
+            ),
+        )
+        source = render_mermaid(plan_obj)
+        assert "cost_usd" in source and "tokens" in source

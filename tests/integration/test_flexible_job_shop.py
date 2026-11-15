@@ -93,6 +93,21 @@ ALT_ACTION_NAMES = {
 EXPECTED_ACTION_COUNT = 12  # 3 jobs x 2 ops x 2 modes
 EXPECTED_STATE_FLAG_COUNT = 6  # 3 jobs x 2 ops
 
+# A hard cap no plan can violate.  A goal that carries only hard limits
+# returns the first feasible A* plan (the "greedy" all-express plan)
+# while still routing through CSP, so schedule and resource metadata are
+# attached.  The default goal declares ``cost_usd -> MINIMIZE``, which
+# since issue #12 is honoured even when the greedy plan is feasible and
+# therefore selects the cheaper-USD alternative instead.
+GENEROUS_CAP = 10_000.0
+
+
+def _greedy_goal():
+    """Hard-only goal: the A*-cheapest (all-express) plan is final."""
+    return flexible_job_shop_goal(
+        minimize_cost_usd=False, max_cost_usd=GENEROUS_CAP, max_cost_level="hard"
+    )
+
 
 # ---------------------------------------------------------------------------
 # Smoke tests on the factories
@@ -157,13 +172,15 @@ class TestTutorialHelpers:
 
 
 class TestGreedyPlan:
-    """With no ``cost_usd`` cap the pipeline routes through CSP for the
-    MINIMIZE objective but finds the A*-optimal greedy plan feasible."""
+    """A goal that carries only a (generous) hard ``cost_usd`` cap and no
+    preferences returns the A*-cheapest all-express plan and still attaches
+    CSP schedule and resource metadata.  The MINIMIZE variant lives in
+    :class:`TestMinimizeObjectiveSelection`."""
 
     def test_greedy_plan_picks_every_express_mode(self) -> None:
         plan_obj = pipeline_plan(
             PlanningState.from_dict(flexible_job_shop_start()),
-            flexible_job_shop_goal(),
+            _greedy_goal(),
             flexible_job_shop_actions(),
         )
         assert plan_obj is not None
@@ -173,7 +190,7 @@ class TestGreedyPlan:
     def test_greedy_csp_is_feasible_with_full_schedule(self) -> None:
         plan_obj = pipeline_plan(
             PlanningState.from_dict(flexible_job_shop_start()),
-            flexible_job_shop_goal(),
+            _greedy_goal(),
             flexible_job_shop_actions(),
         )
         assert plan_obj is not None
@@ -192,7 +209,7 @@ class TestGreedyPlan:
         """
         plan_obj = pipeline_plan(
             PlanningState.from_dict(flexible_job_shop_start()),
-            flexible_job_shop_goal(),
+            _greedy_goal(),
             flexible_job_shop_actions(),
         )
         assert plan_obj is not None
@@ -203,7 +220,7 @@ class TestGreedyPlan:
     def test_greedy_schedule_respects_per_job_precedence(self) -> None:
         plan_obj = pipeline_plan(
             PlanningState.from_dict(flexible_job_shop_start()),
-            flexible_job_shop_goal(),
+            _greedy_goal(),
             flexible_job_shop_actions(),
         )
         assert plan_obj is not None
@@ -224,7 +241,7 @@ class TestGreedyPlan:
         """
         plan_obj = pipeline_plan(
             PlanningState.from_dict(flexible_job_shop_start()),
-            flexible_job_shop_goal(),
+            _greedy_goal(),
             flexible_job_shop_actions(),
         )
         assert plan_obj is not None
@@ -238,7 +255,7 @@ class TestGreedyPlan:
     def test_greedy_resource_totals_are_pinned(self) -> None:
         plan_obj = pipeline_plan(
             PlanningState.from_dict(flexible_job_shop_start()),
-            flexible_job_shop_goal(),
+            _greedy_goal(),
             flexible_job_shop_actions(),
         )
         assert plan_obj is not None
@@ -247,21 +264,75 @@ class TestGreedyPlan:
         usage = {u.key: u for u in csp.resource_usage}
         assert usage["cost_usd"].total == GREEDY_COST_USD
         assert usage["duration_hours"].total == GREEDY_DURATION_HOURS
-        # No declared constraint → level is "info".
-        assert usage["cost_usd"].level == "info"
+        # The generous cap is a declared hard constraint, comfortably met.
+        assert usage["cost_usd"].level == "hard"
+        assert usage["cost_usd"].satisfied is True
+        # duration_hours has no declared constraint → level is "info".
         assert usage["duration_hours"].level == "info"
 
-    def test_greedy_score_reflects_cost_usd_minimize(self) -> None:
+    def test_greedy_hard_only_score_has_no_soft_component(self) -> None:
         plan_obj = pipeline_plan(
             PlanningState.from_dict(flexible_job_shop_start()),
-            flexible_job_shop_goal(),
+            _greedy_goal(),
             flexible_job_shop_actions(),
         )
         assert plan_obj is not None
         assert isinstance(plan_obj.score, HardSoftScore)
         assert plan_obj.score.hard == 0.0
-        assert plan_obj.score.soft == -GREEDY_COST_USD
+        assert plan_obj.score.soft == 0.0
         assert plan_obj.score.is_feasible() is True
+
+
+# ---------------------------------------------------------------------------
+# MINIMIZE objective selects the cheaper-USD alternative (issue #12)
+# ---------------------------------------------------------------------------
+
+
+class TestMinimizeObjectiveSelection:
+    """The default goal declares ``cost_usd -> MINIMIZE``.  The pipeline
+    compares the greedy plan against its single-blacklist alternatives and
+    CP-SAT picks the lowest ``cost_usd`` among them: ``prepare_gamma_standard``
+    saves $25 for two extra hours.  Before issue #12 the objective was
+    silently ignored whenever the greedy plan passed the hard checks."""
+
+    def _plan(self):
+        return pipeline_plan(
+            PlanningState.from_dict(flexible_job_shop_start()),
+            flexible_job_shop_goal(),
+            flexible_job_shop_actions(),
+        )
+
+    def test_minimize_picks_prepare_gamma_standard_without_any_cap(self) -> None:
+        plan_obj = self._plan()
+        assert plan_obj is not None
+        assert set(plan_obj.action_names) == ALT_ACTION_NAMES
+        assert plan_obj.total_cost == ALT_PLAN_COST
+
+    def test_minimize_compares_more_than_one_candidate(self) -> None:
+        plan_obj = self._plan()
+        assert plan_obj is not None
+        csp = plan_obj.metadata.csp
+        assert csp is not None
+        assert csp.plans_evaluated > 1
+        assert csp.status in (CSPStatus.FEASIBLE, CSPStatus.OPTIMAL)
+
+    def test_minimize_score_reflects_selected_cost_usd(self) -> None:
+        plan_obj = self._plan()
+        assert plan_obj is not None
+        assert isinstance(plan_obj.score, HardSoftScore)
+        assert plan_obj.score.hard == 0.0
+        assert plan_obj.score.soft == -ALT_PLAN_COST_USD
+        usage = {u.key: u for u in plan_obj.metadata.csp.resource_usage}
+        assert usage["cost_usd"].total == ALT_PLAN_COST_USD
+        assert usage["cost_usd"].level == "info"
+
+    def test_minimize_selection_keeps_the_temporal_schedule(self) -> None:
+        plan_obj = self._plan()
+        assert plan_obj is not None
+        csp = plan_obj.metadata.csp
+        assert csp is not None
+        assert len(csp.schedule) == len(ALT_ACTION_NAMES)
+        assert csp.makespan == timedelta(hours=ALT_PLAN_MAKESPAN_HOURS)
 
 
 # ---------------------------------------------------------------------------
@@ -340,11 +411,9 @@ class TestHardCapEnumeration:
     def test_alternative_plan_makespan_matches_gamma_critical_path(self) -> None:
         """The alternative plan's critical path is ``gamma_standard``.
 
-        ``optimize_plans`` does not compute a temporal schedule — it
-        only selects between candidate plans.  Re-plan with
-        ``prepare_gamma_express`` blacklisted and the default
-        (no-cap) goal so the pipeline routes through
-        ``validate_plan()`` which runs CP-SAT temporal scheduling:
+        Re-plan with ``prepare_gamma_express`` blacklisted and the
+        hard-only goal so the alternative is the primary plan and
+        ``validate_plan()`` runs CP-SAT temporal scheduling on it:
 
         - alpha: 2+1 = 3h
         - beta:  3+2 = 5h
@@ -354,7 +423,7 @@ class TestHardCapEnumeration:
         """
         plan_obj = pipeline_plan(
             PlanningState.from_dict(flexible_job_shop_start()),
-            flexible_job_shop_goal(),
+            _greedy_goal(),
             flexible_job_shop_actions(),
             blacklisted_actions=["prepare_gamma_express"],
         )
@@ -437,12 +506,16 @@ class TestInfeasibleHardCap:
 
 
 class TestSoftCap:
-    """A soft cap below the greedy aggregate records a penalty in
-    ``score.soft`` but leaves ``score.hard == 0`` and the plan feasible.
-    This demonstrates the hard/soft split added in Epic 3.
+    """A soft cap is a preference: the pipeline compares the greedy plan
+    against its alternatives and picks the one with the smallest weighted
+    violation (plus the MINIMIZE objective).  When no candidate can meet
+    the cap the selected plan still records the overflow in ``score.soft``
+    while ``score.hard`` stays 0 and the plan stays feasible.
     """
 
-    def test_soft_cap_violation_penalizes_soft_score(self) -> None:
+    def test_soft_cap_below_every_alternative_penalizes_soft_score(self) -> None:
+        # SOFT_CAP (100) is below every single-blacklist alternative, so
+        # the cheapest-USD plan ($125) is selected and penalized by $25.
         goal = flexible_job_shop_goal(max_cost_usd=SOFT_CAP, max_cost_level="soft")
         plan_obj = pipeline_plan(
             PlanningState.from_dict(flexible_job_shop_start()),
@@ -457,14 +530,53 @@ class TestSoftCap:
         usage_cost = next(u for u in csp.resource_usage if u.key == "cost_usd")
         assert usage_cost.level == "soft"
         assert usage_cost.satisfied is False
-        assert usage_cost.total == GREEDY_COST_USD
+        assert usage_cost.total == ALT_PLAN_COST_USD
 
-        # soft = -objective(GREEDY_COST_USD) - overflow(GREEDY_COST_USD - SOFT_CAP)
-        overflow = GREEDY_COST_USD - SOFT_CAP
+        # soft = -objective(ALT_PLAN_COST_USD) - overflow(ALT_PLAN_COST_USD - SOFT_CAP)
+        overflow = ALT_PLAN_COST_USD - SOFT_CAP
         assert isinstance(plan_obj.score, HardSoftScore)
         assert plan_obj.score.hard == 0.0
-        assert plan_obj.score.soft == -(GREEDY_COST_USD + overflow)
+        assert plan_obj.score.soft == -(ALT_PLAN_COST_USD + overflow)
         assert plan_obj.score.is_feasible() is True
+
+    def test_soft_cap_met_by_an_alternative_is_not_violated(self) -> None:
+        # The greedy plan ($150) breaks a soft cap at HARD_COST_CAP (130);
+        # the $125 alternative honours it, so selection avoids the penalty.
+        goal = flexible_job_shop_goal(max_cost_usd=HARD_COST_CAP, max_cost_level="soft")
+        plan_obj = pipeline_plan(
+            PlanningState.from_dict(flexible_job_shop_start()),
+            goal,
+            flexible_job_shop_actions(),
+        )
+        assert plan_obj is not None
+        csp = plan_obj.metadata.csp
+        assert csp is not None
+        usage_cost = next(u for u in csp.resource_usage if u.key == "cost_usd")
+        assert usage_cost.level == "soft"
+        assert usage_cost.satisfied is True
+        assert usage_cost.total == ALT_PLAN_COST_USD
+        assert isinstance(plan_obj.score, HardSoftScore)
+        assert plan_obj.score.soft == -ALT_PLAN_COST_USD
+
+    def test_greedy_plan_alone_would_be_penalized(self) -> None:
+        """Scoring semantics, independent of selection: validating the
+        greedy plan against the soft cap records the overflow."""
+        from langgoap.planner.csp import validate_plan
+        from langgoap.planner.pipeline import _score_from_csp
+
+        greedy = pipeline_plan(
+            PlanningState.from_dict(flexible_job_shop_start()),
+            _greedy_goal(),
+            flexible_job_shop_actions(),
+        )
+        assert greedy is not None
+        goal = flexible_job_shop_goal(max_cost_usd=SOFT_CAP, max_cost_level="soft")
+        meta = validate_plan(greedy, goal)
+        assert meta.status in (CSPStatus.FEASIBLE, CSPStatus.OPTIMAL)
+        score = _score_from_csp(greedy, goal, meta)
+        overflow = GREEDY_COST_USD - SOFT_CAP
+        assert score.hard == 0.0
+        assert score.soft == -(GREEDY_COST_USD + overflow)
 
 
 # ---------------------------------------------------------------------------
@@ -520,7 +632,7 @@ class TestGanttVisualization:
         )
         assert plan_obj is not None
         chart = render_ascii_gantt(plan_obj, width=80)
-        for name in GREEDY_ACTION_NAMES:
+        for name in plan_obj.action_names:
             assert name in chart
 
     def test_gantt_via_plan_method_matches_module_helper(self) -> None:
@@ -603,12 +715,14 @@ class TestEndToEndExecution:
         assert len(records) == 1
         record = records[0]
         assert record.outcome == "success"
-        assert set(record.plan_actions) == GREEDY_ACTION_NAMES
+        # The default goal minimizes cost_usd, so the executed plan is the
+        # prepare_gamma_standard alternative (see TestMinimizeObjectiveSelection).
+        assert set(record.plan_actions) == ALT_ACTION_NAMES
         # Expected cost is the A* total cost; actual matches because
         # every action in this tutorial is deterministic and succeeds
         # on the first try.
-        assert record.expected_cost == GREEDY_TOTAL_COST
-        assert record.actual_cost == GREEDY_TOTAL_COST
+        assert record.expected_cost == ALT_PLAN_COST
+        assert record.actual_cost == ALT_PLAN_COST
         assert record.replan_count == 0
 
     async def test_graph_ainvoke_reaches_goal_under_hard_cap(self) -> None:

@@ -111,20 +111,19 @@ class TestGoapLoopWithConstraints:
         result = graph.compile().invoke({"goal": goal, "world_state": {}})
         assert result["status"] == "goal_achieved"
         # Verify the plan has CSP metadata showing a feasible selection
-        plan_obj = result.get("plan")
+        plan_obj = graph.rehydrate(result)["plan"]
         assert plan_obj is not None, "graph must expose the executed plan"
         assert plan_obj.metadata.csp is not None, "CSP metadata must be attached"
         assert plan_obj.metadata.csp.status in (CSPStatus.OPTIMAL, CSPStatus.FEASIBLE)
 
     def test_no_feasible_plan(self) -> None:
-        """When A* finds a plan that CSP marks infeasible, the graph executes it anyway.
+        """When the only plan violates a hard constraint the run ends as no_plan.
 
-        CSP is advisory in the current implementation: a plan marked
-        INFEASIBLE by CSP is still handed to the executor.  The only
-        action has no execute callable, so declared effects are applied
-        and the goal is achieved regardless.  The critical assertion is
-        that the CSP metadata on the returned plan records INFEASIBLE,
-        proving the constraint was evaluated (not silently ignored).
+        Hard constraints are enforced by default (``GoalPolicy.on_infeasible
+        == "fail"``, issue #13): the planner rejects the CSP-infeasible plan
+        instead of handing it to the executor, and the
+        ``no_plan_explanation`` names the violated resource so a stuck
+        handler can relax it.
         """
         actions = [
             make_action(
@@ -139,10 +138,40 @@ class TestGoapLoopWithConstraints:
         )
         graph = GoapGraph(actions=actions)
         result = graph.compile().invoke({"goal": goal, "world_state": {}})
-        # Plan executes (advisory CSP does not block) → goal_achieved
+        assert result["status"] == "no_plan"
+        assert result.get("plan") is None
+        assert result["execution_history"] == []
+        expl = result["no_plan_explanation"]
+        assert expl["infeasible_plan"] == ["only_path"]
+        assert expl["resource_shortfalls"][0]["key"] == "cost_usd"
+
+    def test_infeasible_plan_executes_when_policy_opts_in(self) -> None:
+        """``on_infeasible="execute"`` keeps the pre-0.2 advisory behaviour.
+
+        The plan marked INFEASIBLE is still handed to the executor; the
+        only action has no execute callable, so declared effects are
+        applied and the goal is achieved.  The CSP metadata on the returned
+        plan must still record INFEASIBLE, proving the constraint was
+        evaluated rather than silently ignored.
+        """
+        from langgoap import GoalPolicy
+
+        actions = [
+            make_action(
+                "only_path",
+                eff={"done": True},
+                resources={"cost_usd": 500},
+            ),
+        ]
+        goal = GoalSpec(
+            conditions={"done": True},
+            constraints=(ConstraintSpec(key="cost_usd", max=10),),
+            policy=GoalPolicy(on_infeasible="execute"),
+        )
+        graph = GoapGraph(actions=actions)
+        result = graph.compile().invoke({"goal": goal, "world_state": {}})
         assert result["status"] == "goal_achieved"
-        # But the plan's CSP metadata must record the violation
-        plan_obj = result.get("plan")
+        plan_obj = graph.rehydrate(result)["plan"]
         assert plan_obj is not None, "graph must expose the executed plan"
         assert plan_obj.metadata.csp is not None, "CSP metadata must be attached"
         assert plan_obj.metadata.csp.status == CSPStatus.INFEASIBLE
@@ -195,7 +224,7 @@ class TestGoapLoopWithScheduling:
         graph = GoapGraph(actions=actions)
         result = graph.compile().invoke({"goal": goal, "world_state": {}})
         assert result["status"] == "goal_achieved"
-        plan_obj = result.get("plan")
+        plan_obj = graph.rehydrate(result)["plan"]
         assert plan_obj is not None, "graph must expose the executed plan"
         assert plan_obj.metadata.csp is not None, "CSP metadata must be attached"
         csp = plan_obj.metadata.csp
@@ -216,7 +245,7 @@ class TestGoapLoopWithScheduling:
         graph = GoapGraph(actions=actions)
         result = graph.compile().invoke({"goal": goal, "world_state": {}})
         assert result["status"] == "goal_achieved"
-        plan_obj = result.get("plan")
+        plan_obj = graph.rehydrate(result)["plan"]
         assert plan_obj is not None, "graph must expose the executed plan"
         assert plan_obj.metadata.csp is not None, "CSP metadata must be attached"
         csp = plan_obj.metadata.csp

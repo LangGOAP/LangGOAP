@@ -19,8 +19,9 @@ from langgoap.graph.nodes._helpers import (
     logger,
 )
 from langgoap.graph.nodes.observer import _is_goal_satisfied
-from langgoap.graph.state import GoapState
+from langgoap.graph.state import GoapState, rehydrate_state, serialize_updates
 from langgoap.planner.astar import plan as astar_plan
+from langgoap.planner.csp import CSPStatus
 from langgoap.planner.explain import explain_no_plan
 from langgoap.planner.types import Plan
 from langgoap.sensors import (
@@ -35,6 +36,44 @@ from langgoap.tracing import NullTracer, PlanningTracer, SafeTracerProxy
 if TYPE_CHECKING:
     from langgoap.planner.strategy import PlanningStrategy
     from langgoap.stuck import StuckHandler
+
+
+def _infeasible_no_plan_dict(plan: Plan, goal: GoalSpec) -> dict[str, Any]:
+    """Build the ``no_plan_explanation`` payload for a rejected infeasible plan.
+
+    Shaped like :meth:`~langgoap.planner.explain.NoPlanExplanation.to_dict`
+    (so ``NoPlanExplanation.from_dict`` still works) plus two extra keys:
+    ``infeasible_plan`` (the action names of the rejected plan) and
+    ``resource_shortfalls`` (one dict per violated hard constraint).
+    """
+    csp = plan.metadata.csp
+    shortfalls: list[dict[str, Any]] = []
+    suggestion = (
+        "The best plan found violates the goal's hard constraints (CSP status "
+        "infeasible). Relax a constraint, add cheaper actions, or set "
+        "GoalPolicy(on_infeasible='execute') to run it anyway."
+    )
+    explanation = csp.explanation if csp is not None else None
+    if explanation is not None:
+        shortfalls = [
+            {
+                "key": s.key,
+                "required": s.required,
+                "available_max": s.available_max,
+                "available_min": s.available_min,
+                "overrun": s.overrun,
+            }
+            for s in explanation.resource_shortfalls
+        ]
+        if explanation.suggestion:
+            suggestion = explanation.suggestion
+    return {
+        "unreachable_conditions": [],
+        "missing_preconditions": [],
+        "suggestion": suggestion,
+        "infeasible_plan": list(plan.action_names),
+        "resource_shortfalls": shortfalls,
+    }
 
 
 class GoapPlanner:
@@ -70,6 +109,18 @@ class GoapPlanner:
         from langgoap.stuck import MulticastStuckHandler
 
         self.actions = actions
+
+        self._actions_by_name = {a.name: a for a in self.actions}
+        # Resolvers answer questions the actions cannot: precondition keys
+        # that no action produces.  Effect keys and goal conditions are
+        # the planner's business, and asking an (LLM) resolver about them
+        # lets it declare the goal already achieved (issue #32).
+        produced: set[str] = set()
+        required: set[str] = set()
+        for a in self.actions:
+            produced.update(a.effect_key_set())
+            required.update(a.preconditions.keys())
+        self._resolver_keys: list[str] = sorted(required - produced)
         self._strategy = strategy
         # See ``GoapExecutor.__init__`` for the SafeTracerProxy rationale.
         self._tracer: PlanningTracer = SafeTracerProxy(tracer or NullTracer())
@@ -94,9 +145,9 @@ class GoapPlanner:
         """Human-readable label passed to ``on_plan_start``."""
         if self._strategy is not None:
             return type(self._strategy).__name__
-        if isinstance(goal, GoalSpec) and (
-            goal.constraints or goal.objectives is not None
-        ):
+        from langgoap.planner.pipeline import needs_csp
+
+        if isinstance(goal, GoalSpec) and needs_csp(goal):
             return "TwoPhasePipeline"
         return "AStar"
 
@@ -161,7 +212,9 @@ class GoapPlanner:
                 blacklisted_actions=blacklisted,
                 **extras,
             )
-        if goal.constraints or goal.objectives is not None or goal.metrics:
+        from langgoap.planner.pipeline import needs_csp
+
+        if needs_csp(goal):
             from langgoap.planner.pipeline import plan as pipeline_plan
 
             return pipeline_plan(
@@ -181,6 +234,48 @@ class GoapPlanner:
             record_expansions=self._record_expansions,
         )
 
+    def _plan_single_checked(
+        self,
+        start: PlanningState,
+        goal: GoalSpec,
+        blacklisted: list[str],
+        *,
+        prior_plan: Plan | None = None,
+        current_step: int = 0,
+    ) -> tuple[Plan | None, dict[str, Any] | None]:
+        """Run :meth:`_plan_single` and apply ``GoalPolicy.on_infeasible``.
+
+        Returns ``(plan, rejection)``.  When the strategy's best plan
+        carries ``CSPStatus.INFEASIBLE`` and the goal's policy is
+        ``"fail"`` (the default), the plan is rejected: ``plan`` is
+        ``None`` and ``rejection`` is the ``no_plan_explanation`` payload
+        describing the violated hard constraints.  Otherwise ``rejection``
+        is ``None`` and ``plan`` is whatever the strategy returned
+        (possibly an infeasible plan under ``on_infeasible="execute"``).
+        """
+        result = self._plan_single(
+            start,
+            goal,
+            blacklisted,
+            prior_plan=prior_plan,
+            current_step=current_step,
+        )
+        if result is None:
+            return None, None
+        csp = result.metadata.csp
+        if (
+            csp is not None
+            and csp.status == CSPStatus.INFEASIBLE
+            and goal.policy.on_infeasible == "fail"
+        ):
+            logger.warning(
+                "Rejecting plan %s: it violates a hard constraint "
+                "(CSP infeasible) and GoalPolicy.on_infeasible='fail'",
+                result.action_names,
+            )
+            return None, _infeasible_no_plan_dict(result, goal)
+        return result, None
+
     def _resolve_sequential_subgoal(
         self, raw_goal: MultiGoal, state: GoapState, was_replan: bool
     ) -> GoalSpec:
@@ -196,7 +291,7 @@ class GoapPlanner:
             )
         return effective_goal
 
-    def _plan_sequential_best_effort(
+    def _plan_sequential(
         self,
         raw_goal: MultiGoal,
         start_idx: int,
@@ -204,30 +299,29 @@ class GoapPlanner:
         state: GoapState,
         was_replan: bool,
         blacklisted: list[str],
-    ) -> tuple[Plan | None, GoalSpec, int]:
-        """Best-effort sequential sub-goal dispatch.
+    ) -> tuple[Plan | None, GoalSpec, int, list[int]]:
+        """Sequential sub-goal dispatch.
 
-        Starting from ``start_idx`` the planner tries each sub-goal in
-        order: the first one that (a) is already satisfied in the
-        sensed world state or (b) yields an A* plan becomes the
-        effective goal.  Infeasible sub-goals along the way are
-        skipped rather than failing the whole invocation.  The
-        previous strict-sequential behaviour would get stuck on the
-        first unreachable sub-goal (e.g. a per-ghost escape whose
-        single flee step is not enough) and collapse Pac-Man to
-        ``STOP``; the best-effort variant preserves forward progress
-        on later sub-goals even when an earlier one cannot be
-        established this tick.
+        Starting from ``start_idx`` the planner passes over sub-goals that
+        are already satisfied in the sensed world state and plans the first
+        one that is not.  A sub-goal that cannot be planned ends the
+        invocation (``MultiGoal.on_infeasible="fail"``, the default: the
+        docstring promises ``goals[0]`` to completion before ``goals[1]``).
+        With ``on_infeasible="skip"`` the planner records the index and
+        moves on, so forward progress on later stages survives an
+        unreachable earlier one (the per-entity Pac-Man use case); the
+        observer then finishes the run as ``partial`` (issue #35).
 
-        Returns ``(plan, effective_goal, landed_idx)``.  ``plan`` may
-        be ``None`` iff every sub-goal from ``start_idx`` onward
-        failed; in that case ``effective_goal`` and ``landed_idx``
-        refer to the final attempt so the caller's ``no_plan``
-        reporting still carries meaningful conditions.
+        Returns ``(plan, effective_goal, landed_idx, skipped)``.  ``plan``
+        is ``None`` when the dispatch stopped without a plan; then
+        ``effective_goal`` and ``landed_idx`` refer to the sub-goal that
+        failed so the caller's ``no_plan`` reporting carries meaningful
+        conditions.
         """
         total = len(raw_goal.goals)
         last_goal = raw_goal.goals[start_idx]
         last_idx = start_idx
+        skipped: list[int] = []
         for idx in range(start_idx, total):
             candidate = raw_goal.goals[idx]
             last_goal = candidate
@@ -251,13 +345,16 @@ class GoapPlanner:
                 )
             pkeys = _planning_keys(self.actions, candidate)
             start = PlanningState.from_dict(world_state, keys=pkeys)
-            plan = self._plan_single(start, candidate, blacklisted)
+            plan, _rejected = self._plan_single_checked(start, candidate, blacklisted)
             if plan is not None:
-                return plan, candidate, idx
+                return plan, candidate, idx, skipped
+            if raw_goal.on_infeasible == "fail":
+                return None, candidate, idx, skipped
+            skipped.append(idx)
             if idx + 1 < total:
                 logger.info(
-                    "MultiGoal (sequential) sub-goal %d/%d infeasible, "
-                    "best-effort fallback to %d/%d",
+                    "MultiGoal (sequential, on_infeasible='skip') sub-goal %d/%d "
+                    "infeasible, skipping to %d/%d",
                     idx + 1,
                     total,
                     idx + 2,
@@ -267,7 +364,7 @@ class GoapPlanner:
         # already satisfied without an actionable successor.  Return
         # ``None`` so the caller emits ``no_plan`` using the last
         # attempted goal's conditions for diagnostics.
-        return None, last_goal, last_idx
+        return None, last_goal, last_idx, skipped
 
     def _resolve_any_subgoal(
         self,
@@ -295,7 +392,7 @@ class GoapPlanner:
         for i, sg in enumerate(raw_goal.goals):
             sub_pkeys = _planning_keys(self.actions, sg)
             sub_start = PlanningState.from_dict(world_state, keys=sub_pkeys)
-            candidate = self._plan_single(sub_start, sg, blacklisted)
+            candidate, _rejected = self._plan_single_checked(sub_start, sg, blacklisted)
             if candidate is None:
                 continue
             if best_plan is None:
@@ -434,16 +531,20 @@ class GoapPlanner:
         # that abstraction lives at the planner/observer dispatch layer.
         extra_updates: dict[str, Any] = {}
         precomputed_result: Plan | None = None
+        infeasible_rejection: dict[str, Any] | None = None
         effective_goal: GoalSpec
         start: PlanningState
         if isinstance(raw_goal, MultiGoal):
             if raw_goal.mode == "sequential":
                 start_idx = state.get("current_subgoal_index", 0)
-                result, effective_goal, landed_idx = self._plan_sequential_best_effort(
+                result, effective_goal, landed_idx, skipped = self._plan_sequential(
                     raw_goal, start_idx, world_state, state, was_replan, blacklisted
                 )
                 if landed_idx != start_idx:
                     extra_updates["current_subgoal_index"] = landed_idx
+                if skipped:
+                    already = set(state.get("skipped_subgoals", []) or [])
+                    extra_updates["skipped_subgoals"] = sorted(already | set(skipped))
                 pkeys = _planning_keys(self.actions, effective_goal)
                 start = PlanningState.from_dict(world_state, keys=pkeys)
             else:  # "any"
@@ -480,7 +581,7 @@ class GoapPlanner:
             # Pass prior_plan/current_step on replans so repair-style
             # strategies can patch the in-flight plan; non-repair
             # strategies ignore them.
-            result = self._plan_single(
+            result, infeasible_rejection = self._plan_single_checked(
                 start,
                 effective_goal,
                 blacklisted,
@@ -488,10 +589,9 @@ class GoapPlanner:
                 current_step=state.get("current_step", 0) if was_replan else 0,
             )
 
-        # Detect blacklist fallback: if the plan uses a blacklisted action,
-        # the A* fallback in ``astar_plan`` fired because the filtered
-        # action set could not reach the goal. Clear the blacklist so the
-        # same fallback is not re-triggered on every subsequent replan.
+        # Detect the opt-in blacklist fallback (``GoalPolicy.blacklist_fallback``):
+        # if the plan uses a blacklisted action, ``astar_plan`` re-admitted it
+        # because the filtered action set could not reach the goal.
         used_blacklisted = False
         if result is not None and blacklisted:
             plan_names = set(result.action_names)
@@ -503,19 +603,39 @@ class GoapPlanner:
                 )
 
         if result is None:
-            no_plan_expl = explain_no_plan(start, effective_goal, self.actions)
-            logger.warning(
-                "A* found no plan for goal %s \u2014 %s",
-                dict(effective_goal.conditions),
-                no_plan_expl.suggestion,
-            )
+            if infeasible_rejection is not None:
+                no_plan_dict = infeasible_rejection
+                logger.warning(
+                    "No feasible plan for goal %s \u2014 %s",
+                    dict(effective_goal.conditions),
+                    no_plan_dict["suggestion"],
+                )
+            else:
+                no_plan_expl = explain_no_plan(start, effective_goal, self.actions)
+                no_plan_dict = no_plan_expl.to_dict()
+                if blacklisted:
+                    no_plan_dict["blacklisted_actions"] = list(blacklisted)
+                    if self._blacklist_is_the_cause(start, effective_goal):
+                        no_plan_dict["suggestion"] = (
+                            "Every remaining path to the goal needs a blacklisted "
+                            f"action ({', '.join(blacklisted)}). Raise "
+                            "ActionSpec.max_retries or attach an ActionQos for "
+                            "transient failures, add an alternative action, or "
+                            "set GoalPolicy(blacklist_fallback=True) to re-admit "
+                            "blacklisted actions."
+                        )
+                logger.warning(
+                    "A* found no plan for goal %s \u2014 %s",
+                    dict(effective_goal.conditions),
+                    no_plan_dict["suggestion"],
+                )
             return (
                 {
                     "plan": None,
                     "status": "no_plan",
                     "current_step": 0,
                     "replan_count": replan_count,
-                    "no_plan_explanation": no_plan_expl.to_dict(),
+                    "no_plan_explanation": no_plan_dict,
                     **extra_updates,
                 },
                 was_replan,
@@ -537,8 +657,10 @@ class GoapPlanner:
             **extra_updates,
         }
         if used_blacklisted:
+            # Clear the blacklist so the opt-in fallback does not fire on
+            # every subsequent replan, but keep ``action_failure_counts``:
+            # the history of what failed must survive (issue #15).
             updates["blacklisted_actions"] = []
-            updates["action_failure_counts"] = {}
         # Surface reflections from a ReflexionTracer (or MultiTracer containing
         # one) into GoapState so downstream components (e.g. PromptConditions)
         # can read them without coupling to the tracer directly.
@@ -549,6 +671,18 @@ class GoapPlanner:
                 for r in reflections
             ]
         return updates, was_replan
+
+    def _blacklist_is_the_cause(self, start: PlanningState, goal: GoalSpec) -> bool:
+        """True when a plan exists with every action admitted.
+
+        Diagnostic only, run on the (rare) no-plan path so the explanation
+        can distinguish "unreachable" from "reachable only through a
+        blacklisted action".
+        """
+        try:
+            return astar_plan(start, goal, self.actions) is not None
+        except Exception:  # pragma: no cover - diagnostics must not raise
+            return False
 
     def _run_sensors_sync(self, state: GoapState) -> dict[str, Any] | None:
         """Run sensors and return world_state update, or None if no sensors."""
@@ -571,6 +705,9 @@ class GoapPlanner:
         return world_state
 
     def __call__(self, state: GoapState) -> dict[str, Any]:
+        # Channel values are JSON-native: work with typed objects inside
+        # the node and serialise the update on the way out.
+        state = rehydrate_state(state, self._actions_by_name)
         # Anchor the wall-clock budget on the first planner invocation
         # so MaxWallClockPolicy has a stable start time.  The newly set
         # anchor is also added to the returned update dict so LangGraph
@@ -585,14 +722,14 @@ class GoapPlanner:
         if sensor_ws is not None:
             state = {**state, "world_state": sensor_ws}
 
-        # Run condition resolvers to fill in UNKNOWN/missing keys
+        # Run condition resolvers to fill in UNKNOWN/missing keys.  The
+        # resolved values are persisted below so the executed world state
+        # matches the planned one (issue #32).
+        resolved_ws: dict[str, Any] | None = None
         if self._resolvers:
             ws = dict(state.get("world_state", {}))
-            resolver_keys: list[str] = []
-            for a in self.actions:
-                resolver_keys.extend(a.preconditions.keys())
-                resolver_keys.extend(a.effect_key_set())
-            ws = resolve_conditions(self._resolvers, list(set(resolver_keys)), ws)
+            ws = resolve_conditions(self._resolvers, self._resolver_keys, ws)
+            resolved_ws = ws
             state = {**state, "world_state": ws}
 
         goal = state.get("goal")
@@ -611,14 +748,16 @@ class GoapPlanner:
             self._tracer.on_replan(reason, plan)
         else:
             self._tracer.on_plan_complete(plan, duration_ms)
-        if sensor_ws is not None and "world_state" not in updates:
-            updates["world_state"] = sensor_ws
+        observed_ws = resolved_ws if resolved_ws is not None else sensor_ws
+        if observed_ws is not None and "world_state" not in updates:
+            updates["world_state"] = observed_ws
         if new_wall_clock_anchor is not None:
             updates.setdefault("wall_clock_started_at", new_wall_clock_anchor)
-        return updates
+        return serialize_updates(updates)
 
     async def acall(self, state: GoapState) -> dict[str, Any]:
         """Async entry point \u2014 fires async tracer hooks."""
+        state = rehydrate_state(state, self._actions_by_name)
         new_wall_clock_anchor: float | None = None
         if state.get("wall_clock_started_at") is None:
             new_wall_clock_anchor = time.monotonic()
@@ -628,15 +767,11 @@ class GoapPlanner:
         if sensor_ws is not None:
             state = {**state, "world_state": sensor_ws}
 
+        resolved_ws: dict[str, Any] | None = None
         if self._resolvers:
             ws = dict(state.get("world_state", {}))
-            resolver_keys: list[str] = []
-            for a in self.actions:
-                resolver_keys.extend(a.preconditions.keys())
-                resolver_keys.extend(a.effect_key_set())
-            ws = await aresolve_conditions(
-                self._resolvers, list(set(resolver_keys)), ws
-            )
+            ws = await aresolve_conditions(self._resolvers, self._resolver_keys, ws)
+            resolved_ws = ws
             state = {**state, "world_state": ws}
 
         goal = state.get("goal")
@@ -657,11 +792,12 @@ class GoapPlanner:
             await self._tracer.aon_replan(reason, plan)
         else:
             await self._tracer.aon_plan_complete(plan, duration_ms)
-        if sensor_ws is not None and "world_state" not in updates:
-            updates["world_state"] = sensor_ws
+        observed_ws = resolved_ws if resolved_ws is not None else sensor_ws
+        if observed_ws is not None and "world_state" not in updates:
+            updates["world_state"] = observed_ws
         if new_wall_clock_anchor is not None:
             updates.setdefault("wall_clock_started_at", new_wall_clock_anchor)
-        return updates
+        return serialize_updates(updates)
 
 
 __all__ = ["GoapPlanner"]

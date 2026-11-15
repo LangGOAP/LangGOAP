@@ -26,7 +26,7 @@ can pick it up.
 ```python
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
-from langgoap import create_goap_agent
+from langgoap import create_goap_agent, rehydrate_state
 
 # A small counter so the demo can simulate the cheap writer flaking out
 # on its first N invocations.  Flip `fail_fast_n_times` to 1 to see the
@@ -98,6 +98,9 @@ result = agent.invoke(
         "goal": agent.goap_goal,
     }
 )
+# A compiled graph returns plain JSON state (so any checkpointer can store it);
+# rehydrate it to get Plan and ActionResult objects back.
+result = rehydrate_state(result, agent.goap_actions)
 ```
 
 `agent` is a compiled LangGraph graph. Use it with streaming,
@@ -173,7 +176,20 @@ world_state (relevant keys): {'topic': 'GOAP for LangGraph', 'brief': 'Brief on 
   resource caps (budgets, time windows) or objectives to minimize or
   maximize, the candidate plan is handed to a constraint solver
   ([OR-Tools CP-SAT](https://developers.google.com/optimization/cp/cp_solver))
-  that refines or replaces it to satisfy them.
+  that refines or replaces it to satisfy them. Preferences pick among
+  alternative plans with cost as the tie-breaker; a plan that breaks a
+  hard cap is reported as `no_plan` with the shortfalls instead of
+  being executed, unless the goal opts in.
+- **Predictable failure handling** — a failed action is retried up to
+  its `max_retries` and then blacklisted; the planner routes around it,
+  and when no path remains the run ends with `no_plan` and an
+  explanation naming the blacklisted actions. Re-admitting failed
+  actions is an explicit `GoalPolicy(blacklist_fallback=True)` opt-in.
+- **Any checkpointer** — the graph state is plain JSON, so every
+  LangGraph checkpointer works with its stock serializer. Build a
+  checkpointed run's input with `GoapGraph.initial_state(...)` and turn
+  a compiled graph's result back into objects with
+  `GoapGraph.rehydrate(...)`; `GoapGraph.invoke` does both.
 - **Plan scoring** — rank candidate plans by a single number
   (`SimpleScore`), by feasibility-first hard/soft tradeoffs
   (`HardSoftScore` — hard violations make a plan infeasible, soft

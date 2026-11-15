@@ -875,3 +875,86 @@ class TestParetoPlans:
         frontier = pareto_plans(plans, goal)
         for _, meta in frontier:
             assert meta.plans_evaluated == 4
+
+
+# ---------------------------------------------------------------------------
+# optimize_plans numerics (issue #26)
+# ---------------------------------------------------------------------------
+
+
+class TestOptimizePlansNumerics:
+    """Signed resource totals and sub-tick bound violations."""
+
+    def test_negative_resource_totals_are_representable(self) -> None:
+        loss = make_plan(
+            make_action("loss", eff={"done": True}, resources={"net_usd": -5.0})
+        )
+        gain = make_plan(
+            make_action("gain", eff={"done": True}, resources={"net_usd": 3.0})
+        )
+        goal = GoalSpec(conditions={"done": True}, objectives={"net_usd": Minimize})
+        chosen, meta = optimize_plans([gain, loss], goal)
+        assert meta.status in (CSPStatus.OPTIMAL, CSPStatus.FEASIBLE)
+        assert chosen.action_names == ["loss"]
+        assert dict(meta.objective_values)["net_usd"] == -5.0
+
+    def test_sub_tick_violation_is_not_selected(self) -> None:
+        # ``over`` is cheaper on A* cost but breaches the hard cap by less
+        # than one scaling tick (1/1000); the float check must win.
+        over = make_plan(
+            make_action(
+                "over", eff={"done": True}, cost=1.0, resources={"cost_usd": 10.0004}
+            )
+        )
+        under = make_plan(
+            make_action(
+                "under", eff={"done": True}, cost=2.0, resources={"cost_usd": 9.5}
+            )
+        )
+        goal = GoalSpec(
+            conditions={"done": True},
+            constraints=(ConstraintSpec(key="cost_usd", max=10.0),),
+        )
+        chosen, meta = optimize_plans([over, under], goal)
+        assert meta.status in (CSPStatus.OPTIMAL, CSPStatus.FEASIBLE)
+        assert chosen.action_names == ["under"]
+        usage = {u.key: u for u in meta.resource_usage}
+        assert usage["cost_usd"].satisfied is True
+
+    def test_sub_tick_violation_alone_is_infeasible(self) -> None:
+        over = make_plan(
+            make_action("over", eff={"done": True}, resources={"cost_usd": 10.0004})
+        )
+        goal = GoalSpec(
+            conditions={"done": True},
+            constraints=(ConstraintSpec(key="cost_usd", max=10.0),),
+        )
+        _, meta = optimize_plans([over], goal)
+        assert meta.status == CSPStatus.INFEASIBLE
+
+    def test_feasible_plan_at_a_fractional_bound_is_kept(self) -> None:
+        exact = make_plan(
+            make_action("exact", eff={"done": True}, resources={"cost_usd": 10.0005})
+        )
+        goal = GoalSpec(
+            conditions={"done": True},
+            constraints=(ConstraintSpec(key="cost_usd", max=10.0005),),
+        )
+        chosen, meta = optimize_plans([exact], goal)
+        assert meta.status in (CSPStatus.OPTIMAL, CSPStatus.FEASIBLE)
+        assert chosen.action_names == ["exact"]
+
+    def test_negative_total_against_a_minimum_bound(self) -> None:
+        deficit = make_plan(
+            make_action("deficit", eff={"done": True}, resources={"net_usd": -5.0})
+        )
+        surplus = make_plan(
+            make_action("surplus", eff={"done": True}, resources={"net_usd": 2.0})
+        )
+        goal = GoalSpec(
+            conditions={"done": True},
+            constraints=(ConstraintSpec(key="net_usd", min=0.0),),
+        )
+        chosen, meta = optimize_plans([deficit, surplus], goal)
+        assert meta.status in (CSPStatus.OPTIMAL, CSPStatus.FEASIBLE)
+        assert chosen.action_names == ["surplus"]

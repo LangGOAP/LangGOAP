@@ -265,7 +265,7 @@ class TestAsyncGoapExecutor:
 
         assert result["world_state"]["a"] is True
         assert result["current_step"] == 1
-        assert result["execution_history"][0].success is True
+        assert result["execution_history"][0]["success"] is True
 
     async def test_acall_with_sync_action(self) -> None:
         """Sync actions work through acall via run_in_executor."""
@@ -325,8 +325,8 @@ class TestAsyncGoapExecutor:
         result = await executor.acall(state)
 
         assert result["status"] == "action_failed"
-        assert result["execution_history"][0].success is False
-        assert "async boom" in (result["execution_history"][0].error or "")
+        assert result["execution_history"][0]["success"] is False
+        assert "async boom" in (result["execution_history"][0]["error"] or "")
 
     async def test_acall_no_plan_short_circuit(self) -> None:
         executor = GoapExecutor()
@@ -375,7 +375,7 @@ class TestAsyncGoapExecutor:
         result = await executor.acall(state)
 
         assert result["status"] == "action_failed"
-        assert "validation failed" in (result["execution_history"][0].error or "")
+        assert "validation failed" in (result["execution_history"][0]["error"] or "")
 
     async def test_acall_validator_rejection_rolls_back_world_state(self) -> None:
         """Async path mirrors the sync rollback contract on validator rejection."""
@@ -406,9 +406,9 @@ class TestAsyncGoapExecutor:
         assert "done" not in result["world_state"]
         assert "side_effect" not in result["world_state"]
         history_entry = result["execution_history"][0]
-        assert history_entry.state_after.get("done") is True
-        assert history_entry.state_after.get("side_effect") == "leaked"
-        assert history_entry.state_before == {"prior": "value"}
+        assert history_entry["state_after"].get("done") is True
+        assert history_entry["state_after"].get("side_effect") == "leaked"
+        assert history_entry["state_before"] == {"prior": "value"}
 
 
 # ---------------------------------------------------------------------------
@@ -490,7 +490,11 @@ class TestAsyncGoapGraph:
         assert result["world_state"]["b"] is True
 
     async def test_ainvoke_replanning_with_async(self) -> None:
-        """ainvoke handles replanning when async action fails."""
+        """ainvoke handles replanning when async action fails.
+
+        ``flaky`` is the only action, so it declares ``max_retries=1`` to
+        be retried after the transient failure instead of blacklisted.
+        """
         fail_count = 0
 
         async def sometimes_fails(ws: dict[str, Any]) -> dict[str, Any]:
@@ -505,6 +509,7 @@ class TestAsyncGoapGraph:
                 name="flaky",
                 effects={"done": True},
                 aexecute=sometimes_fails,
+                max_retries=1,
             ),
         ]
         graph = GoapGraph(actions=actions)

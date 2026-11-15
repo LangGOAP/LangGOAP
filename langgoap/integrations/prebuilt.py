@@ -19,19 +19,53 @@ construction time, before the graph is compiled.
 from __future__ import annotations
 
 import logging
+import random
 from datetime import timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 
 from langgoap.actions import ActionSpec
+from langgoap.conditions import AsyncConditionResolver, ConditionResolver
 from langgoap.goals import GoalSpec
 from langgoap.graph.builder import GoapGraph
+from langgoap.guards import ActionGuard, AsyncActionGuard
+from langgoap.history import StoreExecutionHistory
 from langgoap.integrations.tools import EffectValidator, goapify_tool
+from langgoap.planner.transitions import TransitionModel
+from langgoap.qos import ActionQos
+from langgoap.sensors import AsyncSensor, Sensor
+from langgoap.tracing import PlanningTracer
+from langgoap.types import CostFunction
+
+if TYPE_CHECKING:
+    from langgoap.planner.strategy import PlanningStrategy
+    from langgoap.stuck import StuckHandler
+    from langgoap.termination import TerminationPolicy
 
 logger = logging.getLogger(__name__)
+
+#: Keyword arguments that :meth:`GoapGraph.compile` accepts.  Anything else
+#: passed through ``**compile_kwargs`` is a typo or a ``GoapGraph.__init__``
+#: option that must be passed by its explicit name.
+COMPILE_OPTIONS: frozenset[str] = frozenset(
+    {"checkpointer", "store", "interrupt_before", "interrupt_after"}
+)
+
+
+def _check_compile_kwargs(func_name: str, compile_kwargs: dict[str, Any]) -> None:
+    unknown = sorted(set(compile_kwargs) - COMPILE_OPTIONS)
+    if unknown:
+        raise TypeError(
+            f"{func_name}() got an unexpected keyword argument "
+            f"{unknown[0]!r}. Compile options are "
+            f"{sorted(COMPILE_OPTIONS)}; GoapGraph options (tracer, strategy, "
+            "history, sensors, guards, resolvers, transition_model, rng, "
+            "stuck_handlers, max_stuck_iterations, termination_policies, "
+            "record_expansions) are explicit keyword arguments."
+        )
 
 
 def create_goap_agent(
@@ -47,9 +81,35 @@ def create_goap_agent(
     max_retries: dict[str, int] | None = None,
     durations: dict[str, timedelta] | None = None,
     effect_validators: dict[str, EffectValidator] | None = None,
-    **graph_kwargs: Any,
+    qos: dict[str, ActionQos] | None = None,
+    require_human_approval: dict[str, bool | type] | None = None,
+    human_input_key: dict[str, str] | None = None,
+    can_rerun: dict[str, bool] | None = None,
+    read_only: dict[str, bool] | None = None,
+    utility: dict[str, float | CostFunction] | None = None,
+    metadata: dict[str, dict[str, Any]] | None = None,
+    strategy: PlanningStrategy | None = None,
+    tracer: PlanningTracer | None = None,
+    history: StoreExecutionHistory | None = None,
+    sensors: list[Sensor | AsyncSensor] | None = None,
+    guards: list[ActionGuard | AsyncActionGuard] | None = None,
+    resolvers: list[ConditionResolver | AsyncConditionResolver] | None = None,
+    record_expansions: bool = False,
+    transition_model: TransitionModel | None = None,
+    rng: random.Random | None = None,
+    stuck_handlers: list[StuckHandler] | None = None,
+    max_stuck_iterations: int = 3,
+    termination_policies: list[TerminationPolicy] | None = None,
+    **compile_kwargs: Any,
 ) -> CompiledStateGraph:
     """Create a compiled GOAP agent from a list of LangChain tools and a goal.
+
+    The returned graph exposes LangGraph's ``invoke`` / ``ainvoke`` and
+    returns the JSON-native :class:`~langgoap.graph.state.GoapStateChannels`
+    form (``plan`` and ``execution_history`` entries are dicts); use
+    :func:`langgoap.rehydrate_state` to get typed objects.  Pass the goal
+    as ``agent.goap_goal`` (or ``goal.to_dict()`` when a checkpointer is
+    attached, because LangGraph persists the raw input).
 
     **NL-at-invocation-time limitation**: the returned ``CompiledStateGraph``
     only exposes LangGraph's ``invoke({"goal": GoalSpec, "world_state":
@@ -97,16 +157,42 @@ def create_goap_agent(
             ``(pre_state, post_state) -> bool`` invoked after
             execution.  Returning ``False`` signals the action did
             not produce its declared effects (soft failure → replan).
-        **graph_kwargs: Forwarded to
-            :meth:`GoapGraph.compile` (e.g. ``checkpointer``, ``store``).
+        qos: Optional mapping of tool name →
+            :class:`~langgoap.qos.ActionQos` retry / idempotency policy.
+        require_human_approval: Optional mapping of tool name → ``True``
+            (approve/deny gate) or a Pydantic ``BaseModel`` subclass
+            (typed form) that pauses the run with ``interrupt()`` before
+            the tool executes.
+        human_input_key: Optional mapping of tool name → world-state key
+            receiving the approved form.
+        can_rerun: Optional mapping of tool name → ``False`` for tools
+            that must not run twice in one run.
+        read_only: Optional mapping of tool name → ``True`` for tools
+            that do not mutate the world.
+        utility: Optional mapping of tool name → utility score for
+            :class:`~langgoap.planner.utility.UtilityStrategy`.
+        metadata: Optional mapping of tool name → free-form metadata dict.
+        strategy, tracer, history, sensors, guards, resolvers,
+        record_expansions, transition_model, rng, stuck_handlers,
+        max_stuck_iterations, termination_policies: Forwarded verbatim to
+            :class:`~langgoap.graph.builder.GoapGraph`; see its docstring.
+        **compile_kwargs: Forwarded to :meth:`GoapGraph.compile`
+            (``checkpointer``, ``store``, ``interrupt_before``,
+            ``interrupt_after``).  Any other name raises ``TypeError``.
 
     Returns:
         A compiled :class:`CompiledStateGraph` ready for ``.invoke()``
-        or ``.ainvoke()``.
+        or ``.ainvoke()``.  It carries two attributes for convenience:
+        ``goap_goal`` (the resolved :class:`GoalSpec`) and ``goap_actions``
+        (the wrapped :class:`ActionSpec` list, e.g. for
+        :func:`langgoap.rehydrate_state`).
 
     Raises:
         ValueError: If ``goal`` is a string but ``llm`` is ``None``.
+        TypeError: If ``**compile_kwargs`` contains a name that
+            :meth:`GoapGraph.compile` does not accept.
     """
+    _check_compile_kwargs("create_goap_agent", compile_kwargs)
     actions = _wrap_tools_as_actions(
         tools,
         preconditions=preconditions or {},
@@ -117,16 +203,39 @@ def create_goap_agent(
         max_retries=max_retries or {},
         durations=durations or {},
         effect_validators=effect_validators or {},
+        qos=qos or {},
+        require_human_approval=require_human_approval or {},
+        human_input_key=human_input_key or {},
+        can_rerun=can_rerun or {},
+        read_only=read_only or {},
+        utility=utility or {},
+        metadata=metadata or {},
     )
     resolved_goal = _resolve_goal(goal, llm=llm, actions=actions)
 
-    graph = GoapGraph(actions=actions)
-    compiled = graph.compile(**graph_kwargs)
-    # Attach the resolved goal as a public attribute so callers can
-    # pass it back to ``invoke({"goal": agent.goap_goal, ...})`` — the
-    # resolved goal is otherwise opaque to the caller when the input
-    # was a natural-language string.
+    graph = GoapGraph(
+        actions=actions,
+        strategy=strategy,
+        tracer=tracer,
+        history=history,
+        sensors=sensors,
+        guards=guards,
+        resolvers=resolvers,
+        record_expansions=record_expansions,
+        transition_model=transition_model,
+        rng=rng,
+        stuck_handlers=stuck_handlers,
+        max_stuck_iterations=max_stuck_iterations,
+        termination_policies=termination_policies,
+    )
+    compiled = graph.compile(**compile_kwargs)
+    # Attach the resolved goal and the wrapped actions as public attributes
+    # so callers can pass the goal back to ``invoke({"goal":
+    # agent.goap_goal, ...})`` (the resolved goal is otherwise opaque when
+    # the input was a natural-language string) and rehydrate the JSON
+    # result with ``rehydrate_state(result, agent.goap_actions)``.
     setattr(compiled, "goap_goal", resolved_goal)
+    setattr(compiled, "goap_actions", actions)
     return compiled
 
 
@@ -141,6 +250,13 @@ def _wrap_tools_as_actions(
     max_retries: dict[str, int],
     durations: dict[str, timedelta],
     effect_validators: dict[str, EffectValidator],
+    qos: dict[str, ActionQos],
+    require_human_approval: dict[str, bool | type],
+    human_input_key: dict[str, str],
+    can_rerun: dict[str, bool],
+    read_only: dict[str, bool],
+    utility: dict[str, float | CostFunction],
+    metadata: dict[str, dict[str, Any]],
 ) -> list[ActionSpec]:
     """Wrap every tool with ``goapify_tool`` and warn on empty-effect tools."""
     actions: list[ActionSpec] = []
@@ -161,6 +277,13 @@ def _wrap_tools_as_actions(
                 max_retries=max_retries.get(tool.name, 0),
                 duration=durations.get(tool.name),
                 effect_validator=effect_validators.get(tool.name),
+                qos=qos.get(tool.name),
+                require_human_approval=require_human_approval.get(tool.name, False),
+                human_input_key=human_input_key.get(tool.name),
+                can_rerun=can_rerun.get(tool.name, True),
+                read_only=read_only.get(tool.name, False),
+                utility=utility.get(tool.name),
+                metadata=metadata.get(tool.name),
             )
         )
     if tools_without_eff:

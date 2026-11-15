@@ -19,6 +19,7 @@ from langgraph.graph import StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from langgoap.goals import GoalSpec
+from langgoap.graph.state import plan_from_state
 from langgoap.integrations.prebuilt import create_goap_agent
 from langgoap.integrations.subgraph import GoapSubgraph, add_goap_subgraph
 from langgoap.integrations.tools import goapify_tool
@@ -266,7 +267,7 @@ class TestGoapifyToolResultKey:
         goal = GoalSpec(conditions={"greeted": True})
         state: GoapState = {"world_state": {"has_name": True}, "goal": goal}
         result = planner(state)
-        plan = result.get("plan")
+        plan = plan_from_state(result.get("plan"))
         assert plan is not None
         assert len(plan) == 1
         assert plan.actions[0].name == "greet"

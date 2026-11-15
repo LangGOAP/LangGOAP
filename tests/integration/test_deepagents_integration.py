@@ -280,8 +280,8 @@ class TestFormatGoapResult:
             "status": "goal_achieved",
             "world_state": {"done": True},
             "execution_history": [
-                {"action": "gather", "success": True},
-                {"action": "process", "success": True},
+                {"action_name": "gather", "success": True},
+                {"action_name": "process", "success": True},
             ],
         }
         text = format_goap_result(result)
