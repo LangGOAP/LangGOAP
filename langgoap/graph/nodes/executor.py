@@ -8,7 +8,7 @@ import random
 import time
 from typing import Any
 
-from langgoap.actions import ActionSpec
+from langgoap.actions import ActionSpec, ensure_unique_action_names
 from langgoap.graph.nodes._execution import (
     _apply_result,
     _build_failure,
@@ -86,6 +86,8 @@ class GoapExecutor:
         # type references on require_human_approval, human_input_key
         # strings, qos).  Restored by :meth:`_rebind` before each
         # action runs.
+        if actions:
+            ensure_unique_action_names(actions)
         self._actions: dict[str, ActionSpec] = (
             {a.name: a for a in actions} if actions else {}
         )

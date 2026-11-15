@@ -7,7 +7,7 @@ and observer nodes wired together for the GOAP execution loop.
 from __future__ import annotations
 
 import random
-from typing import TYPE_CHECKING, Any, Mapping, cast
+from typing import TYPE_CHECKING, Any, Literal, Mapping, cast
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import RunnableConfig, RunnableLambda
@@ -16,10 +16,15 @@ from langgraph.graph import START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Checkpointer
 
-from langgoap.actions import ActionSpec
+from langgoap.actions import ActionSpec, ensure_unique_action_names
 from langgoap.conditions import AsyncConditionResolver, ConditionResolver
 from langgoap.goals import GoalSpec, MultiGoal
-from langgoap.graph.nodes import GoapExecutor, GoapObserver, GoapPlanner
+from langgoap.graph.nodes import (
+    GoapExecutor,
+    GoapObserver,
+    GoapPlanner,
+    ParallelGoapExecutor,
+)
 from langgoap.graph.state import (
     GoapState,
     GoapStateChannels,
@@ -101,6 +106,11 @@ class GoapGraph:
             and runtime share one noise distribution.
         rng: Optional ``random.Random`` forwarded to the executor for
             reproducible sampling.
+        executor: ``"sequential"`` (default) runs one plan step per
+            executor node invocation with :class:`GoapExecutor`;
+            ``"parallel"`` wires :class:`ParallelGoapExecutor`, which runs
+            every independent action of the next wave in one invocation
+            (actions requiring human approval always run alone).
     """
 
     def __init__(
@@ -119,7 +129,14 @@ class GoapGraph:
         stuck_handlers: "list[StuckHandler] | None" = None,
         max_stuck_iterations: int = 3,
         termination_policies: "list[TerminationPolicy] | None" = None,
+        executor: Literal["sequential", "parallel"] = "sequential",
     ) -> None:
+        ensure_unique_action_names(actions)
+        if executor not in ("sequential", "parallel"):
+            raise ValueError(
+                f"executor must be 'sequential' or 'parallel', got {executor!r}"
+            )
+        self._executor_kind = executor
         self.actions = actions
         self._strategy = strategy
         self._tracer = tracer
@@ -181,7 +198,10 @@ class GoapGraph:
             stuck_handlers=self._stuck_handlers,
             max_stuck_iterations=self._max_stuck_iterations,
         )
-        executor = GoapExecutor(
+        executor_cls = (
+            ParallelGoapExecutor if self._executor_kind == "parallel" else GoapExecutor
+        )
+        executor = executor_cls(
             tracer=self._tracer,
             guards=self._guards,
             transition_model=self._transition_model,

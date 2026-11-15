@@ -137,7 +137,9 @@ class TestGoapifyToolParity:
         assert spec.can_rerun is False
         assert spec.read_only is True
         assert spec.utility == 3.0
-        assert dict(spec.metadata or {}) == {"team": "ops"}
+        # goapify_tool also records the tool description and args (issue #56).
+        assert dict(spec.metadata or {})["team"] == "ops"
+        assert "description" in dict(spec.metadata or {})
 
     def test_defaults_match_action_spec_defaults(self) -> None:
         spec = goapify_tool(gather_data, effects={"has_data": True})
@@ -148,7 +150,9 @@ class TestGoapifyToolParity:
         assert spec.can_rerun == default.can_rerun
         assert spec.read_only == default.read_only
         assert spec.utility == default.utility
-        assert spec.metadata == default.metadata
+        # Metadata is never None for a wrapped tool: it carries the tool's
+        # description and args (issue #56); nothing else is added.
+        assert set(dict(spec.metadata or {})) == {"description", "args"}
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +246,7 @@ class TestCreateGoapAgentPerToolOptions:
         specs = _by_name(agent)
         assert specs["gather_data"].qos is qos
         assert specs["gather_data"].read_only is True
-        assert dict(specs["gather_data"].metadata or {}) == {"team": "ops"}
+        assert dict(specs["gather_data"].metadata or {})["team"] == "ops"
         assert specs["write_report"].require_human_approval is True
         assert specs["write_report"].human_input_key == "sign_off"
         assert specs["write_report"].can_rerun is False

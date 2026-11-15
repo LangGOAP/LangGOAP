@@ -185,6 +185,63 @@ default behaviours change; each has an explicit opt-in that restores the
   (`dict`) `args_schema` via `tool.args` and forwards Pydantic aliased
   fields under their alias, accepting either the field name or the alias
   from `world_state`.
+- **Lazy decomposition keeps scores honest (#45).** A truncated plan no
+  longer advertises the full plan's CSP resource usage, schedule and
+  status: the prefix is re-validated and carries a `HardSoftScore` and
+  `CSPMetadata` for its own actions (search statistics stay from the
+  inner run), so MultiGoal `any` selection compares like with like.
+- **The router's choice reaches the tracer (#46).** After planning with a
+  `StrategyRouter`, the planner fires `on_strategy_chosen` /
+  `aon_strategy_chosen` with the dispatched strategy's name.
+- **Goal satisfaction wins over a cap hit on the same step (#47).** The
+  observer checks the goal before termination policies, so a three-step
+  plan under `MaxActionsPolicy(3)` reports `goal_achieved`; a cap hit
+  while the goal is still open terminates as before.
+- **Duplicate action names are rejected (#48).** `GoapGraph`,
+  `GoapPlanner`, `GoapExecutor` and `ParallelGoapExecutor` raise a
+  `ValueError` listing the duplicates.
+- **`GoapGraph(executor="parallel")` (#49)** wires `ParallelGoapExecutor`
+  without a hand-built graph; the on-ramps accept the same option.
+- **Wall-clock anchor is an epoch timestamp (#50).** The planner stores
+  `time.time()` in `wall_clock_started_at` and `MaxWallClockPolicy`
+  compares against the same clock, so a budget survives a checkpoint
+  resume in another process.
+- **`ExecutionRecord` reports what executed (#51).** `plan_actions` lists
+  the successful steps in order across replans, `actual_cost` sums their
+  costs, `expected_cost` stays the final plan's cost, and `metadata`
+  carries `failed_attempts` and `final_plan`.
+- **Class-based and decorator actions express every field (#52).**
+  `GoapAction` gained `resources`, `duration`, `metadata` and
+  `effect_keys` (with callable `effects`), all forwarded by `to_spec`;
+  `@goap_action` accepts a callable `effects` plus `effect_keys`.
+- **The async path is async all the way down (#53).** `GoapPlanner.acall`
+  uses a strategy's `aplan` when it has one and awaits coroutine stuck
+  handlers (new `AsyncStuckHandler` protocol; `MulticastStuckHandler`
+  dispatches both kinds); an async-only handler under `invoke` is skipped
+  with a warning instead of crashing.
+- **Renderers evaluate costs against each step's pre-state (#54)** and
+  draw no badge when a state-dependent cost cannot be evaluated instead of
+  raising; Gantt task ids are positional, so repeated names and names with
+  spaces stay valid and unique.
+- **Unknown models are not silently free (#55).** `CostAccumulator` warns
+  once per model name it has no price for (tokens are still counted) and
+  `require_known_pricing=True` raises instead. The bundled price table is
+  documented as a convenience snapshot; no new prices were added because
+  current list prices could not be verified from a primary source here.
+- **Tool descriptions reach the goal interpreter (#56).** `goapify_tool`
+  records `description` and `args` in the action's metadata (your metadata
+  keys win) and `build_action_catalog` shows both.
+- **Compact GOAP reports for agents (#57).** `format_goap_result` renders
+  every history entry as one line (with the error for failed steps) and
+  clips world-state values and key counts, so a tool result no longer
+  carries whole state snapshots.
+- **Notebook display is offline by default (#58).** `Plan` displays as
+  Markdown with the fenced Mermaid source; set `LANGGOAP_DISPLAY_PNG=1`
+  to also render an inline PNG through the mermaid.ink service.
+- **Goal interpreter prompt hygiene (#59).** `AzureChatOpenAI` and other
+  `BaseChatOpenAI` subclasses get the `function_calling` structured-output
+  path; the prompt shows only planning-relevant world-state keys, clipped
+  to `max_world_state_chars`, or none with `include_world_state=False`.
 - **`add_goap_subgraph` runs async and inherits the parent's config (#20).**
   The node is a `RunnableLambda` with sync and async variants, so
   async-only actions work under `parent.ainvoke`, and it passes the
@@ -249,11 +306,33 @@ default behaviours change; each has an explicit opt-in that restores the
   wheel in a throwaway virtualenv with the checkout's package moved aside,
   the minimum-versions job uses `uv sync --resolution lowest-direct`, and
   the `deepagents` extra is installed on the main test matrix (#42).
+- CI hygiene (#61): the Claude workflow is pinned to a commit and answers
+  only repository owners and members, and no longer requests an OIDC
+  token; `actions/checkout` and `astral-sh/setup-uv` versions are
+  aligned; Dependabot watches GitHub Actions and uv dependencies; the
+  reusable release workflow runs with `contents: read` plus
+  `id-token: write` instead of `write-all`; the PR quality report updates
+  one sticky comment; the scheduled full matrix runs weekly; the coverage
+  badge uses the same 80% floor as the quality gate.
 - `@pytest.mark.api` tests skip when `OPENAI_API_KEY` is unset instead of
   erroring, the `MemorySaver` checkpoint tests live in their own module
   so a missing Docker daemon no longer hides them, the Docker probe times
   out after two seconds, and the public-API test compares the version to
   the installed distribution metadata (#43).
+
+### Documentation
+
+- **Versioned docs document their own release (#60).** The docs workflow
+  builds each tag from its own git worktree and virtualenv instead of
+  main's checkout, the version switcher's `populate` receives the URL it
+  used to fetch `versions.json` (it threw a `ReferenceError` and left the
+  menu empty), and the Sphinx toolchain is a uv dependency group
+  (`uv sync --group docs`; `docs/requirements.txt` is gone).
+- **README claims match the code (#62).** Pareto filtering is described
+  as the standalone `pareto_plans` helper, `StoreExecutionHistory` is
+  described as using the `BaseStore` `get`/`put` interface and tested with
+  `InMemoryStore`, and the flagship screencast is described as three
+  agent shapes plus a disruption run.
 
 ### Dependencies
 

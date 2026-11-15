@@ -249,14 +249,23 @@ class LazyDecompositionStrategy:
             sim_state = sim_state.apply(a.get_effects(sim_dict))
             expected.append(sim_state)
 
-        # Preserve the inner strategy's metadata
-        return Plan(
+        # Keep the inner strategy's search statistics but never its CSP
+        # verdict: resource usage, schedule and status described the *full*
+        # plan.  Re-validate the truncated prefix so the score type and the
+        # CSP metadata describe what will actually run (issue #45).
+        truncated = Plan(
             actions=truncated_actions,
             expected_states=tuple(expected),
             total_cost=total_cost,
-            metadata=full_plan.metadata,
+            metadata=replace(full_plan.metadata, csp=None),
             score=SimpleScore(scalar=total_cost),
         )
+        from langgoap.planner.csp import validate_plan
+        from langgoap.planner.pipeline import _augment_plan, needs_csp
+
+        if needs_csp(goal):
+            return _augment_plan(truncated, goal, validate_plan(truncated, goal))
+        return truncated
 
 
 class AnytimePlanningStrategy:

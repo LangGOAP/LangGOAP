@@ -108,12 +108,14 @@ class MaxActionsPolicy:
 class MaxWallClockPolicy:
     """Terminate after ``seconds`` of wall-clock time since the run started.
 
-    Reads ``state['wall_clock_started_at']`` if present (set by the
-    planner on the first invocation, see
-    :class:`~langgoap.graph.nodes.GoapPlanner`).  When absent, the
-    policy uses ``time.monotonic`` snapshot lazily on first call;
-    construction time is intentionally **not** the start anchor so a
-    long-lived ``GoapGraph`` does not bleed wall-clock between runs.
+    Reads ``state['wall_clock_started_at']``, the epoch timestamp
+    (``time.time()``) the planner stores on its first invocation (see
+    :class:`~langgoap.graph.nodes.GoapPlanner`).  Epoch seconds survive a
+    checkpoint resume in another process, which a ``time.monotonic()``
+    reading would not (issue #50).  Until the planner has set the anchor
+    the policy returns ``None``; construction time is intentionally **not**
+    the start anchor so a long-lived ``GoapGraph`` does not bleed
+    wall-clock between runs.
     """
 
     seconds: float
@@ -123,7 +125,7 @@ class MaxWallClockPolicy:
         started_at = state.get("wall_clock_started_at")
         if started_at is None:
             return None
-        elapsed = time.monotonic() - float(started_at)
+        elapsed = time.time() - float(started_at)
         if elapsed >= self.seconds:
             return EarlyTermination(
                 policy_name=self.name,

@@ -20,6 +20,7 @@ without any further wiring.
 from __future__ import annotations
 
 import logging
+import warnings
 from typing import Any, Mapping
 from uuid import UUID
 
@@ -31,6 +32,9 @@ logger = logging.getLogger(__name__)
 # (input_per_1k, output_per_1k) USD pricing for LangChain models.
 # Pulled from publicly published pricing snapshots; users override per
 # call via ``cost_per_1k_tokens=...``.
+#: Convenience snapshot of per-1K-token prices (USD) for a few models.
+#: Not a maintained price list: models missing here are priced at the
+#: accumulator's defaults (see :class:`CostAccumulator`).
 DEFAULT_COST_PER_1K_TOKENS: dict[str, tuple[float, float]] = {
     # OpenAI
     "gpt-4o": (0.0025, 0.01),
@@ -81,8 +85,16 @@ class CostAccumulator(BaseCallbackHandler):
             Merged with :data:`DEFAULT_COST_PER_1K_TOKENS` — your
             entries win on collision.
         default_input_price: Used when no model-specific entry matches.
-            Defaults to ``0.0`` (unknown models contribute zero cost).
+            Defaults to ``0.0``; with both defaults at zero an unknown
+            model is counted at $0 and a ``UserWarning`` is emitted once
+            per model name so the gap is visible (issue #55).
         default_output_price: As above.
+        require_known_pricing: When ``True``, an unknown model raises
+            ``ValueError`` instead of being priced at the defaults.
+
+    The bundled :data:`DEFAULT_COST_PER_1K_TOKENS` is a convenience
+    snapshot, not a maintained price list: pass ``cost_per_1k_tokens`` for
+    any model you rely on for budget enforcement.
     """
 
     def __init__(
@@ -92,8 +104,11 @@ class CostAccumulator(BaseCallbackHandler):
         cost_per_1k_tokens: Mapping[str, tuple[float, float]] | None = None,
         default_input_price: float = 0.0,
         default_output_price: float = 0.0,
+        require_known_pricing: bool = False,
     ) -> None:
         self._world_state = world_state
+        self._require_known_pricing = require_known_pricing
+        self._warned_models: set[str] = set()
         self._pricing: dict[str, tuple[float, float]] = {
             **DEFAULT_COST_PER_1K_TOKENS,
             **(dict(cost_per_1k_tokens) if cost_per_1k_tokens else {}),
@@ -117,6 +132,27 @@ class CostAccumulator(BaseCallbackHandler):
         )
         if candidates:
             return self._pricing[candidates[0]]
+        if self._require_known_pricing:
+            raise ValueError(
+                f"CostAccumulator has no pricing for model {model_name!r}. Pass "
+                "cost_per_1k_tokens={...} with an entry for it, or set "
+                "default_input_price/default_output_price."
+            )
+        if (
+            self._default_input_price == 0.0
+            and self._default_output_price == 0.0
+            and model_name not in self._warned_models
+        ):
+            self._warned_models.add(model_name)
+            warnings.warn(
+                f"CostAccumulator has no pricing for model {model_name!r}; its "
+                "tokens are counted but priced at $0, so cost-based policies "
+                "cannot fire. Pass cost_per_1k_tokens={...}, set "
+                "default_input_price/default_output_price, or use "
+                "require_known_pricing=True to fail instead.",
+                UserWarning,
+                stacklevel=3,
+            )
         return self._default_input_price, self._default_output_price
 
     def _extract_usage(self, response: Any) -> tuple[int, int, str | None]:

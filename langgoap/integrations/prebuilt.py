@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 import random
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
@@ -64,7 +64,7 @@ def _check_compile_kwargs(func_name: str, compile_kwargs: dict[str, Any]) -> Non
             f"{sorted(COMPILE_OPTIONS)}; GoapGraph options (tracer, strategy, "
             "history, sensors, guards, resolvers, transition_model, rng, "
             "stuck_handlers, max_stuck_iterations, termination_policies, "
-            "record_expansions) are explicit keyword arguments."
+            "record_expansions, executor) are explicit keyword arguments."
         )
 
 
@@ -100,6 +100,7 @@ def create_goap_agent(
     stuck_handlers: list[StuckHandler] | None = None,
     max_stuck_iterations: int = 3,
     termination_policies: list[TerminationPolicy] | None = None,
+    executor: Literal["sequential", "parallel"] = "sequential",
     **compile_kwargs: Any,
 ) -> CompiledStateGraph:
     """Create a compiled GOAP agent from a list of LangChain tools and a goal.
@@ -174,7 +175,7 @@ def create_goap_agent(
         metadata: Optional mapping of tool name → free-form metadata dict.
         strategy, tracer, history, sensors, guards, resolvers,
         record_expansions, transition_model, rng, stuck_handlers,
-        max_stuck_iterations, termination_policies: Forwarded verbatim to
+        max_stuck_iterations, termination_policies, executor: Forwarded verbatim to
             :class:`~langgoap.graph.builder.GoapGraph`; see its docstring.
         **compile_kwargs: Forwarded to :meth:`GoapGraph.compile`
             (``checkpointer``, ``store``, ``interrupt_before``,
@@ -227,6 +228,7 @@ def create_goap_agent(
         stuck_handlers=stuck_handlers,
         max_stuck_iterations=max_stuck_iterations,
         termination_policies=termination_policies,
+        executor=executor,
     )
     compiled = graph.compile(**compile_kwargs)
     # Attach the resolved goal and the wrapped actions as public attributes

@@ -12,7 +12,7 @@ import asyncio
 import random
 from typing import Any
 
-from langgoap.actions import ActionSpec
+from langgoap.actions import ActionSpec, ensure_unique_action_names
 from langgoap.graph.nodes._execution import (
     _apply_result,
     _build_failure,
@@ -170,6 +170,8 @@ class ParallelGoapExecutor:
         # require_human_approval class refs, human_input_key strings).
         # See :class:`GoapExecutor._rebind` for the full rationale —
         # same pattern, applied per-action inside each parallel wave.
+        if actions:
+            ensure_unique_action_names(actions)
         self._actions: dict[str, ActionSpec] = (
             {a.name: a for a in actions} if actions else {}
         )

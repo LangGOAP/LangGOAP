@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextvars
 import time
 from typing import TYPE_CHECKING, Any
 
-from langgoap.actions import ActionSpec
+from langgoap.actions import ActionSpec, ensure_unique_action_names
 from langgoap.conditions import (
     AsyncConditionResolver,
     ConditionResolver,
@@ -76,6 +78,46 @@ def _infeasible_no_plan_dict(plan: Plan, goal: GoalSpec) -> dict[str, Any]:
     }
 
 
+# Per-task overrides consulted by the planning core.  ``acall`` sets them
+# around a worker-thread run of the (synchronous) planning core so a
+# strategy's ``aplan`` and coroutine stuck handlers execute on the event
+# loop while the core stays single-sourced (issue #53).
+_STRATEGY_OVERRIDE: contextvars.ContextVar[Any] = contextvars.ContextVar(
+    "langgoap_strategy_override", default=None
+)
+_STUCK_OVERRIDE: contextvars.ContextVar[Any] = contextvars.ContextVar(
+    "langgoap_stuck_override", default=None
+)
+
+
+class _AsyncStrategyBridge:
+    """Expose a strategy's ``aplan`` as a blocking ``plan`` for the core thread."""
+
+    def __init__(self, inner: Any, loop: asyncio.AbstractEventLoop) -> None:
+        self._inner = inner
+        self._loop = loop
+
+    def plan(self, start: Any, goal: Any, actions: Any, **kwargs: Any) -> Any:
+        future = asyncio.run_coroutine_threadsafe(
+            self._inner.aplan(start, goal, actions, **kwargs), self._loop
+        )
+        return future.result()
+
+
+class _AsyncStuckBridge:
+    """Expose ``MulticastStuckHandler.ahandle_stuck`` as a blocking call."""
+
+    def __init__(self, inner: Any, loop: asyncio.AbstractEventLoop) -> None:
+        self._inner = inner
+        self._loop = loop
+
+    def handle_stuck(self, state: Any, reason: Any) -> Any:
+        future = asyncio.run_coroutine_threadsafe(
+            self._inner.ahandle_stuck(state, reason), self._loop
+        )
+        return future.result()
+
+
 class GoapPlanner:
     """LangGraph node that invokes the planner.
 
@@ -108,6 +150,7 @@ class GoapPlanner:
     ) -> None:
         from langgoap.stuck import MulticastStuckHandler
 
+        ensure_unique_action_names(actions)
         self.actions = actions
 
         self._actions_by_name = {a.name: a for a in self.actions}
@@ -195,7 +238,8 @@ class GoapPlanner:
         :class:`~langgoap.planner.repair.RepairStrategy`) consume them
         to patch a partially-executed plan instead of replanning.
         """
-        if self._strategy is not None:
+        strategy = _STRATEGY_OVERRIDE.get() or self._strategy
+        if strategy is not None:
             # Forward repair kwargs only when meaningful so that legacy
             # user strategies whose ``plan`` signature predates the
             # widened Protocol (no ``prior_plan``/``current_step`` kwargs)
@@ -205,7 +249,7 @@ class GoapPlanner:
             if prior_plan is not None:
                 extras["prior_plan"] = prior_plan
                 extras["current_step"] = current_step
-            return self._strategy.plan(
+            return strategy.plan(
                 start,
                 goal,
                 self.actions,
@@ -430,7 +474,8 @@ class GoapPlanner:
         from langgoap.stuck import StuckHandlingResultCode
 
         updates, was_replan = self._plan_core(state)
-        if self._stuck_handler is None:
+        stuck_handler = _STUCK_OVERRIDE.get() or self._stuck_handler
+        if stuck_handler is None:
             return updates, was_replan
 
         recovered_world_state: dict[str, Any] | None = None
@@ -443,7 +488,7 @@ class GoapPlanner:
                     updates["goal"] = recovered_goal
                 return updates, was_replan
             reason_dict = updates.get("no_plan_explanation")
-            handler_result = self._stuck_handler.handle_stuck(state, reason_dict)
+            handler_result = stuck_handler.handle_stuck(state, reason_dict)
             if handler_result.code is not StuckHandlingResultCode.REPLAN:
                 logger.info(
                     "Stuck handlers exhausted on iteration %d: %s",
@@ -470,6 +515,43 @@ class GoapPlanner:
             state = recovered_state
             updates, was_replan = self._plan_core(state)
         return updates, was_replan
+
+    async def _aplan_with_stuck_recovery(
+        self, state: GoapState
+    ) -> tuple[dict[str, Any], bool]:
+        """Async entry to the planning core (issue #53).
+
+        When the strategy exposes ``aplan`` or a stuck handler is coroutine
+        based, the synchronous core runs in a worker thread with bridges
+        that hand those coroutines back to this event loop; otherwise the
+        core runs inline exactly as under ``invoke``.
+        """
+        strategy = self._strategy
+        wants_aplan = strategy is not None and hasattr(strategy, "aplan")
+        wants_async_stuck = (
+            self._stuck_handler is not None and self._stuck_handler.has_async_handlers
+        )
+        if not (wants_aplan or wants_async_stuck):
+            return self._plan_with_stuck_recovery(state)
+        loop = asyncio.get_running_loop()
+        tokens: list[contextvars.Token[Any]] = []
+        if wants_aplan:
+            tokens.append(_STRATEGY_OVERRIDE.set(_AsyncStrategyBridge(strategy, loop)))
+        if self._stuck_handler is not None:
+            tokens.append(
+                _STUCK_OVERRIDE.set(_AsyncStuckBridge(self._stuck_handler, loop))
+            )
+        try:
+            # ``to_thread`` copies the current context, so the overrides are
+            # visible to the core while the loop stays free to run the
+            # bridged coroutines.
+            return await asyncio.to_thread(self._plan_with_stuck_recovery, state)
+        finally:
+            for token in reversed(tokens):
+                if token.var is _STRATEGY_OVERRIDE:
+                    _STRATEGY_OVERRIDE.reset(token)
+                else:
+                    _STUCK_OVERRIDE.reset(token)
 
     def _plan_core(self, state: GoapState) -> tuple[dict[str, Any], bool]:
         """Shared planning logic for sync and async entry points.
@@ -709,12 +791,14 @@ class GoapPlanner:
         # the node and serialise the update on the way out.
         state = rehydrate_state(state, self._actions_by_name)
         # Anchor the wall-clock budget on the first planner invocation
-        # so MaxWallClockPolicy has a stable start time.  The newly set
+        # so MaxWallClockPolicy has a stable start time.  Epoch seconds, not
+        # ``time.monotonic()``: the anchor is checkpointed and may be read
+        # by another process after a resume (issue #50).  The newly set
         # anchor is also added to the returned update dict so LangGraph
         # persists it for downstream nodes.
         new_wall_clock_anchor: float | None = None
         if state.get("wall_clock_started_at") is None:
-            new_wall_clock_anchor = time.monotonic()
+            new_wall_clock_anchor = time.time()
             state = {**state, "wall_clock_started_at": new_wall_clock_anchor}
 
         # Run sensors before planning
@@ -740,6 +824,11 @@ class GoapPlanner:
         started = time.perf_counter()
         updates, was_replan = self._plan_with_stuck_recovery(state)
         duration_ms = (time.perf_counter() - started) * 1000
+        chosen = getattr(self._strategy, "last_chosen", None)
+        if chosen:
+            # A StrategyRouter records the strategy it dispatched to; relay
+            # it to the tracer's dedicated hook (issue #46).
+            self._tracer.on_strategy_chosen(chosen)
         plan = updates.get("plan")
         if plan is None:
             self._tracer.on_plan_failed(updates.get("status", "no_plan"), duration_ms)
@@ -760,7 +849,7 @@ class GoapPlanner:
         state = rehydrate_state(state, self._actions_by_name)
         new_wall_clock_anchor: float | None = None
         if state.get("wall_clock_started_at") is None:
-            new_wall_clock_anchor = time.monotonic()
+            new_wall_clock_anchor = time.time()
             state = {**state, "wall_clock_started_at": new_wall_clock_anchor}
 
         sensor_ws = await self._run_sensors_async(state)
@@ -780,8 +869,11 @@ class GoapPlanner:
         tracer_goal = self._effective_goal_for_tracer(state)
         await self._tracer.aon_plan_start(tracer_goal, world_state, strategy_name)
         started = time.perf_counter()
-        updates, was_replan = self._plan_with_stuck_recovery(state)
+        updates, was_replan = await self._aplan_with_stuck_recovery(state)
         duration_ms = (time.perf_counter() - started) * 1000
+        chosen = getattr(self._strategy, "last_chosen", None)
+        if chosen:
+            await self._tracer.aon_strategy_chosen(chosen)
         plan = updates.get("plan")
         if plan is None:
             await self._tracer.aon_plan_failed(

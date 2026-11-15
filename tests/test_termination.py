@@ -108,7 +108,7 @@ class TestMaxWallClockPolicy:
         )
 
     def test_below_budget_does_not_terminate(self) -> None:
-        anchor = time.monotonic()  # essentially now
+        anchor = time.time()  # essentially now
         assert (
             MaxWallClockPolicy(seconds=10.0).should_terminate(
                 _state(wall_clock_started_at=anchor)
@@ -118,7 +118,7 @@ class TestMaxWallClockPolicy:
 
     def test_above_budget_terminates(self) -> None:
         # Anchor set far in the past — budget already blown.
-        anchor = time.monotonic() - 5.0
+        anchor = time.time() - 5.0
         decision = MaxWallClockPolicy(seconds=0.5).should_terminate(
             _state(wall_clock_started_at=anchor)
         )

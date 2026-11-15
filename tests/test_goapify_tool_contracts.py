@@ -113,3 +113,41 @@ class TestInputFiltering:
         assert action.aexecute is not None
         update = await action.aexecute({"user_id": "u2"})
         assert update == {"greeted": True, "greeting": "hi u2"}
+
+
+class TestToolDescriptionReachesTheCatalog:
+    """Issue #56: the docstring written for the LLM must survive wrapping."""
+
+    def _tool(self) -> StructuredTool:
+        return StructuredTool.from_function(
+            func=_greet,
+            name="greet",
+            description="Greet a user by their id.",
+            args_schema=_GreetArgs,
+        )
+
+    def test_metadata_carries_description_and_args(self) -> None:
+        spec = goapify_tool(self._tool(), effects={"greeted": True})
+        assert spec.metadata is not None
+        assert spec.metadata["description"] == "Greet a user by their id."
+        assert "user_id" in spec.metadata["args"]
+
+    def test_user_metadata_merges_and_wins(self) -> None:
+        spec = goapify_tool(
+            self._tool(),
+            effects={"greeted": True},
+            metadata={"team": "ops", "description": "custom"},
+        )
+        assert spec.metadata is not None
+        assert spec.metadata["description"] == "custom"
+        assert spec.metadata["team"] == "ops"
+        assert "args" in spec.metadata
+
+    def test_catalog_shows_description_and_args(self) -> None:
+        from langgoap.interpreter import build_action_catalog
+
+        text = build_action_catalog(
+            [goapify_tool(self._tool(), effects={"greeted": True})]
+        )
+        assert "Greet a user by their id." in text
+        assert "user_id" in text

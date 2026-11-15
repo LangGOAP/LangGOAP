@@ -19,7 +19,7 @@ worker nodes — see the ``flexible_job_shop`` tutorial for an example.
 from __future__ import annotations
 
 import random
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from langchain_core.runnables import Runnable, RunnableConfig, RunnableLambda
 from langgraph.graph import StateGraph
@@ -50,7 +50,7 @@ class GoapSubgraph:
             NL interpretation must happen before this class is built.
         strategy, tracer, history, sensors, guards, resolvers,
         record_expansions, transition_model, rng, stuck_handlers,
-        max_stuck_iterations, termination_policies: Forwarded verbatim to
+        max_stuck_iterations, termination_policies, executor: Forwarded verbatim to
             :class:`~langgoap.graph.builder.GoapGraph`; see its docstring.
 
     Example::
@@ -85,6 +85,7 @@ class GoapSubgraph:
         stuck_handlers: list[StuckHandler] | None = None,
         max_stuck_iterations: int = 3,
         termination_policies: list[TerminationPolicy] | None = None,
+        executor: Literal["sequential", "parallel"] = "sequential",
     ) -> None:
         self.actions = actions
         self.goal = goal
@@ -102,6 +103,7 @@ class GoapSubgraph:
             stuck_handlers=stuck_handlers,
             max_stuck_iterations=max_stuck_iterations,
             termination_policies=termination_policies,
+            executor=executor,
         )
 
     def compile(self, **compile_kwargs: Any) -> CompiledStateGraph:
@@ -141,6 +143,7 @@ def add_goap_subgraph(
     stuck_handlers: list[StuckHandler] | None = None,
     max_stuck_iterations: int = 3,
     termination_policies: list[TerminationPolicy] | None = None,
+    executor: Literal["sequential", "parallel"] = "sequential",
 ) -> None:
     """Attach a GOAP sub-graph as a node inside a parent ``StateGraph``.
 
@@ -180,7 +183,7 @@ def add_goap_subgraph(
             checkpointer is normally inherited from the parent).
         strategy, tracer, history, sensors, guards, resolvers,
         record_expansions, transition_model, rng, stuck_handlers,
-        max_stuck_iterations, termination_policies: Forwarded verbatim to
+        max_stuck_iterations, termination_policies, executor: Forwarded verbatim to
             :class:`~langgoap.graph.builder.GoapGraph`; see its docstring.
     """
     sub = GoapSubgraph(
@@ -198,6 +201,7 @@ def add_goap_subgraph(
         stuck_handlers=stuck_handlers,
         max_stuck_iterations=max_stuck_iterations,
         termination_policies=termination_policies,
+        executor=executor,
     )
     compiled_sub = sub.compile(**(compile_kwargs or {}))
 

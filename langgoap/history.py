@@ -85,11 +85,12 @@ class ExecutionRecord:
             derived from ``GoalSpec``).
         goal_conditions: The goal's target condition dict, stored for
             later diagnostics.
-        plan_actions: Tuple of action names in execution order.
+        plan_actions: Names of the steps that executed successfully, in
+            order, across every plan of the run.
         expected_cost: The plan's ``total_cost`` at planning time.
-        actual_cost: Realised cost after execution.  Equal to
-            ``expected_cost`` for purely deterministic runs; may
-            differ when dynamic costs change mid-execution.
+        actual_cost: Realised cost after execution: the sum of ``get_cost``
+            over the successful steps in ``plan_actions`` (issue #51).
+            Failed attempts are listed in ``metadata["failed_attempts"]``.
         outcome: One of ``"success"``, ``"failed"``,
             ``"partial"``.  Open string so new tracer implementations
             can introduce extra states without churning the schema.

@@ -162,6 +162,7 @@ from langgoap.serde import (
 )
 from langgoap.state import PlanningState, infer_start_state
 from langgoap.stuck import (
+    AsyncStuckHandler,
     FunctionalStuckHandler,
     MulticastStuckHandler,
     StuckHandler,
@@ -310,6 +311,7 @@ __all__ = [
     "FunctionalStuckHandler",
     "MulticastStuckHandler",
     "StuckHandler",
+    "AsyncStuckHandler",
     "StuckHandlerResult",
     "StuckHandlingResultCode",
     # Early-termination policies

@@ -173,7 +173,9 @@ def goapify_tool(
         utility: Optional utility score (static or callable) consumed by
             :class:`~langgoap.planner.utility.UtilityStrategy`.
         metadata: Free-form, JSON-serialisable metadata attached to the
-            action.
+            action.  Merged over ``{"description": tool.description,
+            "args": tool.args}`` (your keys win), so the natural-language
+            goal interpreter sees the tool's docstring and arguments.
 
         Every remaining :class:`ActionSpec` field has the same meaning and
         default as on :class:`ActionSpec` itself, so a tool wrapped here is
@@ -220,6 +222,15 @@ def goapify_tool(
 
     runner = _strict_runner(tool)
 
+    # The tool's description and argument schema are what the NL goal
+    # interpreter shows the model; keep them on the action (issue #56).
+    tool_metadata: dict[str, Any] = {"description": tool.description or ""}
+    try:
+        tool_metadata["args"] = dict(tool.args)
+    except Exception:  # pragma: no cover - exotic schema objects
+        tool_metadata["args"] = {}
+    merged_metadata: dict[str, Any] = {**tool_metadata, **(metadata or {})}
+
     def _execute(state: dict[str, Any]) -> dict[str, Any]:
         raw_output = runner.invoke(_tool_input(tool, state))
         return _merge(raw_output)
@@ -248,7 +259,7 @@ def goapify_tool(
         can_rerun=can_rerun,
         read_only=read_only,
         utility=utility,
-        metadata=metadata,
+        metadata=merged_metadata,
     )
 
 

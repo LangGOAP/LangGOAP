@@ -126,6 +126,18 @@ def build_action_catalog(actions: list[ActionSpec]) -> str:
             parts.append(f"  Effects: {dict(action.effects)}")  # type: ignore[arg-type]
         if action.metadata and action.metadata.get("description"):
             parts.append(f"  Description: {action.metadata['description']}")
+        if action.metadata and action.metadata.get("args"):
+            args = action.metadata["args"]
+            rendered = ", ".join(
+                (
+                    f"{name}: {spec.get('type', 'any')}"
+                    if isinstance(spec, dict)
+                    else str(name)
+                )
+                for name, spec in dict(args).items()
+            )
+            if rendered:
+                parts.append(f"  Args: {rendered}")
         if action.resources:
             parts.append(f"  Resources: {dict(action.resources)}")
         lines.append("\n".join(parts))
@@ -257,9 +269,11 @@ def _default_structured_output_kwargs(llm: BaseChatModel) -> dict[str, Any]:
     ``function_calling`` mode automatically.
     """
     try:
-        from langchain_openai import ChatOpenAI
+        # ``BaseChatOpenAI`` covers ``ChatOpenAI``, ``AzureChatOpenAI`` and
+        # other OpenAI-compatible subclasses (issue #59).
+        from langchain_openai.chat_models.base import BaseChatOpenAI
 
-        if isinstance(llm, ChatOpenAI):
+        if isinstance(llm, BaseChatOpenAI):
             return {"method": "function_calling"}
     except ImportError:
         pass
@@ -285,8 +299,12 @@ class GoalInterpreter:
             ``conditions`` must remain an open dict (OpenAI strict JSON-schema
             mode requires ``additionalProperties: false`` on all objects, which
             is incompatible with a free-form conditions mapping).  When
-            ``None`` (the default), auto-detects OpenAI models and applies
-            ``{"method": "function_calling"}`` automatically.
+            ``None`` (the default), auto-detects OpenAI-compatible models
+            and applies ``{"method": "function_calling"}`` automatically.
+        include_world_state: Whether the prompt shows the current world
+            state at all.  Only planning-relevant keys (those some action
+            reads or writes) are ever included.
+        max_world_state_chars: Cap on the rendered world state.
     """
 
     def __init__(
@@ -295,10 +313,14 @@ class GoalInterpreter:
         actions: list[ActionSpec],
         system_prompt: str | None = None,
         structured_output_kwargs: dict[str, Any] | None = None,
+        include_world_state: bool = True,
+        max_world_state_chars: int = 2000,
     ) -> None:
         self._llm = llm
         self._actions = actions
         self._system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
+        self._include_world_state = include_world_state
+        self._max_world_state_chars = max_world_state_chars
 
         if structured_output_kwargs is None:
             structured_output_kwargs = _default_structured_output_kwargs(llm)
@@ -307,11 +329,33 @@ class GoalInterpreter:
             InterpretedGoal, **(structured_output_kwargs or {})
         )
 
+    def _render_world_state(self, world_state: dict[str, Any] | None) -> str:
+        """Planning-relevant world-state keys only, clipped (issue #59).
+
+        The prompt used to interpolate ``str(world_state)`` verbatim, which
+        shipped secrets and multi-kilobyte documents to the model.  Only
+        keys that some action reads or writes are planning-relevant; the
+        rendering is capped at ``max_world_state_chars``.
+        """
+        if not self._include_world_state:
+            return "(not provided)"
+        if not world_state:
+            return "{}"
+        keys: set[str] = set()
+        for action in self._actions:
+            keys.update(action.preconditions.keys())
+            keys.update(action.effect_key_set())
+        relevant = {k: v for k, v in world_state.items() if k in keys}
+        text = repr(relevant)
+        if len(text) > self._max_world_state_chars:
+            text = text[: self._max_world_state_chars - 1] + "…"
+        return text
+
     def build_messages(
         self, request: str, world_state: dict[str, Any] | None
     ) -> list[SystemMessage | HumanMessage]:
         catalog = build_action_catalog(self._actions)
-        ws_str = str(world_state) if world_state else "{}"
+        ws_str = self._render_world_state(world_state)
         system_text = self._system_prompt.format(
             action_catalog=catalog,
             world_state=ws_str,

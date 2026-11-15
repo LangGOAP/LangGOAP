@@ -183,6 +183,7 @@ class GoapObserver:
         termination_policies: "list[TerminationPolicy] | None" = None,
     ) -> None:
         self._actions = actions or []
+        self._actions_by_name = {a.name: a for a in self._actions}
         # See ``GoapExecutor.__init__`` for the SafeTracerProxy rationale.
         self._tracer: PlanningTracer = SafeTracerProxy(tracer or NullTracer())
         self._history = history
@@ -277,15 +278,32 @@ class GoapObserver:
         if outcome is None:
             return None
         plan_obj: Plan | None = state.get("plan")
+        # Realised figures come from the execution history, not from the
+        # final plan: after replans the plan omits earlier executed steps
+        # and never shows failures (issue #51).
+        history: list[ActionResult] = state.get("execution_history", [])
+        successes = [h for h in history if h.success]
+        failures = [h for h in history if not h.success]
+        actual_cost = 0.0
+        for entry in successes:
+            spec = self._actions_by_name.get(entry.action_name)
+            if spec is not None:
+                actual_cost += float(spec.get_cost(entry.state_before))
         return ExecutionRecord(
             goal_hash=compute_goal_hash(goal),
             goal_conditions=dict(goal.conditions),
-            plan_actions=tuple(plan_obj.action_names) if plan_obj else (),
+            plan_actions=tuple(h.action_name for h in successes),
             expected_cost=plan_obj.total_cost if plan_obj else 0.0,
-            actual_cost=plan_obj.total_cost if plan_obj else 0.0,
+            actual_cost=actual_cost,
             outcome=outcome,
             replan_count=state.get("replan_count", 0),
             timestamp=datetime.now(timezone.utc),
+            metadata={
+                "failed_attempts": [
+                    {"action": h.action_name, "error": h.error} for h in failures
+                ],
+                "final_plan": list(plan_obj.action_names) if plan_obj else [],
+            },
         )
 
     def _maybe_record_sync(self, state: GoapState, cmd: Command[str]) -> None:
@@ -317,32 +335,36 @@ class GoapObserver:
         current_step: int = state.get("current_step", 0)
         status: str = state.get("status", "")
 
-        # Termination policies short-circuit everything else: a hit
-        # cost ceiling or wall-clock budget must beat the goal-satisfied
-        # check below so a run that overshoots its budget while
-        # incidentally finishing still surfaces the termination reason.
-        terminate_cmd = self._consult_termination(state)
-        if terminate_cmd is not None:
-            return terminate_cmd
-
         if raw_goal is None:
             return Command(
                 goto=END,
                 update={"status": "error", "replan_reason": "no goal specified"},
             )
 
-        # ``MultiGoal`` dispatch: advance sub-goals or short-circuit to
-        # the single-goal logic for the remainder.
+        # Goal satisfaction is checked before termination policies: a run
+        # that finishes on the very step that exhausts a cap has achieved
+        # its goal, and reporting it as ``terminated`` forced users to set
+        # every cap strictly above the plan length (issue #47).  A cap hit
+        # while the goal is still open terminates as before.
+        multi_cmd: Command[str] | None = None
         if isinstance(raw_goal, MultiGoal):
             multi_cmd = _route_multi_goal(raw_goal, state, world_state)
-            if multi_cmd is not None:
+            if multi_cmd is not None and multi_cmd.goto == END:
                 return multi_cmd
             goal = raw_goal.goals[state.get("current_subgoal_index", 0)]
         else:
             goal = raw_goal
+            if _is_goal_satisfied(goal, world_state):
+                return Command(goto=END, update={"status": "goal_achieved"})
 
-        if _is_goal_satisfied(goal, world_state):
-            return Command(goto=END, update={"status": "goal_achieved"})
+        terminate_cmd = self._consult_termination(state)
+        if terminate_cmd is not None:
+            return terminate_cmd
+
+        if multi_cmd is not None:
+            # Sequential sub-goal satisfied: advance (the composite goal is
+            # still open, so the cap check above applied first).
+            return multi_cmd
 
         limit_cmd = _route_replan_limit(goal, state)
         if limit_cmd is not None:
