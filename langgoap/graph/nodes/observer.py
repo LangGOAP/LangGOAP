@@ -165,11 +165,11 @@ class GoapObserver:
             ``actions`` keeps its retry budgets.
         tracer: Optional :class:`PlanningTracer` invoked on terminal
             states (``on_goal_achieved`` / ``on_plan_failed``).
-            **Known limitation (v0.1.0):** mid-run ``MultiGoal``
+            **Known limitation:** mid-run ``MultiGoal``
             sub-goal completions do **not** emit tracer events \u2014 the
             tracer stays silent until the whole ``MultiGoal``
             terminates.  A future ``on_subgoal_achieved`` hook is out
-            of scope for v0.1.0.
+            of scope for now.
         history: Optional :class:`StoreExecutionHistory` that records
             one :class:`ExecutionRecord` per terminal state so downstream
             analytics can query past runs by goal or by failing action.

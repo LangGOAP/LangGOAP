@@ -5,11 +5,36 @@ All notable changes to LangGOAP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] — Unreleased
+## [0.2.0] — 2026-11-15
 
-The first batch of fixes from the v0.2.0 audit (issues #10–#18). Several
-default behaviours change; each has an explicit opt-in that restores the
-0.1.x behaviour where that behaviour was ever useful.
+Resolves the 58 findings of the 2026-11-14 pre-release audit (#10–#67):
+planner correctness, a JSON-native graph state that works with every
+LangGraph checkpointer, stricter defaults, async parity, and a documentation
+and catalog sweep. Several default behaviours change; each has an explicit
+opt-in that restores the 0.1.x behaviour where that behaviour was ever
+useful.
+
+### Breaking changes
+
+- **The graph state is JSON.** A compiled graph returns and checkpoints
+  plain dicts: `result["plan"]` and `execution_history` entries are dicts
+  (`GoapGraph.rehydrate` / `rehydrate_state` convert them back), and with a
+  checkpointer the input is `GoapGraph.initial_state(goal, world_state)` or
+  `goal.to_dict()`, never a `GoalSpec` object (#17, #18).
+- **Defaults are strict.** A CSP-infeasible plan is not executed
+  (`GoalPolicy(on_infeasible="execute")` restores it, #13); the blacklist
+  fallback is off (`GoalPolicy(blacklist_fallback=True)`, #15); an
+  `execute()` dict must set every declared effect key (#31); a sequential
+  `MultiGoal` fails on an unreachable sub-goal
+  (`MultiGoal(on_infeasible="skip")`, #35); objectives, soft constraints
+  and soft goals change which plan runs (#12); `langgoap plan` only plans
+  (`--run` executes, #40).
+- **Termination and reporting.** A run that reaches the goal on the step
+  that exhausts a cap reports `goal_achieved` (#47); a final `no_plan` is
+  reported as `no_plan` (#64); `ExecutionRecord.plan_actions` and
+  `actual_cost` describe executed steps (#51); `Plan` display is offline
+  Markdown unless `LANGGOAP_DISPLAY_PNG=1` (#58).
+- **Removed and deprecated API:** see the sections at the end of this entry.
 
 ### Added
 
@@ -426,10 +451,17 @@ default behaviours change; each has an explicit opt-in that restores the
 - `CSPRefinementStrategy` (call `refine_with_csp`) and
   `ActionSpec.is_async_execute()` (the executors pick the async path
   themselves) warn and will be removed in 0.3.0 (#63, #64).
-- `langgoap.install_langgoap_serde`, `langgoap.LangGOAPSerializer` and
-  `langgoap.LANGGOAP_ALLOWED_MSGPACK_TYPES` are no-op shims that emit
-  `DeprecationWarning`; they will be removed in 0.3.0.
-  `LangGOAPRedisSerializer` is gone (it imported the Redis backend).
+- `langgoap.install_langgoap_serde` and `langgoap.LangGOAPSerializer` are
+  no-op shims that emit `DeprecationWarning`;
+  `langgoap.LANGGOAP_ALLOWED_MSGPACK_TYPES` is an empty tuple kept for
+  import compatibility (a module constant cannot warn on access). All three
+  will be removed in 0.3.0.
+
+### Removed
+
+- `LangGOAPRedisSerializer`: the custom Redis serializer imported the Redis
+  backend into the core package; the JSON-native state (#17) makes every
+  stock checkpointer serializer sufficient.
 
 ## [0.1.2] — 2026-05-15
 

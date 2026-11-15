@@ -480,7 +480,7 @@ class MultiGoal:
       acceptable and the system should chase the cheapest one.
 
     Recursive (HTN-style) decomposition where a sub-goal is itself a
-    ``MultiGoal`` is **out of scope for v0.1.0** — only flat
+    Nested ``MultiGoal`` is **out of scope** — only flat
     composition is supported and :meth:`__post_init__` rejects
     non-:class:`GoalSpec` children with a clear ``ValueError``.
 
@@ -522,7 +522,7 @@ class MultiGoal:
                 raise ValueError(
                     f"MultiGoal.goals[{i}] must be a GoalSpec, got "
                     f"{type(g).__name__}. Nested MultiGoal (HTN-style "
-                    "decomposition) is not supported in v0.1.0."
+                    "decomposition) is not supported."
                 )
 
     def to_dict(self) -> dict[str, Any]:
