@@ -95,9 +95,7 @@ class SoftGoal:
             Defaults to ``str(conditions)`` when empty.
     """
 
-    conditions: MappingProxyType[str, Any] = field(
-        default_factory=lambda: MappingProxyType({})
-    )
+    conditions: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
     weight: float = 1.0
     name: str = ""
 
@@ -227,11 +225,9 @@ class GoalSpec:
         metrics: Optional plan-quality metrics consumed by the CSP phase.
     """
 
-    conditions: MappingProxyType[str, Any] = field(
-        default_factory=lambda: MappingProxyType({})
-    )
+    conditions: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
     policy: GoalPolicy = field(default_factory=GoalPolicy)
-    objectives: MappingProxyType[str, ObjectiveDirection] | None = None
+    objectives: Mapping[str, ObjectiveDirection] | None = None
     constraints: tuple[ConstraintSpec, ...] = field(default_factory=tuple)
     soft_goals: tuple[SoftGoal, ...] = field(default_factory=tuple)
     metrics: tuple["PlanQualityMetric", ...] = field(default_factory=tuple)

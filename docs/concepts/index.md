@@ -349,8 +349,10 @@ reproducible.
 
 `ActionSpec(require_human_approval=True)` makes the executor call
 LangGraph's `interrupt()` before the action runs. Resume with
-`Command(resume=True)` (or `{"approved": True}`) to approve and `False` to
-deny; a denial is a failure that counts toward the action's retry budget.
+`Command(resume=True)` (or `{"approved": True}`) to approve and `False` (or
+`{"approved": False, "reason": ...}`) to deny; anything else is not an
+answer to a yes/no question and is asked again. A denial is a failure that
+counts toward the action's retry budget.
 Passing a Pydantic model class instead of `True` turns the pause into a
 typed form: the resume payload is validated against the model and stored
 under `human_input_key` in the world state; a payload that fails validation

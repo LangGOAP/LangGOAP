@@ -42,6 +42,14 @@ default behaviours change; each has an explicit opt-in that restores the
 
 ### Changed
 
+- **The boolean approval gate asks again instead of guessing.** Any
+  non-empty string, any non-zero number, a dict without `approved` or
+  with a non-boolean `approved` all used to count as approval, so
+  `Command(resume="no")` approved the action. Only `True` / `False` and
+  `{"approved": <bool>, "reason": ...}` are decisions now; any other
+  resume value re-raises the interrupt with `attempt`, `validation_errors`
+  and `rejected_payload`, exactly like the typed-form gate. Both gate
+  payloads carry `attempt` and `effects`.
 - Planner hygiene (#63): `assert_expected_matches_declared` raises
   `ValueError` instead of relying on `assert`; `explain_no_plan` compares
   `(key, value)` pairs, so a goal wanting `x=False` is unreachable when
@@ -168,6 +176,11 @@ default behaviours change; each has an explicit opt-in that restores the
   model has no `approved` field, is recorded and blacklisted exactly like
   a denied boolean gate (`human_approval_denied`), which the form gate
   previously had no way to express.
+- `GoalSpec(conditions={...})`, `SoftGoal(conditions={...})` and
+  `objectives={...}` type-check: the fields are annotated as `Mapping`
+  (what a caller writes) and still converted to an immutable
+  `MappingProxyType` at construction. They were annotated as
+  `MappingProxyType`, so every dict literal in user code was a mypy error.
 - **Every bookkeeping key is present in every result.** LangGraph returns
   only the channels a run wrote to, so `result["blacklisted_actions"]`
   and `result["action_failure_counts"]` raised `KeyError` precisely when
