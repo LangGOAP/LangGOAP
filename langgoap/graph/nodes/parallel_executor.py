@@ -278,6 +278,8 @@ class ParallelGoapExecutor:
                 return _abort_wave(
                     denial, world_state=state_before, completed=all_results
                 )
+            # The state the action runs in includes the operator's answer (#75).
+            state_before = dict(merged_world)
 
             try:
                 raw = _execute_with_retries_sync(
@@ -374,6 +376,7 @@ class ParallelGoapExecutor:
             if denial is not None:
                 await self._tracer.aon_action_complete(denial)
                 return denial
+            state_before = dict(ws_snapshot)  # includes the operator's answer (#75)
 
             try:
                 raw = await _execute_with_retries_async(
@@ -414,6 +417,11 @@ class ParallelGoapExecutor:
             if r.get("status") == "action_failed":
                 if failure is None:
                     failure = r  # first failure in wave order wins
+                if "world_state" in r:
+                    # A failure's world_state is its pre-execution snapshot,
+                    # which carries a typed-form answer the HITL gate merged;
+                    # keep it so the operator is not asked again (#75).
+                    merged_world.update(_delta(world_state, r["world_state"]))
                 continue
             if "world_state" in r:
                 merged_world.update(_delta(world_state, r["world_state"]))

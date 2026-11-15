@@ -183,6 +183,8 @@ class GoapExecutor:
         if denial is not None:
             self._tracer.on_action_complete(denial)
             return denial
+        # The state the action runs in includes the operator's answer (#75).
+        state_before = dict(world_state)
 
         try:
             raw = _execute_with_retries_sync(
@@ -265,6 +267,7 @@ class GoapExecutor:
         if denial is not None:
             await self._tracer.aon_action_complete(denial)
             return denial
+        state_before = dict(world_state)  # includes the operator's answer (#75)
 
         try:
             raw = await _execute_with_retries_async(

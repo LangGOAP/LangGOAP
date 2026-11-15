@@ -224,10 +224,17 @@ def _build_failure(
     state_before: dict[str, Any],
     world_state: dict[str, Any],
 ) -> dict[str, Any]:
-    """Build the failure return dict for the executor."""
+    """Build the failure return dict for the executor.
+
+    ``state_before`` is the state the action ran in, so it includes a
+    typed-form answer merged by the HITL gate; returning it as the
+    ``world_state`` keeps that answer in the checkpoint after a failure
+    instead of dropping it with the action's partial effects (#75).
+    """
     logger.warning("Action %r failed: %s", action.name, exc)
     return {
         "status": "action_failed",
+        "world_state": dict(state_before),
         "execution_history": [
             ActionResult(
                 action_name=action.name,
@@ -380,6 +387,24 @@ def _check_form_approval(
     from pydantic import BaseModel, ValidationError
 
     model_cls: type[BaseModel] = action.require_human_approval  # type: ignore[assignment]
+    key = action.human_input_key or action.name
+    existing = world_state.get(key)
+    if existing is not None:
+        # The operator already answered (earlier attempt of this action, or
+        # a pre-filled world state).  Re-asking on every retry threw that
+        # answer away (#75); an answer that still validates is reused and
+        # only a missing or stale one prompts again.
+        try:
+            model_cls.model_validate(existing)
+        except ValidationError:
+            logger.info(
+                "Action %r: stored %r answer no longer validates; asking again",
+                action.name,
+                key,
+            )
+        else:
+            logger.info("Action %r: reusing the operator's %r answer", action.name, key)
+            return None
     schema = model_cls.model_json_schema()
     resume_value = interrupt(
         {
@@ -419,7 +444,6 @@ def _check_form_approval(
     # the dict rather than the Pydantic instance keeps the value
     # round-trippable through any checkpointer serializer without
     # extra type registration.
-    key = action.human_input_key or action.name
     world_state[key] = parsed.model_dump(mode="json")
     return None
 

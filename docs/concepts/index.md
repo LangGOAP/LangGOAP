@@ -354,8 +354,10 @@ deny; a denial is a failure that counts toward the action's retry budget.
 Passing a Pydantic model class instead of `True` turns the pause into a
 typed form: the resume payload is validated against the model and stored
 under `human_input_key` in the world state, and an invalid payload is a
-failure the observer can re-plan around. Approval actions always run alone
-in a parallel wave.
+failure the observer can re-plan around. The answer survives a failed
+attempt: a retry reuses an answer that still validates instead of asking
+again, and a valid answer already present in the world state skips the
+prompt. Approval actions always run alone in a parallel wave.
 
 ### Stuck handlers
 
