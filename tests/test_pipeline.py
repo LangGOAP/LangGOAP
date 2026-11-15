@@ -223,6 +223,46 @@ class TestEnumerateAlternatives:
         names = [tuple(alt.action_names) for alt in alts]
         assert len(names) == len(set(names))
 
+    @staticmethod
+    def _three_slots() -> list:
+        """Three independent slots, two options each: eight distinct plans."""
+        return [
+            make_action(f"{slot}_{opt}", eff={slot: True})
+            for slot in ("s1", "s2", "s3")
+            for opt in ("a", "b")
+        ]
+
+    def test_explores_beyond_single_exclusions_when_the_budget_allows(self) -> None:
+        """Excluding one action at a time reaches only ``len(plan)`` neighbours;
+        a wider budget must keep widening (breadth-first over exclusion sets)
+        so objective-driven selection can see plans two or more swaps away."""
+        actions = self._three_slots()
+        start = PlanningState.from_dict({})
+        goal = GoalSpec(conditions={"s1": True, "s2": True, "s3": True})
+        primary = plan(start, goal, actions)
+        assert primary is not None and len(primary) == 3
+
+        alts = enumerate_alternatives(start, goal, actions, None, primary, max_count=7)
+
+        names = {tuple(sorted(a.action_names)) for a in alts}
+        assert len(alts) == 7 and len(names) == 7
+        assert tuple(sorted(primary.action_names)) not in names
+
+    def test_nearest_alternatives_come_first(self) -> None:
+        """The first ``len(plan)`` alternatives differ from the primary in one slot."""
+        actions = self._three_slots()
+        start = PlanningState.from_dict({})
+        goal = GoalSpec(conditions={"s1": True, "s2": True, "s3": True})
+        primary = plan(start, goal, actions)
+        assert primary is not None
+
+        alts = enumerate_alternatives(start, goal, actions, None, primary, max_count=7)
+
+        base = set(primary.action_names)
+        for alt in alts[:3]:
+            assert len(base - set(alt.action_names)) == 1
+        assert any(len(base - set(alt.action_names)) >= 2 for alt in alts[3:])
+
 
 # ---------------------------------------------------------------------------
 # Observability: pipeline forwards search hooks into A* primary search

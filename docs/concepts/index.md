@@ -132,7 +132,10 @@ A goal that states only hard limits is satisfied by the first feasible
 A\* plan. A goal that states *preferences* — objectives, soft
 constraints or soft goals (`pipeline.needs_selection`) — compares that
 plan against alternative plans and lets CP-SAT pick the best one, with
-total cost as a strict tie-breaker. Plan-quality `metrics` are arbitrary
+total cost as a strict tie-breaker. Alternatives come from excluding
+actions of the A\* plan breadth-first, one swap away, then two, up to
+`max_alternatives` (8 by default), so that budget bounds how far the
+comparison reaches. Plan-quality `metrics` are arbitrary
 Python callables that CP-SAT cannot express; they re-score the chosen
 plan but do not drive selection. When the only plan is `INFEASIBLE` the
 run ends with `no_plan` and an explanation listing the plan and its

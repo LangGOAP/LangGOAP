@@ -192,7 +192,7 @@ class TwoPhasePipelineStrategy:
     def __init__(
         self,
         *,
-        max_alternatives: int = 5,
+        max_alternatives: int = 8,
         tracer: Any = None,
         record_expansions: bool = False,
     ) -> None:

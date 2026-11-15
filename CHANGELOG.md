@@ -172,14 +172,26 @@ useful.
   objectives never changed which plan ran. Plan-quality `metrics` still
   only re-score the chosen plan (CP-SAT cannot express them). The
   job-shop, project-scheduling and content-builder tutorial tests were
-  rewritten to the corrected semantics; their notebooks need
-  re-execution.
+  rewritten to the corrected semantics and their notebooks re-executed.
+  Alternatives are enumerated breadth-first over excluded actions (one
+  swap away from the A* plan, then two, ...) up to `max_alternatives`,
+  whose default rises from 5 to 8. Excluding one action at a time could
+  never reach a plan two swaps away: with uniform action costs the
+  objective settled on the $1,506 cloud-balancing placement while a
+  feasible $1,092 one existed, and the project-scheduling soft budget of
+  $20 looked unattainable although a two-swap plan meets it exactly.
 - `pipeline.needs_csp` is the public name of the former `_needs_csp`
   (kept as an alias) and includes soft goals; `pipeline.needs_selection`
   is new.
 
 ### Fixed
 
+- The `no_plan` explanation distinguishes actions blacklisted after
+  failures from `can_rerun=False` actions that already ran: the latter are
+  listed under `spent_actions` with advice to add an alternative or allow a
+  rerun, instead of the retry and QoS advice that fits transient failures
+  (a `NirvanaGoal` run ends this way by design). The log line no longer
+  attributes every planning failure to A*.
 - A typed-form answer survives the action it approved failing. The
   pre-execution snapshot an executor keeps is taken after the
   human-in-the-loop gate, so a failure's `world_state` (and the parallel

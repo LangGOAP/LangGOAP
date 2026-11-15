@@ -150,34 +150,51 @@ def enumerate_alternatives(
     exclude_plan: Plan,
     max_count: int,
 ) -> list[Plan]:
-    """Generate alternative plans by blacklisting each action in the rejected plan.
+    """Generate up to ``max_count`` alternative plans, nearest first.
 
-    For each action in ``exclude_plan``, temporarily add it to the blacklist
-    and re-run A*. Deduplicate by action name sequence.
+    Each found plan is re-planned with one more of its actions excluded,
+    breadth-first over the exclusion sets: the first ``len(exclude_plan)``
+    alternatives differ from the rejected plan by one action, the next ring
+    by two, and so on.  Excluding one action at a time only ever reached
+    ``len(exclude_plan)`` neighbours, so with uniform action costs the
+    objective-driven selection (issue #12) could not see a cheaper plan two
+    swaps away whatever ``max_alternatives`` said; the cloud-balancing
+    tutorial settled on a $1506 placement while a $1092 one existed.
+    Plans are deduplicated by action-name sequence.
     """
+    from collections import deque
+
     seen: set[tuple[str, ...]] = {tuple(exclude_plan.action_names)}
     alternatives: list[Plan] = []
     base_blacklist = list(blacklisted) if blacklisted else []
+    frontier: deque[tuple[Plan, tuple[str, ...]]] = deque([(exclude_plan, ())])
 
-    for action in exclude_plan.actions:
-        if len(alternatives) >= max_count:
-            break
-        trial_blacklist = base_blacklist + [action.name]
-        # Never fall back here: the whole point is to plan *without* the
-        # blacklisted action, so re-admitting it would just reproduce the
-        # rejected plan.
-        result = astar_plan(
-            start,
-            goal,
-            actions,
-            blacklisted_actions=trial_blacklist,
-            blacklist_fallback=False,
-        )
-        if result is not None:
+    while frontier and len(alternatives) < max_count:
+        plan_obj, excluded = frontier.popleft()
+        for action in plan_obj.actions:
+            if len(alternatives) >= max_count:
+                break
+            if action.name in excluded:
+                continue
+            trial_excluded = (*excluded, action.name)
+            # Never fall back here: the whole point is to plan *without* the
+            # excluded actions, so re-admitting them would just reproduce a
+            # plan already seen.
+            result = astar_plan(
+                start,
+                goal,
+                actions,
+                blacklisted_actions=base_blacklist + list(trial_excluded),
+                blacklist_fallback=False,
+            )
+            if result is None:
+                continue
             key = tuple(result.action_names)
-            if key not in seen:
-                seen.add(key)
-                alternatives.append(result)
+            if key in seen:
+                continue
+            seen.add(key)
+            alternatives.append(result)
+            frontier.append((result, trial_excluded))
 
     return alternatives
 
@@ -192,7 +209,7 @@ def plan(
     actions: list[ActionSpec],
     blacklisted_actions: list[str] | None = None,
     *,
-    max_alternatives: int = 5,
+    max_alternatives: int = 8,
     tracer: Any = None,
     record_expansions: bool = False,
     blacklist_fallback: bool | None = None,
@@ -205,8 +222,12 @@ def plan(
         goal: Goal specification with target conditions, constraints, objectives.
         actions: Available actions.
         blacklisted_actions: Action names to exclude.
-        max_alternatives: Maximum number of alternative plans to generate
-            when the primary plan fails CSP validation.
+        max_alternatives: Maximum number of alternative plans to compare
+            against the primary plan, when it fails CSP validation or when
+            the goal states preferences.  Alternatives are enumerated
+            breadth-first over excluded actions (one swap away, then two,
+            ...), so this bounds how far the search widens; the default of 8
+            reaches two swaps on a four-step plan.
         tracer: Optional :class:`~langgoap.tracing.PlanningTracer` whose
             ``on_search_expand`` / ``on_search_dead_end`` hooks receive
             primary-search expansions and pipeline-level dead-end events
