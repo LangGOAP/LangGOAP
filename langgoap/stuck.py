@@ -204,7 +204,10 @@ class MulticastStuckHandler:
         for handler in self.handlers:
             handler_name = getattr(handler, "name", type(handler).__name__)
             tried_names.append(handler_name)
-            if not isinstance(handler, StuckHandler):
+            handle = getattr(
+                handler, "handle_stuck", None
+            )  # narrows for mypy 1.20 and 2.4
+            if handle is None:
                 logger.warning(
                     "Stuck handler %r is async-only (ahandle_stuck) and cannot run "
                     "under GoapGraph.invoke(); use ainvoke() or add a sync "
@@ -213,7 +216,7 @@ class MulticastStuckHandler:
                 )
                 continue
             try:
-                result = handler.handle_stuck(state, reason)
+                result = handle(state, reason)
             except Exception as exc:
                 logger.warning(
                     "Stuck handler %r raised during handle_stuck: %s — "
