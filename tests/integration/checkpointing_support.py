@@ -218,4 +218,5 @@ __all__ = [
     "_run_mid_plan_resume_sync",
     "_run_mid_plan_resume_async",
     "_assert_threads_isolated_sync",
+    "_assert_threads_isolated_async",
 ]
