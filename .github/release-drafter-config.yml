@@ -16,6 +16,10 @@ version-resolver:
       - 'BUG'
       - 'maintenance'
   default: patch
+# Each title rule fires for exactly one conventional-commit shape, so a
+# pull request lands under one heading: a ``!`` (breaking) title gets only
+# ``breakingchange``, and no rule is keyed on changed files (a ``*.md``
+# rule used to mark every docs PR as maintenance as well).
 autolabeler:
   - label: 'breakingchange'
     title:
@@ -23,29 +27,16 @@ autolabeler:
       - '/BREAKING[ -]CHANGE/'
   - label: 'enhancement'
     title:
-      - '/^feat(\([^)]+\))?!?:/i'
+      - '/^feat(\([^)]+\))?:/i'
   - label: 'bug'
     title:
-      - '/^fix(\([^)]+\))?!?:/i'
+      - '/^fix(\([^)]+\))?:/i'
   - label: 'documentation'
     title:
-      - '/^docs(\([^)]+\))?!?:/i'
+      - '/^docs(\([^)]+\))?:/i'
   - label: 'maintenance'
     title:
-      - '/^(chore|ci|build|style|refactor|test|perf)(\([^)]+\))?!?:/i'
-  - label: 'maintenance'
-    files:
-      - '*.md'
-      - '.github/*'
-  - label: 'bug'
-    branch:
-      - '/bug-.+'
-  - label: 'maintenance'
-    branch:
-      - '/maintenance-.+'
-  - label: 'feature'
-    branch:
-      - '/feature-.+'
+      - '/^(chore|ci|build|style|refactor|test|perf|release)(\([^)]+\))?:/i'
 categories:
   - title: 'Breaking Changes'
     labels:

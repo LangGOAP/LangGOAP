@@ -102,3 +102,53 @@ class TestReleaseDrafterPolicy:
             "on"
         )  # PyYAML parses bare `on` as True
         assert "pull_request_target" in triggers or "pull_request" in triggers
+
+
+def _autolabels(config: dict, title: str) -> set[str]:
+    """Apply the drafter's title rules the way release-drafter does."""
+    labels: set[str] = set()
+    for rule in config["autolabeler"]:
+        for pattern in rule.get("title", []):
+            body, _, flags = pattern.rpartition("/")
+            body = body[1:]  # strip the leading slash of ``/.../i``
+            if re.search(body, title, re.IGNORECASE if "i" in flags else 0):
+                labels.add(rule["label"])
+    return labels
+
+
+class TestAutolabelerLabelsEachPullRequestOnce:
+    """A pull request shows up under exactly one heading of the release notes.
+
+    release-drafter lists a PR under every category whose label it carries,
+    so a title rule that fires alongside another, or a ``files`` rule that
+    marks every docs PR as maintenance, duplicates the entry.
+    """
+
+    def test_no_rule_is_keyed_on_files(self) -> None:
+        config = yaml.safe_load(_read(".github/release-drafter-config.yml"))
+        assert [rule for rule in config["autolabeler"] if "files" in rule] == []
+
+    def test_conventional_titles_get_exactly_one_label(self) -> None:
+        config = yaml.safe_load(_read(".github/release-drafter-config.yml"))
+        expected = {
+            "docs(examples): LangGraph tutorial refactors": {"documentation"},
+            "fix!: resolve the audit P0 and P1 defects": {"breakingchange"},
+            "feat(graph)!: drop the legacy serializer": {"breakingchange"},
+            "feat(graph): compact execution-history snapshots": {"enhancement"},
+            "fix(hitl,state,types): least-surprise fixes": {"bug"},
+            "release: prepare v0.2.0": {"maintenance"},
+            "build(deps): bump the actions group": {"maintenance"},
+            "chore(ci): refresh the lock": {"maintenance"},
+            "test(mcts): disable the wall-clock cap": {"maintenance"},
+        }
+        got = {title: _autolabels(config, title) for title in expected}
+        assert got == expected
+
+    def test_every_autolabel_has_a_category(self) -> None:
+        config = yaml.safe_load(_read(".github/release-drafter-config.yml"))
+        categorised = {
+            label
+            for cat in config["categories"]
+            for label in (cat.get("labels") or [cat.get("label")])
+        }
+        assert {rule["label"] for rule in config["autolabeler"]} <= categorised
