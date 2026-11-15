@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from langgoap.planner.explain import InfeasibilityExplanation
     from langgoap.planner.types import Plan
 
+from langgoap.viz._costs import step_costs
 
 _ID_SAFE = re.compile(r"[^A-Za-z0-9_]")
 
@@ -70,7 +71,8 @@ def render_mermaid(
     if len(plan) == 0:
         return 'flowchart TD\n    empty["(empty plan)"]\n'
 
-    has_costed = any(a.get_cost({}) != 1.0 for a in plan.actions)
+    costs = step_costs(plan)
+    has_costed = any(c is not None and c != 1.0 for c in costs)
 
     lines: list[str] = []
     if has_costed:
@@ -124,6 +126,7 @@ def _emit_scheduled_nodes(
 
 
 def _emit_unscheduled_nodes(plan: Plan, node_ids: list[str]) -> list[str]:
+    costs = step_costs(plan)
     """Emit action nodes with brand styling and cost badge pills.
 
     Actions with non-default costs get a separate stadium-shaped pill
@@ -135,8 +138,8 @@ def _emit_unscheduled_nodes(plan: Plan, node_ids: list[str]) -> list[str]:
     badge_subgraphs: list[str] = []
     for i, action in enumerate(plan.actions):
         label = _escape_label(action.name)
-        cost = action.get_cost({})
-        if cost != 1.0:
+        cost = costs[i]
+        if cost is not None and cost != 1.0:
             sg_id = f"sg_{node_ids[i]}"
             badge_id = f"c{i}"
             out.append(f'    subgraph {sg_id}[" "]')
@@ -239,14 +242,13 @@ def render_mermaid_gantt(plan: Plan) -> str:
     # Group by identical start for visual grouping (optional); here we
     # emit every entry on its own line for clarity.
     lines.append("    section Plan")
-    for entry in csp.schedule:
+    for index, entry in enumerate(csp.schedule):
         start_ms = int(entry.start.total_seconds() * 1000)
         dur_ms = max(int(entry.duration.total_seconds() * 1000), 1)
         safe_name = _escape_label(entry.action_name)
-        # task_name :id, start_ms, duration_ms
-        lines.append(
-            f"    {safe_name} :task_{start_ms}_{dur_ms}_{safe_name}, {start_ms}, {dur_ms}ms"
-        )
+        # task_name :id, start_ms, duration_ms — ids are positional so
+        # repeated action names and names with spaces stay valid and unique.
+        lines.append(f"    {safe_name} :task_{index}, {start_ms}, {dur_ms}ms")
     return "\n".join(lines) + "\n"
 
 

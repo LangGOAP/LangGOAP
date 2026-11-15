@@ -1,10 +1,10 @@
 """Integration tests for ``ActionQos`` retry policy in the executor.
 
-Per Rule 3 in research/plans/embabel-gap-closure.md, the scenarios below
+Per Rule 3 in the internal "embabel-gap-closure" design note (not in the repository), the scenarios below
 mirror Embabel's ActionQos behaviour:
-  * research/repos/embabel-agent/embabel-agent-api/src/test/kotlin/
+  * https://github.com/embabel/embabel-agent/blob/HEAD/embabel-agent-api/src/test/kotlin/
       com/embabel/agent/spi/config/spring/ActionRetryPolicyPropertiesTest.kt
-  * research/repos/embabel-agent/embabel-agent-api/src/test/kotlin/
+  * https://github.com/embabel/embabel-agent/blob/HEAD/embabel-agent-api/src/test/kotlin/
       com/embabel/agent/core/support/ActionQosExtensionsTest.kt
 
 LangGOAP's ``ActionQos`` is in-executor (intra-attempt retries with

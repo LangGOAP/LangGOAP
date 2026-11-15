@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import timedelta
 from types import MappingProxyType
-from typing import Any, Callable, cast
+from typing import Any, Callable, Iterable, cast
 
 from langgoap.qos import ActionQos
 from langgoap.state import require_hashable_values
@@ -302,9 +303,16 @@ class ActionSpec:
     def is_async_execute(self) -> bool:
         """Return True if this action has an async execute path.
 
-        Checks ``aexecute`` first, then falls back to inspecting
-        ``execute`` for coroutine functions.
+        .. deprecated:: 0.2.0
+            Nothing in the runtime consults this; the executors resolve
+            the async path themselves.  Removed in 0.3.0 (#64).
         """
+        warnings.warn(
+            "ActionSpec.is_async_execute() is deprecated and will be removed "
+            "in 0.3.0; the executors pick the async path themselves.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if self.aexecute is not None:
             return True
         if self.execute is not None:
@@ -353,10 +361,32 @@ class ActionSpec:
         return all(post_state.get(k) == v for k, v in expected.items())
 
 
+def ensure_unique_action_names(actions: Iterable[ActionSpec]) -> None:
+    """Raise ``ValueError`` when two actions share a name (issue #48).
+
+    Blacklists, failure counts, history records and executor rebinding are
+    all keyed by ``ActionSpec.name``, so a duplicate makes the planner plan
+    one action and the executor run another.
+    """
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for action in actions:
+        if action.name in seen and action.name not in duplicates:
+            duplicates.append(action.name)
+        seen.add(action.name)
+    if duplicates:
+        raise ValueError(
+            f"Duplicate action names {duplicates!r}: blacklists, failure counts "
+            "and executor rebinding are keyed by name, so every ActionSpec "
+            "needs a unique name."
+        )
+
+
 def goap_action(
     *,
     preconditions: dict[str, Any] | None = None,
-    effects: dict[str, Any] | None = None,
+    effects: Mapping[str, Any] | EffectFunction | None = None,
+    effect_keys: frozenset[str] | set[str] | None = None,
     cost: float | CostFunction = 1.0,
     name: str | None = None,
     max_retries: int = 0,
@@ -389,6 +419,15 @@ def goap_action(
         def generate_report(state: dict) -> dict:
             return {"report_ready": True}
 
+    **Dynamic effects** — pass a callable and declare the keys it writes::
+
+        @goap_action(
+            effects=lambda ws: {"count": ws.get("count", 0) + 1},
+            effect_keys={"count"},
+        )
+        def bump(state: dict) -> dict:
+            return {"count": state.get("count", 0) + 1}
+
     **Async usage** — requires ``GoapGraph.ainvoke()``::
 
         @goap_action(
@@ -406,7 +445,8 @@ def goap_action(
         return ActionSpec(
             name=name or func.__name__,
             preconditions=preconditions or {},
-            effects=effects or {},
+            effects=effects if effects is not None else {},
+            effect_keys=frozenset(effect_keys) if effect_keys else None,
             cost=cost,
             # Async functions must NOT be stored in `execute` — the sync
             # executor would call them and receive a coroutine object that
@@ -454,7 +494,11 @@ class GoapAction:
     # Class-level declarations — each subclass gets its own copy via
     # __init_subclass__ below, preventing the shared-mutable-dict antipattern.
     preconditions: dict[str, Any] = {}
-    effects: dict[str, Any] = {}
+    #: Static effects mapping, or a callable ``(world_state) -> effects``
+    #: (declare it as a ``@staticmethod`` and set :attr:`effect_keys`).
+    effects: dict[str, Any] | EffectFunction = {}
+    #: Keys a callable :attr:`effects` may write; required with callable effects.
+    effect_keys: frozenset[str] | set[str] | None = None
     max_retries: int = 0
     qos: ActionQos | None = None
     can_rerun: bool = True
@@ -462,6 +506,12 @@ class GoapAction:
     utility: float | CostFunction | None = None
     require_human_approval: bool | type = False
     human_input_key: str | None = None
+    #: CSP resource consumption per run (e.g. ``{"cost_usd": 0.02}``).
+    resources: dict[str, float] | None = None
+    #: Wall-clock duration for CP-SAT temporal scheduling.
+    duration: timedelta | None = None
+    #: Free-form, JSON-serialisable metadata attached to the action.
+    metadata: dict[str, Any] | None = None
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -496,9 +546,14 @@ class GoapAction:
 
         Override to add custom postcondition checks.  The default
         implementation verifies every declared effect is present in
-        ``post_state``.
+        ``post_state`` (callable effects are resolved against ``pre_state``).
         """
-        return all(post_state.get(k) == v for k, v in self.effects.items())
+        declared = (
+            self.effects(pre_state)
+            if callable(self.effects) and not isinstance(self.effects, Mapping)
+            else self.effects
+        )
+        return all(post_state.get(k) == v for k, v in declared.items())
 
     def to_spec(self) -> ActionSpec:
         """Convert this action instance to an ActionSpec.
@@ -521,10 +576,16 @@ class GoapAction:
         if type(self).aexecute is not GoapAction.aexecute:
             custom_aexecute = self.aexecute
 
+        effects: Mapping[str, Any] | EffectFunction
+        if callable(self.effects) and not isinstance(self.effects, Mapping):
+            effects = self.effects
+        else:
+            effects = dict(self.effects)
         return ActionSpec(
             name=type(self).__name__,
             preconditions=dict(self.preconditions),
-            effects=dict(self.effects),
+            effects=effects,
+            effect_keys=frozenset(self.effect_keys) if self.effect_keys else None,
             cost=self.cost,
             execute=self.execute,
             aexecute=custom_aexecute,
@@ -536,4 +597,7 @@ class GoapAction:
             utility=self.utility,
             require_human_approval=self.require_human_approval,
             human_input_key=self.human_input_key,
+            resources=self.resources,
+            duration=self.duration,
+            metadata=self.metadata,
         )

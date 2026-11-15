@@ -2,11 +2,11 @@
 
 Two structural improvements to the sequential sub-goal dispatch,
 uncovered by the Phase 2 per-entity Pac-Man experiment
-(``research/experiments/2026-04-20-per-entity-goals.md``):
+(the internal "2026-04-20-per-entity-goals" design note (not in the repository)):
 
 1. **Preflight** — when the current sub-goal is already satisfied
    in the sensed world state, advance past it **inside
-   ``_resolve_sequential_subgoal``** rather than paying for an
+   ``_plan_sequential``** rather than paying for an
    empty-A*-plan → observer-advance round-trip.  The next CS188
    tick and the per-tick replan cadence multiply that overhead
    across the full game length.

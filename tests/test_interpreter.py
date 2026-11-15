@@ -363,11 +363,15 @@ class TestGoalInterpreter:
         assert messages[0].content.startswith("Custom:")
 
     def test_world_state_appears_in_prompt(self) -> None:
+        """Planning-relevant keys reach the prompt; unrelated payload does not (#59)."""
         response = InterpretedGoal(conditions={"x": True}, reasoning="")
         interp = self._make_interpreter(response)
-        messages = interp.build_messages("test", {"has_data": True})
+        messages = interp.build_messages(
+            "test", {"has_source": True, "irrelevant_blob": "secret-value"}
+        )
         system_content = messages[0].content
-        assert "has_data" in system_content
+        assert "'has_source': True" in system_content
+        assert "secret-value" not in system_content
 
     def test_action_catalog_appears_in_default_prompt(self) -> None:
         """Action names and effects from _sample_actions() must appear in the system prompt (M5).

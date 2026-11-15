@@ -290,12 +290,16 @@ def explain_no_plan(
     Performs a lightweight static analysis of the action set to surface two
     categories of failure:
 
-    1. **Unreachable conditions** — goal conditions that no action can produce
-       as an effect.  These keys can *never* become ``True`` regardless of
-       ordering, so the root cause is a missing action or a typo in the goal.
-    2. **Missing preconditions** — preconditions that actions require but that
-       neither appear in the start state nor can be produced by any other
-       action.  These create unsatisfiable prerequisite chains.
+    1. **Unreachable conditions** — goal conditions whose required value the
+       start state does not hold and no action produces.  They can *never*
+       be met regardless of ordering, so the root cause is a missing action
+       or a typo in the goal.
+    2. **Missing preconditions** — precondition values that actions require
+       but that neither hold in the start state nor are produced by any
+       other action.  These create unsatisfiable prerequisite chains.
+
+    Comparisons are value-aware: ``x=False`` is not satisfied by an action
+    that sets ``x=True``, and ``0``/``""`` count as present.
 
     Args:
         start: The initial world state from which A* searched.
@@ -306,25 +310,45 @@ def explain_no_plan(
         A :class:`NoPlanExplanation` with categorised unreachable conditions,
         missing preconditions, and a human-readable suggestion.
     """
-    # Collect all effects and all preconditions across the available actions.
-    all_effects: set[str] = set()
-    all_preconditions: set[str] = set()
+    # Static picture of what the action set can establish.  Values matter:
+    # an action that sets ``x=True`` does not make ``x=False`` reachable,
+    # and a start value of ``0`` or ``""`` is present, not absent (#63).
+    producible: set[tuple[str, Any]] = set()
+    dynamic_keys: set[str] = set()
+    required: list[tuple[str, Any]] = []
     for a in actions:
-        all_effects.update(str(k) for k in a.effect_key_set())
-        all_preconditions.update(str(k) for k in a.preconditions)
+        if a.has_dynamic_effects:
+            dynamic_keys.update(str(k) for k in (a.effect_keys or ()))
+        else:
+            producible.update(
+                (str(k), v) for k, v in a.effects.items()  # type: ignore[union-attr]
+            )
+        required.extend((str(k), v) for k, v in a.preconditions.items())
+    producible_keys = {k for k, _ in producible} | dynamic_keys
+    start_dict = start.to_dict()
 
-    start_true: set[str] = {k for k, v in start.to_dict().items() if v}
+    def unavailable(key: str, value: Any) -> bool:
+        """``key=value`` is neither held at the start nor producible by any action."""
+        if callable(value):
+            # Predicate conditions cannot be matched statically: fall back
+            # to key presence.
+            return key not in start_dict and key not in producible_keys
+        if key in start_dict and start_dict[key] == value:
+            return False
+        if key in dynamic_keys:
+            return False
+        try:
+            return (key, value) not in producible
+        except TypeError:  # unhashable value: key-level answer
+            return key not in producible_keys
 
-    # Goal conditions that are neither already satisfied nor producible.
     unreachable: list[str] = sorted(
         str(key)
-        for key, required in goal.conditions.items()
-        if str(key) not in start_true and str(key) not in all_effects
+        for key, value in goal.conditions.items()
+        if unavailable(str(key), value)
     )
-
-    # Preconditions that can never be established.
     missing: list[str] = sorted(
-        p for p in all_preconditions if p not in start_true and p not in all_effects
+        {key for key, value in required if unavailable(key, value)}
     )
 
     return NoPlanExplanation(

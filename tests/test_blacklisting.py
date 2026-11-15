@@ -285,7 +285,8 @@ class TestObserverBlacklisting:
         assert cmd.update["action_failure_counts"] == {"a": 1, "b": 1}
 
     def test_observer_without_actions_defaults_max_retries_zero(self) -> None:
-        """Observer with no action specs defaults to max_retries=0 for all actions."""
+        """Without action specs the observer reads ``max_retries`` from the plan;
+        the default of 0 blacklists on the first failure (#64)."""
         observer = GoapObserver()  # no actions provided
 
         state: GoapState = {

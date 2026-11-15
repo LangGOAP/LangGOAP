@@ -2,8 +2,6 @@
 
 Module-private utilities that more than one node module needs:
 
-* :func:`_safe_tracer_call` / :func:`_safe_tracer_acall` \u2014 the
-  defensive tracer-invocation guards used by every hook site.
 * :func:`_planning_keys` \u2014 union of action precondition / effect /
   goal keys used by the planner to slice ``world_state`` down for A*.
 * :func:`_is_better_plan` \u2014 feasibility-first comparison for
@@ -25,26 +23,6 @@ from langgoap.score import SimpleScore
 from langgoap.tracing import PlanningTracer
 
 logger = logging.getLogger("langgoap.graph.nodes")
-
-
-def _safe_tracer_call(tracer: PlanningTracer, method: str, *args: Any) -> None:
-    """Invoke a sync tracer hook, swallowing any exception.
-
-    Observability must never break the planner \u2014 this is the second
-    line of defence beyond :class:`MultiTracer`'s own catch.
-    """
-    try:
-        getattr(tracer, method)(*args)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("Tracer raised during %s: %s", method, exc)
-
-
-async def _safe_tracer_acall(tracer: PlanningTracer, method: str, *args: Any) -> None:
-    """Invoke an async tracer hook, swallowing any exception."""
-    try:
-        await getattr(tracer, method)(*args)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("Tracer raised during %s: %s", method, exc)
 
 
 def _planning_keys(actions: list[ActionSpec], goal: GoalSpec) -> set[str]:
@@ -126,8 +104,6 @@ def _is_better_plan(candidate: Plan, best: Plan) -> bool:
 
 __all__ = [
     "logger",
-    "_safe_tracer_call",
-    "_safe_tracer_acall",
     "_planning_keys",
     "_is_better_plan",
 ]

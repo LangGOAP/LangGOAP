@@ -1,9 +1,9 @@
 """Integration tests for ``TerminationPolicy`` in the observer.
 
 Mirrors Embabel's contract on
-``research/repos/embabel-agent/embabel-agent-api/src/test/kotlin/
+``https://github.com/embabel/embabel-agent/blob/HEAD/embabel-agent-api/src/test/kotlin/
 com/embabel/agent/core/EarlyTerminationPolicyTest.kt`` and
-``research/repos/embabel-agent/embabel-agent-api/src/main/kotlin/
+``https://github.com/embabel/embabel-agent/blob/HEAD/embabel-agent-api/src/main/kotlin/
 com/embabel/agent/core/EarlyTerminationPolicy.kt``:
 
 * ``shouldTerminate(agentProcess) -> EarlyTermination | None`` —
@@ -397,3 +397,29 @@ class TestCustomPolicy:
 
         assert result["status"] == "terminated"
         assert "kill switch flipped" in (result.get("replan_reason") or "")
+
+
+# ---------------------------------------------------------------------------
+# Goal satisfaction wins over a cap hit on the same step (issue #47)
+# ---------------------------------------------------------------------------
+
+
+class TestGoalBeatsTerminationAtTheBoundary:
+    def test_cap_equal_to_plan_length_still_reports_goal_achieved(self) -> None:
+        """Finishing on the capped step is a success, not a termination."""
+        graph = GoapGraph(
+            _trivial_actions(3),
+            termination_policies=[MaxActionsPolicy(3)],
+        )
+        result = graph.invoke(goal=_final_goal(3), world_state={})
+        assert result["status"] == "goal_achieved"
+        assert len(result["execution_history"]) == 3
+
+    def test_cap_below_plan_length_still_terminates(self) -> None:
+        graph = GoapGraph(
+            _trivial_actions(3),
+            termination_policies=[MaxActionsPolicy(2)],
+        )
+        result = graph.invoke(goal=_final_goal(3), world_state={})
+        assert result["status"] == "terminated"
+        assert len(result["execution_history"]) == 2

@@ -65,7 +65,6 @@ def _run_goap() -> dict[str, Any]:
     return result
 
 
-@pytest.mark.bench
 class TestGoapVsReactAgent:
     """Latency comparison between GoapGraph and create_react_agent."""
 

@@ -413,7 +413,7 @@ def test_init_does_not_perform_blocking_io_on_async_only_store() -> None:
 
     class _History:
         def __init__(self, store: Any) -> None:
-            self._store = store
+            self.store = store
 
     store = _AsyncOnlyStore()
     history = _History(store)
@@ -460,7 +460,7 @@ async def test_aload_uses_async_store_path() -> None:
 
     class _History:
         def __init__(self, store: Any) -> None:
-            self._store = store
+            self.store = store
 
     store = _AsyncOnlyStore()
     tracer = ReflexionTracer(history=_History(store))
@@ -566,3 +566,30 @@ def test_reflection_context_surfaced_through_multitracer() -> None:
     # MultiTracer.reflections delegates to inner tracers' .reflections properties.
     assert len(multi.reflections) == 1
     assert multi.reflections[0].action_name == "act"
+
+
+def test_store_is_reached_through_the_public_accessor() -> None:
+    """The tracer uses ``StoreExecutionHistory.store``, never a private attribute (#65)."""
+    from langgraph.store.memory import InMemoryStore
+
+    from langgoap.history import StoreExecutionHistory
+    from langgoap.reflexion import _REFLECTIONS_KEY, _REFLECTIONS_NS
+
+    store = InMemoryStore()
+    assert StoreExecutionHistory(store).store is store
+
+    class _PublicOnly:
+        def __init__(self, store: Any) -> None:
+            self.store = store
+
+    tracer = ReflexionTracer(history=_PublicOnly(store))
+    tracer.on_action_complete(
+        {
+            "status": "action_failed",
+            "execution_history": [
+                ActionResult(action_name="a", success=False, error="e")
+            ],
+        }
+    )
+
+    assert store.get(_REFLECTIONS_NS, _REFLECTIONS_KEY) is not None

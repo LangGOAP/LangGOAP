@@ -10,7 +10,7 @@ Validates the PlanningStrategy Protocol contract end-to-end:
   compilation path A* plans use.
 
 Pre-registered experiment:
-``research/experiments/2026-04-20-mcts-vs-astar.md``.
+the internal "2026-04-20-mcts-vs-astar" design note (not in the repository).
 """
 
 from __future__ import annotations

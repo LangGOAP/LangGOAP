@@ -6,7 +6,7 @@ MCTS for ``is_stochastic=True``; it routes there only on explicit
 opt-in (``prefer_mcts_for_stochastic=True``) or when the user
 declared a risk-averse :class:`DivergencePolicy`.
 
-See ``research/plans/strategy-router.md``.
+See the internal "strategy-router" design note (not in the repository).
 """
 
 from __future__ import annotations
@@ -755,3 +755,53 @@ class TestHorizonEstimate:
         assert router.last_chosen == "astar"
         assert result is not None
         assert result.action_names == [f"step_{i}" for i in range(1, 6)]
+
+
+# ---------------------------------------------------------------------------
+# The router's choice reaches the tracer (issue #46)
+# ---------------------------------------------------------------------------
+
+
+class _ChoiceTracer:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, str]] = []
+
+    def on_strategy_chosen(self, strategy_name: str) -> None:
+        self.events.append(("sync", strategy_name))
+
+    async def aon_strategy_chosen(self, strategy_name: str) -> None:
+        self.events.append(("async", strategy_name))
+
+
+class TestRouterChoiceReachesTracer:
+    def _graph(self, tracer: _ChoiceTracer) -> "GoapGraph":  # type: ignore[name-defined]
+        from langgoap.graph.builder import GoapGraph
+        from langgoap.planner.router import StrategyRouter
+
+        router = StrategyRouter(
+            strategies={"astar": AStarStrategy(), "mcts": MCTSStrategy()},
+            classifier=lambda f: "astar",
+        )
+        return GoapGraph(_actions(1), strategy=router, tracer=tracer)
+
+    def test_sync_hook_fires_with_the_chosen_name(self) -> None:
+        tracer = _ChoiceTracer()
+        result = self._graph(tracer).invoke(goal=_goal(x=1), world_state={})
+        assert result["status"] == "goal_achieved"
+        assert ("sync", "astar") in tracer.events
+
+    @pytest.mark.asyncio
+    async def test_async_hook_fires_with_the_chosen_name(self) -> None:
+        tracer = _ChoiceTracer()
+        result = await self._graph(tracer).ainvoke(goal=_goal(x=1), world_state={})
+        assert result["status"] == "goal_achieved"
+        assert ("async", "astar") in tracer.events
+
+    def test_non_router_strategies_do_not_fire_the_hook(self) -> None:
+        from langgoap.graph.builder import GoapGraph
+
+        tracer = _ChoiceTracer()
+        GoapGraph(_actions(1), strategy=AStarStrategy(), tracer=tracer).invoke(
+            goal=_goal(x=1), world_state={}
+        )
+        assert tracer.events == []

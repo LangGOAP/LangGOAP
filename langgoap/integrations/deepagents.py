@@ -46,12 +46,36 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 
+#: Longest rendering of a single world-state value in a report.
+_VALUE_CLIP = 120
+#: Most world-state keys listed in a report.
+_KEY_CAP = 40
+
+
+def _clip(value: Any, limit: int = _VALUE_CLIP) -> str:
+    text = repr(value)
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _entry_field(entry: Any, name: str, default: Any = None) -> Any:
+    if isinstance(entry, dict):
+        return entry.get(name, default)
+    return getattr(entry, name, default)
+
+
 def format_goap_result(result: dict[str, Any]) -> str:
-    """Format a ``GoapState`` result dict as a human-readable report.
+    """Format a ``GoapState`` result dict as a compact human-readable report.
+
+    This text is what a calling agent receives as a tool result, so it
+    must stay small regardless of world-state size (issue #57): history
+    entries render as one line each (never their state snapshots), failed
+    steps show their error, and world-state values are clipped to
+    :data:`_VALUE_CLIP` characters with at most :data:`_KEY_CAP` keys.
 
     Args:
         result: The dict returned by ``GoapGraph.invoke`` / ``ainvoke``
-            (or ``invoke_nl`` / ``ainvoke_nl``).
+            (or ``invoke_nl`` / ``ainvoke_nl``), or the JSON-native state
+            of a compiled graph.
 
     Returns:
         A multi-line string summarising the outcome, executed actions,
@@ -66,20 +90,23 @@ def format_goap_result(result: dict[str, Any]) -> str:
         lines.append("")
         lines.append("Executed actions:")
         for entry in history:
-            if isinstance(entry, dict):
-                name = entry.get("action_name", "?")
-                ok = entry.get("success", "?")
-            else:
-                name = getattr(entry, "action_name", entry)
-                ok = getattr(entry, "success", "?")
-            lines.append(f"  - {name} (success={ok})")
+            name = _entry_field(entry, "action_name", "?")
+            ok = _entry_field(entry, "success", "?")
+            line = f"  - {name} (success={ok})"
+            error = _entry_field(entry, "error")
+            if error and not ok:
+                line += f": {_clip(error)}"
+            lines.append(line)
 
     world_state = result.get("world_state")
     if world_state:
         lines.append("")
         lines.append("Final world state:")
-        for k, v in sorted(world_state.items()):
-            lines.append(f"  {k}: {v}")
+        items = sorted(world_state.items())
+        for k, v in items[:_KEY_CAP]:
+            lines.append(f"  {k}: {_clip(v)}")
+        if len(items) > _KEY_CAP:
+            lines.append(f"  … {len(items) - _KEY_CAP} more key(s)")
 
     return "\n".join(lines)
 

@@ -2,8 +2,8 @@
 replanning loop on a stochastic gridworld.
 
 Reference: Soemers et al., CIG 2016 Section IV-B
-(``research/papers/tree-reuse-soemers-cig2016.txt:200-224``).
-Design: ``research/plans/tree-reuse-and-junction-graph.md``, Phase A.
+(Soemers et al., "Enhancements for Real-Time Monte-Carlo Tree Search in General Video Game Playing", CIG 2016).
+Design: the internal "tree-reuse-and-junction-graph" design note (not in the repository), Phase A.
 
 Scope
 -----

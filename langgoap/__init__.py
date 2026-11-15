@@ -56,6 +56,7 @@ from langgoap.graph.nodes import (
     GoapObserver,
     GoapPlanner,
     ParallelGoapExecutor,
+    async_execute_action,
 )
 from langgoap.graph.state import (
     ActionResult,
@@ -80,6 +81,7 @@ from langgoap.history import (
     compute_goal_hash,
 )
 from langgoap.integrations import (
+    EffectValidator,
     GoapSubgraph,
     add_goap_subgraph,
     create_goap_agent,
@@ -95,6 +97,7 @@ from langgoap.interpreter import (
     InterpretedGoal,
     InterpretedObjective,
 )
+from langgoap.planner.agents import AgentModel, UniformRandomAgentModel
 from langgoap.planner.astar import plan
 from langgoap.planner.csp import (
     CSPMetadata,
@@ -111,13 +114,24 @@ from langgoap.planner.explain import (
     explain_no_plan,
 )
 from langgoap.planner.mcts import (
+    HeuristicRollout,
     MCTSExploration,
     MCTSReuseConfig,
     MCTSStrategy,
     MCTSTracingConfig,
+    RandomRollout,
+    RolloutPolicy,
+    ScalarHeuristic,
+    StochasticRollout,
+)
+from langgoap.planner.metrics import (
+    MinimizeFinalStateExpression,
+    MinimizeTrajectoryMax,
+    MinimizeTrajectorySum,
+    PlanQualityMetric,
 )
 from langgoap.planner.pipeline import plan as pipeline_plan
-from langgoap.planner.repair import RepairStrategy
+from langgoap.planner.repair import RepairResult, RepairStrategy, repair_plan
 from langgoap.planner.router import (
     ProblemFeatures,
     RuleBasedClassifier,
@@ -132,11 +146,13 @@ from langgoap.planner.strategy import (
     LazyDecompositionStrategy,
     PlanningStrategy,
     TwoPhasePipelineStrategy,
+    refine_with_csp,
 )
 from langgoap.planner.transitions import (
     DeterministicTransitionModel,
     DivergencePolicy,
     TransitionModel,
+    assert_expected_matches_declared,
 )
 from langgoap.planner.types import Plan, PlanMetadata
 from langgoap.planner.utility import (
@@ -162,6 +178,7 @@ from langgoap.serde import (
 )
 from langgoap.state import PlanningState, infer_start_state
 from langgoap.stuck import (
+    AsyncStuckHandler,
     FunctionalStuckHandler,
     MulticastStuckHandler,
     StuckHandler,
@@ -186,6 +203,7 @@ from langgoap.tracing import (
     MultiTracer,
     NullTracer,
     PlanningTracer,
+    SafeTracerProxy,
 )
 from langgoap.types import (
     CostFunction,
@@ -232,6 +250,7 @@ __all__ = [
     "ConstraintBuilder",
     "ConstraintChain",
     # Integrations (low-code LangGraph on-ramp)
+    "EffectValidator",
     "create_goap_agent",
     "create_goap_tool",
     "create_goap_subagent",
@@ -246,6 +265,7 @@ __all__ = [
     "InterpretedGoal",
     "InterpretedObjective",
     # Graph
+    "async_execute_action",
     "GoapGraph",
     "GoapPlanner",
     "GoapExecutor",
@@ -257,6 +277,10 @@ __all__ = [
     "rehydrate_state",
     "successful_action_names",
     # Planning
+    "PlanQualityMetric",
+    "MinimizeFinalStateExpression",
+    "MinimizeTrajectorySum",
+    "MinimizeTrajectoryMax",
     "plan",
     "pipeline_plan",
     "Plan",
@@ -268,13 +292,23 @@ __all__ = [
     "AStarStrategy",
     "AnytimePlanningStrategy",
     "CSPRefinementStrategy",
+    "refine_with_csp",
     "LazyDecompositionStrategy",
     "MCTSStrategy",
     "MCTSExploration",
     "MCTSReuseConfig",
     "MCTSTracingConfig",
     "RepairStrategy",
+    "RepairResult",
+    "repair_plan",
     "TwoPhasePipelineStrategy",
+    "AgentModel",
+    "UniformRandomAgentModel",
+    "ScalarHeuristic",
+    "RolloutPolicy",
+    "RandomRollout",
+    "HeuristicRollout",
+    "StochasticRollout",
     # Utility (greedy) planner
     "NIRVANA_NAME",
     "NirvanaGoal",
@@ -290,6 +324,7 @@ __all__ = [
     "DeterministicTransitionModel",
     "DivergencePolicy",
     "TransitionModel",
+    "assert_expected_matches_declared",
     # Guards
     "ActionGuard",
     "AsyncActionGuard",
@@ -310,6 +345,7 @@ __all__ = [
     "FunctionalStuckHandler",
     "MulticastStuckHandler",
     "StuckHandler",
+    "AsyncStuckHandler",
     "StuckHandlerResult",
     "StuckHandlingResultCode",
     # Early-termination policies
@@ -354,6 +390,7 @@ __all__ = [
     "render_ascii_gantt",
     "visualize",
     # Tracing
+    "SafeTracerProxy",
     "PlanningTracer",
     "NullTracer",
     "LoggingTracer",

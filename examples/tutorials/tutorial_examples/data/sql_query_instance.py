@@ -3,7 +3,7 @@ r"""Minimal Chinook subset for the Text-to-SQL tutorial.
 Provenance
 ----------
 Structurally adapted from deepagents'
-``research/repos/deepagents/examples/text-to-sql-agent`` which targets the
+``https://github.com/langchain-ai/deepagents/blob/HEAD/examples/text-to-sql-agent`` which targets the
 full `Chinook <https://github.com/lerocha/chinook-database>`_ sample
 database.  For a runnable tutorial we compact the schema to just two
 tables — ``Customer`` and ``Invoice`` — and seed them with a handful of

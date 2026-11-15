@@ -3,7 +3,7 @@ r"""Hermetic research corpus for the deep-research-agent tutorial.
 Provenance
 ----------
 Structurally adapted from
-``research/repos/deepagents/examples/deep_research/research_agent`` which
+``https://github.com/langchain-ai/deepagents/blob/HEAD/examples/deep_research/research_agent`` which
 drives a tool-calling research loop against ``tavily_search`` (a live web
 API).  For a deterministic, hermetic tutorial we replace the network call
 with an in-memory :class:`ResearchDocument` corpus.  Each document is

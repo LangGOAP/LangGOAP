@@ -359,8 +359,10 @@ class GoapState(TypedDict, total=False):
         node on each planning round so downstream LLM-evaluated conditions
         can read them without coupling directly to the tracer.
     ``wall_clock_started_at``
-        ``time.monotonic()`` anchor set by the planner on its first
-        invocation; consulted by wall-clock termination policies.
+        Epoch timestamp (``time.time()``) set by the planner on its first
+        invocation; consulted by wall-clock termination policies.  Epoch
+        seconds stay meaningful after a checkpoint resume in another
+        process.
     """
 
     world_state: dict[str, Any]

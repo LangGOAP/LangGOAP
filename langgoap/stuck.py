@@ -9,7 +9,7 @@ state / goal) or ``NO_RESOLUTION`` (the next handler is consulted; the
 planner emits ``no_plan`` if no handler resolves).
 
 API mirrors Embabel's StuckHandler contract
-(``research/repos/embabel-agent/embabel-agent-api/src/main/kotlin/
+(``https://github.com/embabel/embabel-agent/blob/HEAD/embabel-agent-api/src/main/kotlin/
 com/embabel/agent/api/common/StuckHandler.kt`` and
 ``MulticastStuckHandlerTest.kt``) with two LangGOAP-specific
 extensions:
@@ -141,6 +141,26 @@ class StuckHandler(Protocol):
         ...
 
 
+@runtime_checkable
+class AsyncStuckHandler(Protocol):
+    """Coroutine-based twin of :class:`StuckHandler` (issue #53).
+
+    Implement ``ahandle_stuck`` when recovery needs to await something (an
+    LLM, a store, a network call).  Under ``GoapGraph.ainvoke`` the planner
+    awaits it; under the synchronous ``invoke`` an async-only handler cannot
+    run and is skipped with a warning.
+    """
+
+    @property
+    def name(self) -> str:
+        """Stable identifier for this handler."""
+        ...
+
+    async def ahandle_stuck(self, state: Any, reason: Any) -> StuckHandlerResult:
+        """Try to recover from a stuck situation, awaiting as needed."""
+        ...
+
+
 @dataclass
 class FunctionalStuckHandler:
     """Adapter that turns a callable into a :class:`StuckHandler`.
@@ -164,18 +184,34 @@ class MulticastStuckHandler:
     aggregated ``NO_RESOLUTION`` whose message lists every handler tried.
 
     Mirrors
-    ``research/repos/embabel-agent/embabel-agent-api/src/main/kotlin/
+    ``https://github.com/embabel/embabel-agent/blob/HEAD/embabel-agent-api/src/main/kotlin/
     com/embabel/agent/api/common/MulticastStuckHandler.kt``.
     """
 
-    handlers: Sequence[StuckHandler]
+    handlers: Sequence[StuckHandler | AsyncStuckHandler]
     name: str = "multicast"
+
+    @property
+    def has_async_handlers(self) -> bool:
+        """True when at least one child can only run as a coroutine."""
+        return any(
+            not hasattr(h, "handle_stuck") and hasattr(h, "ahandle_stuck")
+            for h in self.handlers
+        )
 
     def handle_stuck(self, state: Any, reason: Any) -> StuckHandlerResult:
         tried_names: list[str] = []
         for handler in self.handlers:
             handler_name = getattr(handler, "name", type(handler).__name__)
             tried_names.append(handler_name)
+            if not hasattr(handler, "handle_stuck"):
+                logger.warning(
+                    "Stuck handler %r is async-only (ahandle_stuck) and cannot run "
+                    "under GoapGraph.invoke(); use ainvoke() or add a sync "
+                    "handle_stuck. Treating as NO_RESOLUTION.",
+                    handler_name,
+                )
+                continue
             try:
                 result = handler.handle_stuck(state, reason)
             except Exception as exc:
@@ -196,8 +232,39 @@ class MulticastStuckHandler:
             ),
         )
 
+    async def ahandle_stuck(self, state: Any, reason: Any) -> StuckHandlerResult:
+        """Async twin of :meth:`handle_stuck`: awaits coroutine handlers and
+        calls synchronous ones inline, first ``REPLAN`` wins."""
+        tried_names: list[str] = []
+        for handler in self.handlers:
+            handler_name = getattr(handler, "name", type(handler).__name__)
+            tried_names.append(handler_name)
+            try:
+                if hasattr(handler, "ahandle_stuck"):
+                    result = await handler.ahandle_stuck(state, reason)
+                else:
+                    result = handler.handle_stuck(state, reason)
+            except Exception as exc:
+                logger.warning(
+                    "Stuck handler %r raised during ahandle_stuck: %s — "
+                    "treating as NO_RESOLUTION",
+                    handler_name,
+                    exc,
+                )
+                continue
+            if result.code is StuckHandlingResultCode.REPLAN:
+                return result
+        return StuckHandlerResult.no_resolution(
+            handler_name=None,
+            message=(
+                "No stuck handler could resolve the issue: tried "
+                + ", ".join(tried_names)
+            ),
+        )
+
 
 __all__ = [
+    "AsyncStuckHandler",
     "FunctionalStuckHandler",
     "MulticastStuckHandler",
     "StuckHandler",

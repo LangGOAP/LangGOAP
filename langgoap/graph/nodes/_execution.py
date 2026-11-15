@@ -47,6 +47,17 @@ def _apply_result(
     if isinstance(raw_result, dict):
         world_state.update(raw_result)
         return True
+    if raw_result is not None:
+        # ``None`` is the documented "apply the declared effects" return;
+        # anything else is almost certainly a mistake (a tool returning a
+        # string, a forgotten dict wrapper) and used to vanish silently (#64).
+        logger.warning(
+            "Action %r execute() returned %s, not a dict; ignoring the value "
+            "and applying the declared effects. Return a dict to update "
+            "world_state, or None to apply the declared effects.",
+            action.name,
+            type(raw_result).__name__,
+        )
     if transition_model is not None:
         sample_rng = rng if rng is not None else random.Random()
         world_state.update(transition_model.sample(world_state, action, sample_rng))

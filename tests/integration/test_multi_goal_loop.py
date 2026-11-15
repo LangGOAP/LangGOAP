@@ -302,7 +302,7 @@ class TestTracerSeesEffectiveSubgoal:
     sub-goal in sequential mode, not the raw ``MultiGoal``.  A tracer
     reading ``goal.conditions.keys()`` would otherwise crash on every
     plan invocation, and the crash would be silently swallowed by
-    ``_safe_tracer_call`` — the worst kind of observability bug.
+    the executor's tracer guard, the worst kind of observability bug.
     """
 
     def test_sequential_mode_feeds_subgoals_to_on_plan_start(self) -> None:
@@ -314,7 +314,7 @@ class TestTracerSeesEffectiveSubgoal:
             def on_plan_start(self, goal: Any, state: Any, strategy_name: str) -> None:
                 # Must not raise — if ``goal`` is a ``MultiGoal`` the
                 # ``.conditions`` attribute does not exist and the
-                # tracer call is swallowed by ``_safe_tracer_call``.
+                # tracer call is swallowed by the SafeTracerProxy guard.
                 plan_start_goals.append(tuple(sorted(goal.conditions.keys())))
 
             def on_plan_complete(self, plan: Any, duration_ms: float) -> None:

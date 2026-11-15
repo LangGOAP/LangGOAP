@@ -233,7 +233,7 @@ class ReflexionTracer:
             return
         self._loaded = True
         try:
-            store = self._history._store
+            store = self._history.store
             item = store.get(_REFLECTIONS_NS, _REFLECTIONS_KEY)
             self._apply_loaded_value(getattr(item, "value", item))
         except Exception as exc:
@@ -249,7 +249,7 @@ class ReflexionTracer:
             return
         self._loaded = True
         try:
-            store = self._history._store
+            store = self._history.store
             aget = getattr(store, "aget", None)
             if aget is not None:
                 item = await aget(_REFLECTIONS_NS, _REFLECTIONS_KEY)
@@ -266,7 +266,7 @@ class ReflexionTracer:
         if self._history is None:
             return
         try:
-            self._history._store.put(
+            self._history.store.put(
                 _REFLECTIONS_NS,
                 _REFLECTIONS_KEY,
                 {"reflections": [_reflection_to_dict(r) for r in self._reflections]},
@@ -279,7 +279,7 @@ class ReflexionTracer:
         if self._history is None:
             return
         try:
-            await self._history._store.aput(
+            await self._history.store.aput(
                 _REFLECTIONS_NS,
                 _REFLECTIONS_KEY,
                 {"reflections": [_reflection_to_dict(r) for r in self._reflections]},

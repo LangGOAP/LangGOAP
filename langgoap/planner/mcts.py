@@ -1,6 +1,6 @@
 """Monte Carlo Tree Search planning strategy.
 
-Adapted from LATS (``research/repos/LATS/hotpot/lats.py``) with
+Adapted from LATS (``https://github.com/lapisrocks/LanguageAgentTreeSearch/blob/HEAD/hotpot/lats.py``) with
 LangGOAP-specific typing: action edges are concrete
 :class:`~langgoap.actions.ActionSpec` instances and each node carries
 a :class:`~langgoap.state.PlanningState` so the compiled graph can
@@ -11,7 +11,7 @@ The public surface is :class:`MCTSStrategy` (satisfies the
 and UCB1 primitives are exported for plan-level integration tests.
 
 Pre-registered experiment:
-``research/experiments/2026-04-20-mcts-vs-astar.md``.
+the internal "2026-04-20-mcts-vs-astar" design note (not in the repository).
 """
 
 from __future__ import annotations
@@ -256,7 +256,7 @@ class RandomRollout:
     ) -> float:
         cursor = state
         for _ in range(self.max_depth):
-            if state.satisfies(goal.conditions):
+            if cursor.satisfies(goal.conditions):
                 return 1.0
             applicable = _applicable_actions(cursor, actions)
             if not applicable:

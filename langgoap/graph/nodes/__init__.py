@@ -8,7 +8,7 @@ This module re-exports the same names that the previous single-file
 working unchanged.  The implementations live in:
 
 * :mod:`langgoap.graph.nodes._helpers` \u2014 cross-module helpers
-  (``_safe_tracer_call``, ``_planning_keys``, ``_is_better_plan``).
+  (``_planning_keys``, ``_is_better_plan``).
 * :mod:`langgoap.graph.nodes._execution` \u2014 executor result
   builders (``_apply_result``, ``_build_*``, ``_is_approved``,
   ``_check_human_approval``, ``_prepare_execution``).
@@ -37,8 +37,6 @@ from langgoap.graph.nodes._execution import (
 from langgoap.graph.nodes._helpers import (
     _is_better_plan,
     _planning_keys,
-    _safe_tracer_acall,
-    _safe_tracer_call,
 )
 
 # Public API \u2014 the names users (and tests) import.
@@ -68,8 +66,6 @@ __all__ = [
     "_find_parallel_group",
     "_is_better_plan",
     "_planning_keys",
-    "_safe_tracer_call",
-    "_safe_tracer_acall",
     "_apply_result",
     "_build_success",
     "_build_failure",

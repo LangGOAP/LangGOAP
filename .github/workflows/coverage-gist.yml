@@ -1,4 +1,4 @@
-name: Update Coverage Badge
+name: Update Badges
 
 on:
   push:
@@ -13,10 +13,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v7
         with:
           version: "latest"
 
@@ -25,6 +25,31 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --extra checkpoint-postgres --extra checkpoint-redis
+
+      # MFCQI runs before the test suite so a failing test never leaves a
+      # stale quality number on the README. The message and colour are taken
+      # from mfcqi's own badge generator, so the README shows exactly what
+      # ``mfcqi badge langgoap`` prints locally.
+      - name: Compute MFCQI badge
+        id: mfcqi
+        run: |
+          uv run python -m mfcqi badge langgoap -f json -o mfcqi-badge.json
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          badge = json.load(open("mfcqi-badge.json"))
+          print(f"message={badge['message']}")
+          print(f"color={badge['color']}")
+          PY
+
+      - name: Create MFCQI Badge
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_TOKEN }}
+          gistID: ${{ secrets.GIST_ID }}
+          filename: langgoap-mfcqi.json
+          label: MFCQI
+          message: ${{ steps.mfcqi.outputs.message }}
+          color: ${{ steps.mfcqi.outputs.color }}
 
       - name: Run tests with coverage
         run: |
@@ -36,9 +61,10 @@ jobs:
           COVERAGE=$(python3 -c "import json; print(int(json.load(open('coverage.json'))['totals']['percent_covered']))")
           echo "COVERAGE=${COVERAGE}" >> $GITHUB_ENV
 
-          if [ $COVERAGE -lt 70 ]; then
+          # Same floor as the PR quality gate (80%).
+          if [ $COVERAGE -lt 80 ]; then
             echo "COLOR=red" >> $GITHUB_ENV
-          elif [ $COVERAGE -lt 80 ]; then
+          elif [ $COVERAGE -lt 90 ]; then
             echo "COLOR=yellow" >> $GITHUB_ENV
           else
             echo "COLOR=green" >> $GITHUB_ENV

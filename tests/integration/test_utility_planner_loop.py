@@ -1,7 +1,7 @@
 """Integration tests for the utility planner.
 
 Mirrors Embabel's contract on
-``research/repos/embabel-agent/embabel-agent-api/src/main/kotlin/
+``https://github.com/embabel/embabel-agent/blob/HEAD/embabel-agent-api/src/main/kotlin/
 com/embabel/plan/utility/UtilityPlanner.kt`` and the test scenarios in
 ``UtilityActionTest.kt`` / ``UtilityPlannerWithStateTest.kt``:
 

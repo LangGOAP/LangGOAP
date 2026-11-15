@@ -1,7 +1,7 @@
 """Integration tests for form-binding HITL.
 
 Mirrors Embabel's typed-form binding contract on
-``research/repos/embabel-agent/embabel-agent-api/src/test/kotlin/
+``https://github.com/embabel/embabel-agent/blob/HEAD/embabel-agent-api/src/test/kotlin/
 com/embabel/agent/core/hitl/FormBindingRequestTest.kt``: when an
 action requires human input shaped by a typed schema, the executor
 emits an interrupt carrying the schema; on resume with a matching

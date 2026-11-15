@@ -32,6 +32,40 @@ default behaviours change; each has an explicit opt-in that restores the
 
 ### Changed
 
+- Planner hygiene (#63): `assert_expected_matches_declared` raises
+  `ValueError` instead of relying on `assert`; `explain_no_plan` compares
+  `(key, value)` pairs, so a goal wanting `x=False` is unreachable when
+  actions only set `x=True` and start values such as `0` count as
+  present; `pareto_plans` annotates `plans_evaluated` and solver time
+  without objectives too; `PlanningState.get` / `in` use a cached dict
+  view and the A* heuristic no longer allocates a dict per evaluation;
+  `AStarStrategy` and `TwoPhasePipelineStrategy` accept `tracer` /
+  `record_expansions` and inherit the planner's tracer when passed
+  explicitly (the lazy, anytime and repair wrappers forward it);
+  `refine_with_csp(plan, goal)` replaces `CSPRefinementStrategy`.
+- Graph-runtime hygiene (#64): an `execute()` return that is neither a
+  dict nor `None` is logged as a warning before the declared effects are
+  applied; QoS back-off jitter uses its own RNG so a retry never perturbs
+  seeded `TransitionModel.sample` sequences; `GoapObserver` built without
+  action specs reads `max_retries` from the plan's specs; an any/best_value
+  `MultiGoal` that cannot be planned emits a `no_plan_explanation` with one
+  entry per sub-goal; a final `no_plan` is reported as `no_plan` rather
+  than `max_replans_exceeded`; dead helpers (`_safe_tracer_call`,
+  `_safe_tracer_acall`, `GoapPlanner._resolve_sequential_subgoal`) are
+  removed.
+- Public exports (#65): `PlanQualityMetric` and the `Minimize*` metrics,
+  `RepairResult` / `repair_plan`, `AgentModel` / `UniformRandomAgentModel`,
+  `ScalarHeuristic` and the rollout policies,
+  `assert_expected_matches_declared`, `SafeTracerProxy`,
+  `async_execute_action` and `EffectValidator` are importable from
+  `langgoap`; `langgoap.planner` re-exports the planner-level ones.
+  `StoreExecutionHistory.store` exposes the backing store, and
+  `ReflexionTracer` uses it instead of a private attribute.
+- The deployment scaffold (#65) lists `"."` first in `langgraph.json`
+  dependencies so the factory module ships, installs
+  `langgraph-cli[inmem]`, uses the `LANGSMITH_*` variables, names the
+  generated agent in its README and no longer tells users to pass a
+  checkpointer that LangGraph Platform ignores.
 - **`GoapState` is JSON-native (#17).** LangGraph channels now hold plain
   dicts, lists and scalars, so every `BaseCheckpointSaver` (in-memory,
   Postgres, Redis, SQLite, your own) works with its **stock** serializer
@@ -185,6 +219,63 @@ default behaviours change; each has an explicit opt-in that restores the
   (`dict`) `args_schema` via `tool.args` and forwards Pydantic aliased
   fields under their alias, accepting either the field name or the alias
   from `world_state`.
+- **Lazy decomposition keeps scores honest (#45).** A truncated plan no
+  longer advertises the full plan's CSP resource usage, schedule and
+  status: the prefix is re-validated and carries a `HardSoftScore` and
+  `CSPMetadata` for its own actions (search statistics stay from the
+  inner run), so MultiGoal `any` selection compares like with like.
+- **The router's choice reaches the tracer (#46).** After planning with a
+  `StrategyRouter`, the planner fires `on_strategy_chosen` /
+  `aon_strategy_chosen` with the dispatched strategy's name.
+- **Goal satisfaction wins over a cap hit on the same step (#47).** The
+  observer checks the goal before termination policies, so a three-step
+  plan under `MaxActionsPolicy(3)` reports `goal_achieved`; a cap hit
+  while the goal is still open terminates as before.
+- **Duplicate action names are rejected (#48).** `GoapGraph`,
+  `GoapPlanner`, `GoapExecutor` and `ParallelGoapExecutor` raise a
+  `ValueError` listing the duplicates.
+- **`GoapGraph(executor="parallel")` (#49)** wires `ParallelGoapExecutor`
+  without a hand-built graph; the on-ramps accept the same option.
+- **Wall-clock anchor is an epoch timestamp (#50).** The planner stores
+  `time.time()` in `wall_clock_started_at` and `MaxWallClockPolicy`
+  compares against the same clock, so a budget survives a checkpoint
+  resume in another process.
+- **`ExecutionRecord` reports what executed (#51).** `plan_actions` lists
+  the successful steps in order across replans, `actual_cost` sums their
+  costs, `expected_cost` stays the final plan's cost, and `metadata`
+  carries `failed_attempts` and `final_plan`.
+- **Class-based and decorator actions express every field (#52).**
+  `GoapAction` gained `resources`, `duration`, `metadata` and
+  `effect_keys` (with callable `effects`), all forwarded by `to_spec`;
+  `@goap_action` accepts a callable `effects` plus `effect_keys`.
+- **The async path is async all the way down (#53).** `GoapPlanner.acall`
+  uses a strategy's `aplan` when it has one and awaits coroutine stuck
+  handlers (new `AsyncStuckHandler` protocol; `MulticastStuckHandler`
+  dispatches both kinds); an async-only handler under `invoke` is skipped
+  with a warning instead of crashing.
+- **Renderers evaluate costs against each step's pre-state (#54)** and
+  draw no badge when a state-dependent cost cannot be evaluated instead of
+  raising; Gantt task ids are positional, so repeated names and names with
+  spaces stay valid and unique.
+- **Unknown models are not silently free (#55).** `CostAccumulator` warns
+  once per model name it has no price for (tokens are still counted) and
+  `require_known_pricing=True` raises instead. The bundled price table is
+  documented as a convenience snapshot; no new prices were added because
+  current list prices could not be verified from a primary source here.
+- **Tool descriptions reach the goal interpreter (#56).** `goapify_tool`
+  records `description` and `args` in the action's metadata (your metadata
+  keys win) and `build_action_catalog` shows both.
+- **Compact GOAP reports for agents (#57).** `format_goap_result` renders
+  every history entry as one line (with the error for failed steps) and
+  clips world-state values and key counts, so a tool result no longer
+  carries whole state snapshots.
+- **Notebook display is offline by default (#58).** `Plan` displays as
+  Markdown with the fenced Mermaid source; set `LANGGOAP_DISPLAY_PNG=1`
+  to also render an inline PNG through the mermaid.ink service.
+- **Goal interpreter prompt hygiene (#59).** `AzureChatOpenAI` and other
+  `BaseChatOpenAI` subclasses get the `function_calling` structured-output
+  path; the prompt shows only planning-relevant world-state keys, clipped
+  to `max_world_state_chars`, or none with `include_world_state=False`.
 - **`add_goap_subgraph` runs async and inherits the parent's config (#20).**
   The node is a `RunnableLambda` with sync and async variants, so
   async-only actions work under `parent.ainvoke`, and it passes the
@@ -249,11 +340,59 @@ default behaviours change; each has an explicit opt-in that restores the
   wheel in a throwaway virtualenv with the checkout's package moved aside,
   the minimum-versions job uses `uv sync --resolution lowest-direct`, and
   the `deepagents` extra is installed on the main test matrix (#42).
+- CI hygiene (#61): the Claude workflow is pinned to a commit and answers
+  only repository owners and members, and no longer requests an OIDC
+  token; `actions/checkout` and `astral-sh/setup-uv` versions are
+  aligned; Dependabot watches GitHub Actions and uv dependencies; the
+  reusable release workflow runs with `contents: read` plus
+  `id-token: write` instead of `write-all`; the PR quality report updates
+  one sticky comment; the scheduled full matrix runs weekly; the coverage
+  badge uses the same 80% floor as the quality gate.
+- The README's MFCQI badge shows a measured number. The badge workflow
+  (now `Update Badges`) runs `mfcqi badge langgoap` on every push to
+  `main`, before the test suite so a red test never leaves a stale
+  value, and publishes the result to the gist that serves the coverage
+  badge. The hand-maintained `.github/badges/mfcqi.json`, which had read
+  0.90 since April 2026 while CI measured 0.81, is removed.
 - `@pytest.mark.api` tests skip when `OPENAI_API_KEY` is unset instead of
   erroring, the `MemorySaver` checkpoint tests live in their own module
   so a missing Docker daemon no longer hides them, the Docker probe times
   out after two seconds, and the public-API test compares the version to
   the installed distribution metadata (#43).
+
+### Documentation
+
+- The API reference is generated from `langgoap.__all__` by
+  `docs/generate_api_index.py`, grouped by the comment headers in
+  `langgoap/__init__.py`, and a test fails when the page is stale; it
+  documented 63 of the public names before (#66).
+- The concepts page gains sections for pluggable strategies and MCTS,
+  multi-goal decomposition, retries and QoS, human-in-the-loop and typed
+  forms, stuck handlers, early termination, sensors / guards / resolvers,
+  checkpointing, plan explanations, visualization, the CLI and
+  deployment, and Deep Agents / tool interop; `myst.xref_missing` is no
+  longer suppressed (#66).
+- Catalog and stale-text sweep (#67): every basics notebook is rendered
+  in the docs and listed in `examples/README.md`; the notebook counts on
+  the docs landing page match the catalog; the incident screencast
+  notebook is linked; the research-agent screencast uses the standard
+  `python3` kernel; the CHANGELOG dates 0.1.1 and 0.1.2; the removed
+  `LANGGOAP_RUN_LIVE_DEMO` gate, the deleted `SECURITY.md` link and the
+  `cd langgoap` clone step are corrected; docstrings cite upstream
+  repositories instead of the maintainer's private `research/` tree; the
+  copyright year is 2026; the Jupyter image no longer installs the unused
+  `langchain` package; the unused `bench` pytest marker is gone.
+- **Versioned docs document their own release (#60).** The docs workflow
+  builds each tag from its own git worktree and virtualenv instead of
+  main's checkout, the version switcher's `populate` receives the URL it
+  used to fetch `versions.json` (it threw a `ReferenceError` and left the
+  menu empty), and the Sphinx toolchain is a uv dependency group
+  (`uv sync --group docs`; `docs/requirements.txt` is gone).
+- **README claims match the code (#62).** Pareto filtering is described
+  as the standalone `pareto_plans` helper, `StoreExecutionHistory` is
+  described as using the `BaseStore` `get`/`put` interface and tested with
+  `InMemoryStore`, and the flagship screencast is described as three
+  agent shapes plus a disruption run.
 
 ### Dependencies
 
@@ -266,12 +405,47 @@ default behaviours change; each has an explicit opt-in that restores the
 
 ### Deprecated
 
+- `CSPRefinementStrategy` (call `refine_with_csp`) and
+  `ActionSpec.is_async_execute()` (the executors pick the async path
+  themselves) warn and will be removed in 0.3.0 (#63, #64).
 - `langgoap.install_langgoap_serde`, `langgoap.LangGOAPSerializer` and
   `langgoap.LANGGOAP_ALLOWED_MSGPACK_TYPES` are no-op shims that emit
   `DeprecationWarning`; they will be removed in 0.3.0.
   `LangGOAPRedisSerializer` is gone (it imported the Redis backend).
 
-## [0.1.1] — Unreleased
+## [0.1.2] — 2026-05-15
+
+### Fixed
+
+- README images render on PyPI: the six relative image references were
+  replaced with absolute `raw.githubusercontent.com` URLs.
+
+### CI
+
+- The TestPyPI reinstall step passes `--index-strategy unsafe-best-match`
+  so the freshly uploaded wheel resolves against PyPI's dependencies.
+
+## [0.1.1] — 2026-05-15
+
+### Fixed
+
+- `click` is a core runtime dependency (#6). `0.1.0` was uploaded to
+  TestPyPI with it under a `[cli]` extra while the `langgoap` console
+  script was always registered, and has been yanked.
+- Docker-backed checkpointer tests skip when no daemon is reachable; the
+  min-versions release check skips `ortools`.
+
+### Changed
+
+- Public API classes are spelled `LangGOAP*` (`LangGOAPSerializer`, ...)
+  instead of `LangGoap*`.
+
+### CI
+
+- Test matrix across Ubuntu, macOS and Windows with a PR quality gate;
+  release pipeline split into build, TestPyPI and PyPI stages;
+  `actions/checkout`, `astral-sh/setup-uv` and `actions/setup-python`
+  bumped to Node 24 releases.
 
 Initial release. LangGOAP is a Goal-Oriented Action Planning framework
 for LangGraph with constraint optimization, natural-language goal

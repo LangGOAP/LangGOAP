@@ -168,3 +168,50 @@ class TestDefaultPricingTable:
         in_price, out_price = DEFAULT_COST_PER_1K_TOKENS[model]
         assert in_price > 0
         assert out_price > 0
+
+
+# ---------------------------------------------------------------------------
+# Unknown models are not silently free (issue #55)
+# ---------------------------------------------------------------------------
+
+
+class TestUnknownModelPricing:
+    def test_unknown_model_warns_once_and_still_counts_tokens(self) -> None:
+        import warnings
+
+        ws: dict[str, Any] = {}
+        acc = CostAccumulator(ws)
+        with pytest.warns(UserWarning, match="gpt-99-ultra"):
+            acc.on_llm_end(_modern_response(10, 5, model_name="gpt-99-ultra"))
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # a second call must not warn again
+            acc.on_llm_end(_modern_response(1, 1, model_name="gpt-99-ultra"))
+        assert ws["total_tokens"] == 17
+        assert ws["total_cost_usd"] == 0.0
+
+    def test_require_known_pricing_raises(self) -> None:
+        acc = CostAccumulator({}, require_known_pricing=True)
+        with pytest.raises(ValueError, match="gpt-99-ultra"):
+            acc.on_llm_end(_modern_response(10, 5, model_name="gpt-99-ultra"))
+
+    def test_known_model_does_not_warn(self) -> None:
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            CostAccumulator({}).on_llm_end(
+                _modern_response(10, 5, model_name="gpt-4o-mini")
+            )
+
+    def test_explicit_default_price_is_a_deliberate_choice_and_does_not_warn(
+        self,
+    ) -> None:
+        import warnings
+
+        ws: dict[str, Any] = {}
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            CostAccumulator(
+                ws, default_input_price=0.01, default_output_price=0.03
+            ).on_llm_end(_modern_response(1000, 1000, model_name="gpt-99-ultra"))
+        assert ws["total_cost_usd"] == pytest.approx(0.04)

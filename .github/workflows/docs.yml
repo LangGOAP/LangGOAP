@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -29,7 +29,7 @@ jobs:
         run: git fetch --tags
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v7
         with:
           version: "latest"
 
@@ -37,14 +37,12 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: |
-          uv sync --extra checkpoint-postgres --extra checkpoint-redis
-          uv pip install -r docs/requirements.txt
+        run: uv sync --group docs --extra checkpoint-postgres --extra checkpoint-redis
 
       - name: Build versioned documentation
         run: |
           set -e
-          OUTPUT_DIR="docs/_build/html"
+          OUTPUT_DIR="$GITHUB_WORKSPACE/docs/_build/html"
           mkdir -p "$OUTPUT_DIR"
 
           TAG_REGEX='^v0\.1\.([1-9][0-9]*)$|^v0\.([2-9]|[0-9]{2,})\.[0-9]+$|^v[1-9][0-9]*\.[0-9]+\.[0-9]+$'
@@ -53,17 +51,30 @@ jobs:
           VERSIONS_JSON='[]'
           LATEST_TAG=""
 
+          # Each tag is built from its own worktree with its own virtualenv,
+          # so autodoc documents that release's code rather than main's and
+          # tag-only files never leak into the main build (issue #60).
           for tag in $TAGS; do
             echo "=== Building docs for tag: $tag ==="
             if ! git ls-tree --name-only "$tag" -- docs/ > /dev/null 2>&1; then
               echo "    Skipping $tag (no docs/ directory)"
               continue
             fi
-
-            git checkout "$tag" -- docs/ examples/ || git checkout "$tag" -- docs/
-            uv run python docs/copy_notebooks.py || true
-            uv run sphinx-build -b html docs "$OUTPUT_DIR/$tag"
-            git checkout HEAD -- docs/ examples/ 2>/dev/null || git checkout HEAD -- docs/
+            WORKTREE="$(mktemp -d)"
+            git worktree add --detach "$WORKTREE" "$tag"
+            (
+              cd "$WORKTREE"
+              if grep -q '^docs = \[' pyproject.toml; then
+                uv sync --group docs
+              else
+                uv sync && uv pip install -r docs/requirements.txt
+              fi
+              uv run python docs/copy_notebooks.py || true
+              # Older tags predate the generator; their committed page is used as is.
+              [ -f docs/generate_api_index.py ] && uv run python docs/generate_api_index.py || true
+              uv run sphinx-build -b html docs "$OUTPUT_DIR/$tag"
+            )
+            git worktree remove --force "$WORKTREE"
 
             if [ -z "$LATEST_TAG" ]; then
               LATEST_TAG="$tag"
@@ -76,9 +87,9 @@ jobs:
           done
 
           echo "=== Building docs for main ==="
-          git checkout HEAD -- docs/ examples/ 2>/dev/null || true
-          uv run python docs/copy_notebooks.py
-          uv run sphinx-build -b html docs "$OUTPUT_DIR/main"
+          uv run --group docs python docs/copy_notebooks.py
+          uv run --group docs python docs/generate_api_index.py
+          uv run --group docs sphinx-build -b html docs "$OUTPUT_DIR/main"
 
           VERSIONS_JSON=$(echo "$VERSIONS_JSON" | python3 -c "
           import json, sys

@@ -5,7 +5,7 @@ Covers the validator (``__post_init__``), backoff computation
 ready-made ``FIRE_ONCE`` / ``DEFAULT_RETRY_POLICY`` policies.
 
 API reference (Embabel parity):
-  research/repos/embabel-agent/embabel-agent-api/src/main/kotlin/
+  https://github.com/embabel/embabel-agent/blob/HEAD/embabel-agent-api/src/main/kotlin/
     com/embabel/agent/core/ActionQos.kt
 """
 
@@ -167,7 +167,7 @@ class TestStandardPolicies:
         assert FIRE_ONCE.should_retry(TimeoutError(), attempt=1) is False
 
     def test_default_retry_policy_mirrors_embabel_defaults(self) -> None:
-        # Source of truth: research/repos/embabel-agent/embabel-agent-api/
+        # Source of truth: https://github.com/embabel/embabel-agent/blob/HEAD/embabel-agent-api/
         #   src/main/kotlin/com/embabel/agent/core/ActionQos.kt
         assert DEFAULT_RETRY_POLICY.max_attempts == 5
         assert DEFAULT_RETRY_POLICY.backoff_initial_ms == 10_000.0

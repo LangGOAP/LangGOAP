@@ -1,7 +1,7 @@
 """Failing unit tests for :mod:`langgoap.planner.transitions`.
 
 Validates the ``TransitionModel`` Protocol boundary committed in
-``research/experiments/2026-04-20-mcts-on-stochastic.md`` §8.1:
+the internal "2026-04-20-mcts-on-stochastic" design note (not in the repository):
 
 - Default path (``divergence_policy is None``) enforces strict
   ``expected(state, action) == action.get_effects(state)`` equality.
@@ -121,7 +121,7 @@ class TestConformanceStrict:
                 return action.get_effects(state)
 
         action = ActionSpec(name="a", preconditions={}, effects={"x": 1}, cost=1.0)
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             assert_expected_matches_declared(BuggyModel(), state={}, action=action)
 
 
@@ -214,7 +214,7 @@ class TestConformanceOptOut:
                 return action.get_effects(state)
 
         action = ActionSpec(name="a", preconditions={}, effects={"x": 10}, cost=1.0)
-        with pytest.raises(AssertionError, match="deviation"):
+        with pytest.raises(ValueError, match="deviation"):
             assert_expected_matches_declared(BoundedModel(), state={}, action=action)
 
     def test_bounded_divergence_still_exact_on_non_numeric(self) -> None:
@@ -241,5 +241,5 @@ class TestConformanceOptOut:
         action = ActionSpec(
             name="a", preconditions={}, effects={"ready": True, "count": 10}, cost=1.0
         )
-        with pytest.raises(AssertionError, match="ready"):
+        with pytest.raises(ValueError, match="ready"):
             assert_expected_matches_declared(BoundedModel(), state={}, action=action)

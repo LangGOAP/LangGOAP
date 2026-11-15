@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import os
 from typing import TYPE_CHECKING, Any, Literal
 
 from langgoap.viz.ascii import render_ascii, render_ascii_gantt
@@ -114,15 +115,41 @@ def _render_dot_display(source: str) -> str | Any:
     return Image(png_bytes)
 
 
+#: Set to ``1`` / ``true`` to also render an inline PNG on display.  The
+#: PNG path posts the diagram source to a rendering service
+#: (``mermaid.ink`` by default), so it is opt-in (issue #58).
+PNG_DISPLAY_ENV = "LANGGOAP_DISPLAY_PNG"
+
+
 def repr_mimebundle(plan: Plan, **_kwargs: Any) -> dict[str, Any]:
     """Build the Jupyter rich-display MIME bundle for ``plan``.
 
-    Used by :meth:`langgoap.planner.types.Plan._repr_mimebundle_`.
-    Renders the plan as an inline PNG via :func:`draw_mermaid_png`.
+    Used by :meth:`langgoap.planner.types.Plan._repr_mimebundle_`, which
+    Jupyter calls on every display.  The default bundle is offline: a
+    ``text/plain`` repr plus ``text/markdown`` holding the fenced Mermaid
+    source (JupyterLab, VS Code and the docs render it).  An inline PNG is
+    added only when :data:`PNG_DISPLAY_ENV` is set, because producing it
+    posts the diagram to a third-party rendering service; a PNG failure
+    (offline) never breaks the display.
     """
-    from langgoap.viz.mermaid import draw_mermaid_png
+    from langgoap.viz import mermaid as _mermaid
 
-    return {
+    bundle: dict[str, Any] = {
         "text/plain": repr(plan),
-        "image/png": draw_mermaid_png(plan),
+        "text/markdown": _wrap_mermaid_markdown(_mermaid.render_mermaid(plan)),
     }
+    if os.environ.get(PNG_DISPLAY_ENV, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        try:
+            bundle["image/png"] = _mermaid.draw_mermaid_png(plan)
+        except Exception:  # pragma: no cover - network / service dependent
+            pass
+    return bundle
+
+
+def _wrap_mermaid_markdown(source: str) -> str:
+    return f"```mermaid\n{source.rstrip()}\n```"

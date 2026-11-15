@@ -1,6 +1,6 @@
 """Failing tests for the chance-node stochastic-MCTS extension.
 
-See ``research/plans/stochastic-mcts-expansion.md``.  The chance-node
+See the internal "stochastic-mcts-expansion" design note (not in the repository).  The chance-node
 design splits expansion into ``Decision \u2192 Chance \u2192 Decision`` layers
 so UCB1 statistics at decision nodes reflect the true outcome
 distribution sampled via ``TransitionModel.sample`` instead of the

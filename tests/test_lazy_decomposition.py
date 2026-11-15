@@ -15,6 +15,7 @@ from langgoap.planner.strategy import (
     TwoPhasePipelineStrategy,
 )
 from langgoap.planner.types import Plan
+from langgoap.score import SimpleScore
 from langgoap.state import PlanningState
 
 
@@ -245,3 +246,65 @@ def test_goal_already_satisfied_returns_empty_plan() -> None:
 
     assert result is not None
     assert len(result) == 0
+
+
+# ---------------------------------------------------------------------------
+# Truncation keeps score and CSP metadata consistent (issue #45)
+# ---------------------------------------------------------------------------
+
+
+def test_truncated_csp_plan_carries_fresh_score_and_metadata() -> None:
+    """A truncated plan must not advertise the full plan's CSP numbers.
+
+    With a CSP-backed inner strategy the full plan carries a
+    ``HardSoftScore`` and ``metadata.csp`` for *all* its actions.  After
+    truncation the score type must stay ``HardSoftScore`` (so MultiGoal
+    "any" selection compares like with like) and the CSP resource usage
+    must describe the truncated action list only.
+    """
+    from langgoap.goals import ConstraintSpec
+    from langgoap.planner.strategy import TwoPhasePipelineStrategy
+    from langgoap.score import HardSoftScore
+
+    actions: list[ActionSpec] = []
+    for i in range(3):
+        pre = {f"step_{i}": True} if i > 0 else {}
+        actions.append(
+            ActionSpec(
+                name=f"a{i}",
+                preconditions=pre,
+                effects={f"step_{i + 1}": True},
+                cost=1.0,
+                resources={"cost_usd": 10.0},
+            )
+        )
+    goal = GoalSpec(
+        conditions={"step_3": True},
+        constraints=(ConstraintSpec(key="cost_usd", max=100.0),),
+    )
+    start = PlanningState.from_dict({})
+
+    full = TwoPhasePipelineStrategy().plan(start, goal, actions)
+    assert full is not None and full.metadata.csp is not None
+    assert isinstance(full.score, HardSoftScore)
+
+    lazy = LazyDecompositionStrategy(lookahead=1, inner=TwoPhasePipelineStrategy())
+    truncated = lazy.plan(start, goal, actions)
+    assert truncated is not None
+    assert truncated.action_names == ["a0"]
+    assert isinstance(truncated.score, HardSoftScore)
+    assert truncated.score.is_feasible()
+    csp = truncated.metadata.csp
+    assert csp is not None, "CSP metadata is re-derived for the truncated plan"
+    usage = {u.key: u for u in csp.resource_usage}
+    assert usage["cost_usd"].total == 10.0, "usage describes the truncated plan"
+    # The search statistics still come from the inner strategy's full run.
+    assert truncated.metadata.nodes_explored == full.metadata.nodes_explored
+
+
+def test_truncated_plain_plan_has_no_csp_metadata() -> None:
+    actions, goal, start = _make_chain(4)
+    truncated = LazyDecompositionStrategy(lookahead=2).plan(start, goal, actions)
+    assert truncated is not None
+    assert truncated.metadata.csp is None
+    assert truncated.score == SimpleScore(scalar=truncated.total_cost)

@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from langgoap.planner.csp import CSPMetadata, ScheduleEntry
     from langgoap.planner.types import Plan
 
+from langgoap.viz._costs import step_costs
 
 _ID_SAFE = re.compile(r"[^A-Za-z0-9_]")
 
@@ -97,10 +98,11 @@ def _emit_scheduled_nodes(
 def _emit_unscheduled_nodes(plan: Plan, node_ids: list[str]) -> list[str]:
     """Emit one node per action, annotating non-default costs."""
     out: list[str] = []
+    costs = step_costs(plan)
     for i, action in enumerate(plan.actions):
         label = _escape_dot(action.name)
-        cost = action.get_cost({})
-        if cost != 1.0:
+        cost = costs[i]
+        if cost is not None and cost != 1.0:
             label = f"{label}\\ncost={cost:g}"
         out.append(f'    {node_ids[i]} [label="{label}"];')
     return out

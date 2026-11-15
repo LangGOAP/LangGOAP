@@ -12,7 +12,7 @@ Key advantages over the original:
 - Cost-optimal ordering: A* finds the cheapest path through available agents
 - Verifiable plans: the agent sequence is type-checked via preconditions/effects
 
-Reference: research/repos/langgraph/docs/docs/tutorials/multi_agent/hierarchical_agent_teams.ipynb
+Reference: https://github.com/langchain-ai/langgraph/blob/HEAD/docs/docs/tutorials/multi_agent/hierarchical_agent_teams.ipynb
 """
 
 from __future__ import annotations

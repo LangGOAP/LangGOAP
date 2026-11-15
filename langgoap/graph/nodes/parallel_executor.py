@@ -12,7 +12,7 @@ import asyncio
 import random
 from typing import Any
 
-from langgoap.actions import ActionSpec
+from langgoap.actions import ActionSpec, ensure_unique_action_names
 from langgoap.graph.nodes._execution import (
     _apply_result,
     _build_failure,
@@ -148,7 +148,7 @@ class ParallelGoapExecutor:
         rng: Optional ``random.Random`` forwarded to
             ``transition_model.sample``.  When omitted, a single
             ``random.Random()`` is created at construction time and
-            reused across waves.
+            reused across waves.  Back-off jitter uses a separate stream.
     """
 
     def __init__(
@@ -165,11 +165,15 @@ class ParallelGoapExecutor:
         self._guards: list[ActionGuard | AsyncActionGuard] = guards or []
         self._transition_model: TransitionModel | None = transition_model
         self._rng: random.Random = rng if rng is not None else random.Random()
+        # See ``GoapExecutor``: jitter must not consume the sampling stream.
+        self._backoff_rng = random.Random()
         # Source-of-truth action map for rebinding fields the serializer
         # cannot round-trip (callable execute, qos, Pydantic
         # require_human_approval class refs, human_input_key strings).
         # See :class:`GoapExecutor._rebind` for the full rationale —
         # same pattern, applied per-action inside each parallel wave.
+        if actions:
+            ensure_unique_action_names(actions)
         self._actions: dict[str, ActionSpec] = (
             {a.name: a for a in actions} if actions else {}
         )
@@ -258,7 +262,7 @@ class ParallelGoapExecutor:
                     action,
                     merged_world,
                     tracer=self._tracer,
-                    rng=self._rng,
+                    rng=self._backoff_rng,
                 )
                 returned_dict = _apply_result(
                     raw,
@@ -351,7 +355,7 @@ class ParallelGoapExecutor:
                     action,
                     ws_snapshot,
                     tracer=self._tracer,
-                    rng=self._rng,
+                    rng=self._backoff_rng,
                 )
                 returned_dict = _apply_result(
                     raw,

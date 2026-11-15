@@ -1,7 +1,7 @@
 """Utility-AI planner: greedy one-step net-value selection.
 
 Mirrors Embabel's contract on
-``research/repos/embabel-agent/embabel-agent-api/src/main/kotlin/
+``https://github.com/embabel/embabel-agent/blob/HEAD/embabel-agent-api/src/main/kotlin/
 com/embabel/plan/utility/UtilityPlanner.kt``: at each tick the
 strategy filters to applicable actions, scores each by
 ``net_value(state) = action.utility(state) - action.cost(state)``,

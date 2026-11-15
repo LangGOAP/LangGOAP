@@ -15,6 +15,7 @@ from langgoap import (
     ScheduleEntry,
 )
 from langgoap.planner.types import PlanMetadata
+from langgoap.state import PlanningState
 from langgoap.viz import (
     render_ascii,
     render_ascii_gantt,
@@ -395,9 +396,12 @@ class TestPlanViz:
         result = _make_linear_plan().draw_mermaid_png()
         assert result == fake_png
 
-    def test_repr_mimebundle_contains_png(
+    def test_repr_mimebundle_contains_png_when_opted_in(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        # PNG display posts the diagram to a rendering service, so it is
+        # opt-in via LANGGOAP_DISPLAY_PNG (issue #58).
+        monkeypatch.setenv("LANGGOAP_DISPLAY_PNG", "1")
         fake_png = b"\x89PNG\r\n\x1a\n"
         import langchain_core.runnables.graph_mermaid as _mod
 
@@ -405,4 +409,82 @@ class TestPlanViz:
         plan = _make_linear_plan()
         bundle = plan._repr_mimebundle_()
         assert "text/plain" in bundle
+        assert "text/markdown" in bundle
         assert bundle["image/png"] == fake_png
+
+
+# ---------------------------------------------------------------------------
+# State-dependent costs and Gantt ids (issue #54)
+# ---------------------------------------------------------------------------
+
+
+def _dynamic_cost_plan() -> Plan:
+    first = ActionSpec(name="price_it", effects={"price": 5.0}, cost=2.0)
+    second = ActionSpec(
+        name="buy",
+        preconditions={"price": 5.0},
+        effects={"done": True},
+        cost=lambda ws: ws["price"] * 2,  # reads the pre-state of its step
+    )
+    s1 = PlanningState.from_dict({"price": 5.0})
+    s2 = s1.apply({"done": True})
+    return Plan(actions=(first, second), expected_states=(s1, s2), total_cost=12.0)
+
+
+def _unknowable_cost_plan() -> Plan:
+    only = ActionSpec(
+        name="guess", effects={"done": True}, cost=lambda ws: ws["missing"]
+    )
+    return Plan(
+        actions=(only,),
+        expected_states=(PlanningState.from_dict({"done": True}),),
+        total_cost=1.0,
+    )
+
+
+class TestDynamicCostRendering:
+    def test_mermaid_evaluates_cost_against_the_step_pre_state(self) -> None:
+        source = render_mermaid(_dynamic_cost_plan())
+        assert "10" in source, "buy costs price * 2 = 10 in its pre-state"
+
+    def test_dot_evaluates_cost_against_the_step_pre_state(self) -> None:
+        source = render_dot(_dynamic_cost_plan())
+        assert "cost=10" in source
+
+    def test_unknowable_cost_renders_without_a_badge_instead_of_crashing(self) -> None:
+        plan = _unknowable_cost_plan()
+        mermaid = render_mermaid(plan)
+        dot = render_dot(plan)
+        assert "guess" in mermaid and "guess" in dot
+        assert ":::cost" not in mermaid
+        assert "cost=" not in dot
+
+
+class TestGanttIds:
+    def test_ids_are_unique_and_identifier_safe_for_repeated_names(self) -> None:
+        from langgoap.planner.csp import CSPMetadata, CSPStatus, ScheduleEntry
+
+        entries = (
+            ScheduleEntry(
+                "send email", timedelta(0), timedelta(seconds=1), timedelta(seconds=1)
+            ),
+            ScheduleEntry(
+                "send email", timedelta(0), timedelta(seconds=1), timedelta(seconds=1)
+            ),
+        )
+        plan = Plan(
+            actions=(
+                ActionSpec(name="send email", effects={"sent": True}),
+                ActionSpec(name="send email", effects={"sent": True}),
+            ),
+            total_cost=2.0,
+            metadata=PlanMetadata(
+                csp=CSPMetadata(status=CSPStatus.FEASIBLE, schedule=entries)
+            ),
+        )
+        source = render_mermaid_gantt(plan)
+        import re
+
+        ids = re.findall(r":(\S+),", source)
+        assert len(ids) == 2 and len(set(ids)) == 2
+        assert all(re.fullmatch(r"task_\d+", task_id) for task_id in ids), ids

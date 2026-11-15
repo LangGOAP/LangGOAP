@@ -5,6 +5,8 @@ from __future__ import annotations
 from types import MappingProxyType
 from typing import Any
 
+import pytest
+
 from langgoap.actions import ActionSpec
 from langgoap.goals import ConstraintSpec, GoalSpec
 from langgoap.graph.nodes import GoapPlanner
@@ -138,7 +140,8 @@ class TestCSPRefinementStrategy:
             conditions=MappingProxyType({"done": True}),
             constraints=(ConstraintSpec(key="cost_usd", max=10.0),),
         )
-        refiner = CSPRefinementStrategy(candidate)
+        with pytest.warns(DeprecationWarning, match="refine_with_csp"):
+            refiner = CSPRefinementStrategy(candidate)
         refined = refiner.plan(start, constrained, _simple_actions())
         assert refined is not None
         assert isinstance(refined.score, HardSoftScore)
@@ -147,7 +150,9 @@ class TestCSPRefinementStrategy:
     def test_runtime_checkable_protocol(self) -> None:
         # Needs a candidate Plan
         empty = Plan(actions=(), expected_states=(), total_cost=0.0)
-        assert isinstance(CSPRefinementStrategy(empty), PlanningStrategy)
+        with pytest.warns(DeprecationWarning):
+            refiner = CSPRefinementStrategy(empty)
+        assert isinstance(refiner, PlanningStrategy)
 
 
 class TestGoapPlannerStrategyKwarg:
@@ -189,3 +194,107 @@ class TestGoapPlannerStrategyKwarg:
         }
         updates = planner(state)
         assert updates["plan"] is not None
+
+
+class TestRefineWithCsp:
+    """``refine_with_csp`` is the helper that replaces ``CSPRefinementStrategy`` (#63)."""
+
+    def test_refines_candidate_against_constrained_goal(self) -> None:
+        from langgoap.planner.strategy import refine_with_csp
+
+        plain_goal = GoalSpec(conditions=MappingProxyType({"done": True}))
+        start = PlanningState.from_dict({})
+        candidate = AStarStrategy().plan(start, plain_goal, _simple_actions())
+        assert candidate is not None
+
+        constrained = GoalSpec(
+            conditions=MappingProxyType({"done": True}),
+            constraints=(ConstraintSpec(key="cost_usd", max=10.0),),
+        )
+        refined = refine_with_csp(candidate, constrained)
+
+        assert refined.action_names == candidate.action_names
+        assert isinstance(refined.score, HardSoftScore)
+        assert refined.metadata.csp is not None
+
+    def test_exported_from_the_package(self) -> None:
+        import langgoap
+
+        assert "refine_with_csp" in langgoap.__all__
+        assert callable(langgoap.refine_with_csp)
+
+
+class TestExplicitStrategiesKeepTracing:
+    """Passing the default strategies explicitly must not drop search tracing (#63)."""
+
+    @staticmethod
+    def _state() -> GoapState:
+        return {
+            "world_state": {},
+            "goal": GoalSpec(conditions=MappingProxyType({"done": True})),
+        }
+
+    @staticmethod
+    def _expansions(rec: Any) -> list[Any]:
+        return [args for name, args in rec.calls if name == "on_search_expand"]
+
+    def test_astar_strategy_uses_the_planner_tracer(self) -> None:
+        from tests.test_tracing import RecordingTracer
+
+        rec = RecordingTracer()
+        planner = GoapPlanner(
+            _simple_actions(),
+            strategy=AStarStrategy(),
+            tracer=rec,
+            record_expansions=True,
+        )
+        updates = planner(self._state())
+
+        assert updates["plan"] is not None
+        assert self._expansions(rec)
+
+    def test_two_phase_strategy_uses_the_planner_tracer(self) -> None:
+        from tests.test_tracing import RecordingTracer
+
+        rec = RecordingTracer()
+        planner = GoapPlanner(
+            _simple_actions(),
+            strategy=TwoPhasePipelineStrategy(),
+            tracer=rec,
+            record_expansions=True,
+        )
+        updates = planner(self._state())
+
+        assert updates["plan"] is not None
+        assert self._expansions(rec)
+
+    def test_strategy_with_its_own_tracer_keeps_it(self) -> None:
+        from tests.test_tracing import RecordingTracer
+
+        own, other = RecordingTracer(), RecordingTracer()
+        planner = GoapPlanner(
+            _simple_actions(),
+            strategy=AStarStrategy(tracer=own, record_expansions=True),
+            tracer=other,
+            record_expansions=True,
+        )
+        planner(self._state())
+
+        assert self._expansions(own)
+        assert not self._expansions(other)
+
+    def test_wrapper_strategies_forward_to_their_inner_search(self) -> None:
+        from langgoap.planner.strategy import LazyDecompositionStrategy
+        from tests.test_tracing import RecordingTracer
+
+        rec = RecordingTracer()
+        planner = GoapPlanner(
+            _simple_actions(),
+            strategy=LazyDecompositionStrategy(lookahead=2),
+            tracer=rec,
+            record_expansions=True,
+        )
+        updates = planner(self._state())
+
+        assert updates["plan"] is not None
+        assert self._expansions(rec)

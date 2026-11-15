@@ -20,10 +20,10 @@
     fetch(url).then(function(r) {
       if (!r.ok) throw new Error(r.status);
       return r.json();
-    }).then(populate).catch(function() { tryFetch(urls); });
+    }).then(function(data) { populate(data, url); }).catch(function() { tryFetch(urls); });
   }
 
-  function populate(data) {
+  function populate(data, url) {
     var sel = document.getElementById('version-select');
     sel.innerHTML = '';
     var current = data.current || '';

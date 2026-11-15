@@ -10,7 +10,7 @@ ever pass close to a ghost — not just plans whose terminal state is
 unsafe.
 
 The three concrete metrics landed here cover the patterns called out
-in ``research/plans/trajectory-level-cost.md``:
+in the internal "trajectory-level-cost" design note (not in the repository):
 * ``MinimizeFinalStateExpression`` — evaluate on the last state only.
 * ``MinimizeTrajectorySum`` — integral over every expected state.
 * ``MinimizeTrajectoryMax`` — worst-case state along the plan.
