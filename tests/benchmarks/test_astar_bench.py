@@ -105,14 +105,22 @@ def test_bench_astar_blacklist_fallback(benchmark: object) -> None:
     """Blacklist forces the fallback path where all actions are tried again.
 
     Benchmarks the cost of the two-call pattern inside astar.plan() when
-    the blacklist would otherwise block the only solution.
+    the blacklist would otherwise block the only solution.  The fallback
+    is opt-in since 0.2.0 (``GoalPolicy(blacklist_fallback=True)``, #15),
+    so the benchmark asks for it explicitly.
     """
     actions, goal, start = linear_chain(5)
     # Blacklist the first action — fallback re-tries with empty blacklist
     blacklisted = [actions[0].name]
 
     def run() -> object:
-        return plan(start, goal, actions, blacklisted_actions=blacklisted)
+        return plan(
+            start,
+            goal,
+            actions,
+            blacklisted_actions=blacklisted,
+            blacklist_fallback=True,
+        )
 
     result = benchmark(run)  # type: ignore[call-arg]
     assert result is not None
