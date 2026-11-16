@@ -153,3 +153,14 @@ class TestAutolabelerLabelsEachPullRequestOnce:
             for label in (cat.get("labels") or [cat.get("label")])
         }
         assert {rule["label"] for rule in config["autolabeler"]} <= categorised
+
+
+class TestReleaseNotesTemplate:
+    def test_no_contributors_block(self) -> None:
+        """release-drafter unions pull-request authors with commit authors, so
+        a single-maintainer project got itself listed twice (login and
+        name) and dependabot twice (login and app link).  The block carries
+        no information here; the notes are the categorised change list."""
+        config = yaml.safe_load(_read(".github/release-drafter-config.yml"))
+        assert "$CONTRIBUTORS" not in config["template"]
+        assert "$CHANGES" in config["template"]
