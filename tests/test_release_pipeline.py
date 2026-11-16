@@ -16,6 +16,7 @@ from pathlib import Path
 
 import yaml  # type: ignore[import-untyped]
 
+import langgoap
 from langgoap import __version__
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,7 +75,7 @@ class TestVersionAndChangelogAgree:
     def test_no_stale_release_names_in_package_text(self) -> None:
         offenders = [
             str(p.relative_to(ROOT))
-            for p in (ROOT / "langgoap").rglob("*.py")
+            for p in Path(langgoap.__file__).resolve().parent.rglob("*.py")
             if "v0.1.0" in p.read_text(encoding="utf-8")
         ]
         assert offenders == []

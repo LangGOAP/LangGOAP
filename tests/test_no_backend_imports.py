@@ -14,7 +14,9 @@ from pathlib import Path
 
 import pytest
 
-PACKAGE = Path(__file__).resolve().parents[1] / "langgoap"
+import langgoap
+
+PACKAGE = Path(langgoap.__file__).resolve().parent  # the checkout or the wheel
 
 FORBIDDEN = [
     r"^\s*(from|import)\s+langgraph\.checkpoint\.(redis|postgres|sqlite|mongodb)",

@@ -140,3 +140,29 @@ class TestStaleText:
             "pytest.mark.bench" in p.read_text(encoding="utf-8")
             for p in (ROOT / "tests/benchmarks").glob("*.py")
         )
+
+
+class TestTestsInspectTheInstalledPackage:
+    """Tests find the package through ``langgoap.__file__``, never through the
+    checkout path.  The release workflow moves ``langgoap/`` aside and runs
+    the suite against the built wheel; a test that reads
+    ``ROOT / "langgoap"`` then raises ``FileNotFoundError`` (or, worse,
+    globs an empty directory and passes vacuously).  v0.2.0's first release
+    run failed exactly this way."""
+
+    PATTERN = re.compile(r"""/\s*["']langgoap["']""")
+
+    def test_no_test_joins_the_checkout_path_to_the_package(self) -> None:
+        offenders = [
+            str(path.relative_to(ROOT))
+            for path in sorted((ROOT / "tests").rglob("*.py"))
+            if path.name != Path(__file__).name
+            and self.PATTERN.search(path.read_text(encoding="utf-8"))
+        ]
+        assert offenders == []
+
+    def test_api_index_generator_falls_back_to_the_installed_package(self) -> None:
+        from docs.generate_api_index import package_init_file
+
+        assert package_init_file(checkout_exists=False).name == "__init__.py"
+        assert package_init_file(checkout_exists=False).parent.name == "langgoap"
