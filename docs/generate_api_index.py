@@ -19,7 +19,27 @@ import sys
 from pathlib import Path
 
 DOCS_DIR = Path(__file__).resolve().parent
-INIT_FILE = DOCS_DIR.parent / "langgoap" / "__init__.py"
+
+
+def package_init_file(checkout_exists: bool | None = None) -> Path:
+    """``langgoap/__init__.py`` of the checkout, or of the installed package.
+
+    The release workflow moves the checkout's ``langgoap/`` aside and runs
+    the test suite against the built wheel; the generator (and the tests
+    that pin its output) then read the shipped ``__init__.py``, which is
+    the same file the wheel was built from.
+    """
+    checkout = DOCS_DIR.parent / "langgoap" / "__init__.py"
+    if checkout_exists is None:
+        checkout_exists = checkout.exists()
+    if checkout_exists:
+        return checkout
+    import langgoap
+
+    return Path(langgoap.__file__).resolve()
+
+
+INIT_FILE = package_init_file()
 TARGET = DOCS_DIR / "api" / "index.md"
 
 #: Names in ``__all__`` that autosummary cannot document usefully.
