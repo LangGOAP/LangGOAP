@@ -406,12 +406,18 @@ class AnytimePlanningStrategy:
         if isinstance(self._inner, AStarStrategy):
             # A* honours the deadline itself and returns the best complete
             # plan found; no thread is needed and nothing is left running.
+            # The inner strategy carries the tracer ``rebind_inner_tracer``
+            # bound (or the one it was built with); calling ``astar_plan``
+            # directly used to drop it, so a planner-level tracer saw no
+            # search expansions from an anytime run (#63).
             return astar_plan(
                 start,
                 goal,
                 actions,
                 blacklisted_actions=blacklisted_actions,
                 time_budget_ms=self._budget_ms,
+                tracer=self._inner._tracer,
+                record_expansions=self._inner._record_expansions,
             )
 
         import concurrent.futures
