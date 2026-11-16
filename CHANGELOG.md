@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `AnytimePlanningStrategy` forwards the planner's tracer. Its fast path
+  called A* directly and dropped the tracer that `rebind_inner_tracer` had
+  bound into the inner strategy, so a tracer given to `GoapGraph` saw no
+  search expansions from an anytime run while the lazy, repair and
+  two-phase wrappers reported theirs (#63).
+
+### Tests
+
+- The gaps the v0.2.0 audit listed are closed: a run resumed by a **new**
+  process on the same checkpointer and thread keeps its plan, history,
+  replan count, failure counts and blacklist, sub-goal index and skipped
+  sub-goals, wall-clock anchor, no-plan explanation and reflections, and a
+  finished thread stays finished (`tests/integration/test_crash_resume.py`);
+  `ainvoke` matches `invoke` for termination policies, the three
+  `MultiGoal` modes and the strict sequential default, stuck recovery,
+  failure counts, handled tool errors, the parallel wave merge and the
+  blacklist fallback, plus the goal-object-with-checkpointer error, the
+  compile-option `TypeError` wording and the report key cap
+  (`tests/test_async_parity.py`); every codec round-trips every field,
+  including `ActionResult.cost`, `MultiGoal.on_infeasible`, `PlanMetadata`
+  and `CSPMetadata`, `ActionQos`, typed-form `ActionSpec`s and
+  `NirvanaGoal` (`tests/test_codec_roundtrips.py`); the wrapper strategies
+  forward the tracer and the pipeline, repair and utility planners see
+  non-planning context keys (`tests/test_tracer_forwarding_and_context.py`).
+
 ### CI
 
 - `make lint` checks and never rewrites: it runs `black --check`,
