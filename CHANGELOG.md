@@ -5,6 +5,24 @@ All notable changes to LangGOAP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### CI
+
+- `make lint` checks and never rewrites: it runs `black --check`,
+  `isort --check-only`, mypy and `ruff check --select F821,F401,F811`
+  (undefined names, unused imports, redefinitions). It used to run the
+  formatters in write mode, so an unsorted import block passed CI and
+  surfaced only in the release job's format step; and no check caught an
+  undefined name, which is how the `NameError` in #71's first CI run got
+  through. `make format` still rewrites. The 150 findings ruff reported
+  on the existing tree are fixed (unused imports, duplicate `Mapping`
+  imports, test annotations naming types that were only imported inside
+  the function).
+- The release notes drop the Contributors block: release-drafter unions
+  pull-request authors with commit authors, which listed the maintainer
+  twice and dependabot twice.
+
 ## [0.2.0] — 2026-11-15
 
 Resolves the 58 findings of the 2026-11-14 pre-release audit (#10–#67):

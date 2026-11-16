@@ -61,7 +61,8 @@ on those specific integrations.
 
 ```bash
 make format       # isort + black
-make lint         # format + mypy
+make lint         # black/isort --check, mypy, ruff (F821/F401/F811); never rewrites
+make format       # rewrite with isort + black
 make test         # fast default (skips api-marked live-LLM tests)
 make test-all     # everything, including live-LLM tests (needs keys)
 make check        # lint + test

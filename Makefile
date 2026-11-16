@@ -1,4 +1,4 @@
-.PHONY: install install-frozen format lint test test-all clean check-types check docs docs-clean docs-serve test-coverage coverage-report coverage-html find-dead-code benchmark benchmark-compare
+.PHONY: install install-frozen format check-format check-ruff lint test test-all clean check-types check docs docs-clean docs-serve test-coverage coverage-report coverage-html find-dead-code benchmark benchmark-compare
 
 install:
 	uv sync
@@ -17,7 +17,13 @@ check-format:
 check-types:
 	uv run python -m mypy ./langgoap
 
-lint: format check-types
+# Undefined names (the #71 NameError slipped through), unused imports and
+# redefinitions.  black/isort do not catch these.
+check-ruff:
+	uv run ruff check --select F821,F401,F811 ./langgoap ./tests/
+
+# lint CHECKS; it never rewrites files.  Use `make format` to fix formatting.
+lint: check-format check-types check-ruff
 
 test:
 	uv run python -m pytest -vv -s --log-level=CRITICAL -m "not api"

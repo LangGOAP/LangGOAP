@@ -111,6 +111,7 @@ dev = [
     "matplotlib>=3.10.9",
     "python-dotenv>=1.0",
     "bandit>=1.9.4",
+    "ruff>=0.9",
 ]
 
 [tool.pytest.ini_options]
