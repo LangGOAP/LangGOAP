@@ -34,7 +34,6 @@ from langgoap.graph.builder import GoapGraph
 from langgoap.guards import ActionGuard, AsyncActionGuard
 from langgoap.history import StoreExecutionHistory
 from langgoap.integrations._compile_options import (
-    COMPILE_OPTIONS,
     _check_compile_kwargs,
 )
 from langgoap.integrations.tools import EffectValidator, goapify_tool

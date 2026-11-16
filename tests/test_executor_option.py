@@ -6,8 +6,6 @@ hand.  The option is also accepted by the low-code on-ramps.
 
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 from langchain_core.tools import tool
 

@@ -31,7 +31,6 @@ instance fixture is at
 
 from __future__ import annotations
 
-import pytest
 from tutorial_examples.data.task_assigning_instance import (
     EMPLOYEES,
     TASKS,

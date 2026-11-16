@@ -27,7 +27,6 @@ import math
 import random
 import statistics
 import time
-from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -38,7 +37,6 @@ from langgoap.planner.mcts import (
     MCTSExploration,
     MCTSReuseConfig,
     MCTSStrategy,
-    MCTSTracingConfig,
 )
 from langgoap.planner.strategy import AStarStrategy, PlanningStrategy
 from langgoap.state import PlanningState
@@ -48,7 +46,6 @@ from tests.fixtures.stochastic_gridworld import (
     SlipperyTransitionModel,
     cliff_walking_4x12,
     frozen_lake_4x4,
-    make_gridworld_actions,
     run_episode,
 )
 

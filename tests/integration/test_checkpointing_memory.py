@@ -7,7 +7,6 @@ in-memory resume and thread-isolation tests (issue #43).
 
 from __future__ import annotations
 
-import pytest
 from langgraph.checkpoint.memory import MemorySaver
 
 from tests.integration.checkpointing_support import (

@@ -14,7 +14,6 @@ from langgoap.goals import GoalPolicy, GoalSpec
 from langgoap.graph.builder import GoapGraph
 from langgoap.graph.nodes import GoapExecutor, async_execute_action
 from langgoap.graph.state import GoapState
-from langgoap.types import ReplanStrategy
 from tests.conftest import make_action as _action
 from tests.conftest import make_plan as _make_plan
 

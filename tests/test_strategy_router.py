@@ -18,17 +18,17 @@ import pytest
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import ConstraintSpec, GoalSpec
+from langgoap.graph.builder import GoapGraph
 from langgoap.planner.mcts import (
     MCTSExploration,
     MCTSReuseConfig,
     MCTSStrategy,
-    MCTSTracingConfig,
 )
+from langgoap.planner.router import StrategyRouter
 from langgoap.planner.strategy import AStarStrategy, PlanningStrategy
 from langgoap.planner.transitions import (
     DeterministicTransitionModel,
     DivergencePolicy,
-    TransitionModel,
 )
 from langgoap.planner.types import Plan
 from langgoap.state import PlanningState
@@ -448,10 +448,7 @@ class TestStrategyRouterEndToEnd:
         without the notebook having to patch anything.
         """
         from langgoap.planner.mcts import (
-            MCTSExploration,
-            MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
         from langgoap.planner.router import (
             RuleBasedClassifier,

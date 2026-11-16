@@ -11,7 +11,6 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.tools import tool

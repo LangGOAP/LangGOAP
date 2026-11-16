@@ -26,7 +26,6 @@ from langgoap.planner.mcts import (
     MCTSExploration,
     MCTSReuseConfig,
     MCTSStrategy,
-    MCTSTracingConfig,
 )
 from langgoap.state import PlanningState
 from tests.benchmarks.stochastic_gridworld_bench import GridworldMDPRollout

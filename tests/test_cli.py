@@ -9,7 +9,6 @@ import json
 import sys
 import textwrap
 from pathlib import Path
-from typing import Any
 
 import pytest
 from click.testing import CliRunner

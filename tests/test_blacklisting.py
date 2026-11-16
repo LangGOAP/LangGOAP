@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 from langgraph.graph import END
 
-from langgoap.actions import ActionSpec, GoapAction, goap_action
+from langgoap.actions import GoapAction, goap_action
 from langgoap.goals import GoalPolicy, GoalSpec
 from langgoap.graph.nodes import (
     GoapObserver,

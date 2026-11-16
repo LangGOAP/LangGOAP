@@ -10,13 +10,10 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-import pytest
-
 from langgoap.actions import ActionSpec, GoapAction
 from langgoap.goals import GoalPolicy, GoalSpec
 from langgoap.graph.builder import GoapGraph
 from langgoap.types import ReplanStrategy
-from tests.conftest import make_action as _action
 
 
 class TestAsyncGoapLoop:

@@ -31,7 +31,6 @@ instance fixture is at
 
 from __future__ import annotations
 
-import pytest
 from tutorial_examples.data.nurse_rostering_instance import (
     NURSES,
     SHIFTS,

@@ -67,40 +67,28 @@ def _counter_action() -> ActionSpec:
 class TestTreeReuseAPI:
     def test_strategy_exposes_reuse_tree_flag_default_false(self) -> None:
         from langgoap.planner.mcts import (
-            MCTSExploration,
-            MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         assert MCTSStrategy().reuse.reuse_tree is False
 
     def test_strategy_exposes_tree_reuse_decay_default_zero_point_six(self) -> None:
         from langgoap.planner.mcts import (
-            MCTSExploration,
-            MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         assert MCTSStrategy().reuse.tree_reuse_decay == pytest.approx(0.6)
 
     def test_strategy_exposes_advance_method(self) -> None:
         from langgoap.planner.mcts import (
-            MCTSExploration,
-            MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         assert callable(getattr(MCTSStrategy(), "advance", None))
 
     def test_strategy_exposes_carryover_root_handle(self) -> None:
         from langgoap.planner.mcts import (
-            MCTSExploration,
-            MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         strategy = MCTSStrategy()
@@ -114,9 +102,7 @@ class TestReuseOffIsBitIdentical:
     def test_reuse_off_leaves_carryover_unset(self) -> None:
         from langgoap.planner.mcts import (
             MCTSExploration,
-            MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         goal = GoalSpec(conditions={"done": True})
@@ -140,7 +126,6 @@ class TestAdvancePromotesObservedChildStochastic:
             MCTSExploration,
             MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         model = _SlipCounterModel(slip_p=0.3)
@@ -174,7 +159,6 @@ class TestAdvancePromotesObservedChildStochastic:
             MCTSExploration,
             MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         model = _SlipCounterModel(slip_p=0.3)
@@ -205,7 +189,6 @@ class TestAdvancePromotesObservedChildDeterministic:
             MCTSExploration,
             MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         goal = GoalSpec(conditions={"done": True})
@@ -240,7 +223,6 @@ class TestDecaySemantics:
             MCTSExploration,
             MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         model = _SlipCounterModel(slip_p=0.3)
@@ -288,7 +270,6 @@ class TestReuseAccumulatesStatsAcrossTicks:
             MCTSExploration,
             MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         model = _SlipCounterModel(slip_p=0.3)
@@ -320,10 +301,8 @@ class TestReuseAccumulatesStatsAcrossTicks:
 class TestAdvanceBeforePlanIsNoOp:
     def test_advance_with_no_prior_root_leaves_carryover_none(self) -> None:
         from langgoap.planner.mcts import (
-            MCTSExploration,
             MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         strategy = MCTSStrategy(reuse=MCTSReuseConfig(reuse_tree=True))

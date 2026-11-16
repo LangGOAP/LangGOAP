@@ -18,7 +18,7 @@ import math
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from typing import Any, Mapping, cast
+from typing import Any, cast
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec

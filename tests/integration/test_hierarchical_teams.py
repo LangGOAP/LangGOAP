@@ -21,7 +21,7 @@ from typing import Any
 
 import pytest
 
-from langgoap import ActionSpec, GoalSpec, GoapGraph, ReplanStrategy
+from langgoap import ActionSpec, GoalSpec, GoapGraph
 
 # ---------------------------------------------------------------------------
 # Deterministic stubs for GOAP mechanics tests.

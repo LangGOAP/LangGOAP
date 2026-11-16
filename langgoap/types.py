@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import enum
-from typing import Any, Callable, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 class ReplanStrategy(str, enum.Enum):

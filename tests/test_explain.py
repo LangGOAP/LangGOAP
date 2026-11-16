@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
-import pytest
-
 from langgoap.actions import ActionSpec
 from langgoap.goals import ConstraintSpec, GoalSpec
 from langgoap.planner.csp import CSPMetadata, CSPStatus, ResourceUsage, validate_plan

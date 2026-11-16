@@ -9,8 +9,6 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any
 
-import pytest
-
 from langgoap import ConstraintSpec, CSPStatus, GoalSpec, Maximize, Minimize
 from langgoap.graph.builder import GoapGraph
 from tests.conftest import make_action

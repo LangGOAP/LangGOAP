@@ -23,7 +23,7 @@ uncovered by the Phase 2 per-entity Pac-Man experiment
 
 from __future__ import annotations
 
-from langgoap import ActionSpec, GoalSpec, GoapGraph, ReplanStrategy
+from langgoap import ActionSpec, GoalSpec, GoapGraph
 from langgoap.goals import MultiGoal
 
 # ---------------------------------------------------------------------------

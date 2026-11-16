@@ -20,8 +20,6 @@ LangGOAP additions:
 
 from __future__ import annotations
 
-from typing import Any
-
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec, MultiGoal
 from langgoap.graph.builder import GoapGraph

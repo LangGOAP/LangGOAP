@@ -4,17 +4,15 @@ from __future__ import annotations
 
 from datetime import timedelta
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 
-from langgoap import ConstraintSpec, CSPMetadata, CSPStatus, GoalSpec, Minimize
+from langgoap import ConstraintSpec, CSPStatus, GoalSpec, Minimize
 from langgoap.planner.pipeline import (
     enumerate_alternatives,
     needs_csp,
     plan,
 )
-from langgoap.planner.types import Plan
 from langgoap.state import PlanningState
 from tests.conftest import make_action, make_plan
 

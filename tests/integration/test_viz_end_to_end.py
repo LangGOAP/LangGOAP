@@ -10,14 +10,11 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-import pytest
-
 from langgoap import (
     ActionSpec,
     ConstraintSpec,
     CSPStatus,
     GoalSpec,
-    Minimize,
     PlanningState,
 )
 from langgoap.planner.pipeline import plan as pipeline_plan

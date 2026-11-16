@@ -24,7 +24,6 @@ type any implementation.
 from __future__ import annotations
 
 import copy
-import time
 import warnings
 from dataclasses import replace
 from typing import Any, Protocol, runtime_checkable
@@ -33,7 +32,7 @@ from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
 from langgoap.planner.astar import plan as astar_plan
 from langgoap.planner.pipeline import plan as pipeline_plan
-from langgoap.planner.types import Plan, PlanMetadata
+from langgoap.planner.types import Plan
 from langgoap.score import SimpleScore
 from langgoap.state import PlanningState
 

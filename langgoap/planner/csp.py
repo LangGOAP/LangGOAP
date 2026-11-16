@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from langgoap.planner.types import Plan
 
 from langgoap.actions import ActionSpec
-from langgoap.goals import ConstraintSpec, GoalSpec, SoftGoal
+from langgoap.goals import ConstraintSpec, GoalSpec
 from langgoap.types import ObjectiveDirection
 
 logger = logging.getLogger(__name__)

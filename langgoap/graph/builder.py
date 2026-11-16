@@ -7,11 +7,10 @@ and observer nodes wired together for the GOAP execution loop.
 from __future__ import annotations
 
 import random
-from typing import TYPE_CHECKING, Any, Literal, Mapping, cast
+from typing import TYPE_CHECKING, Any, Literal, Mapping
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import RunnableConfig, RunnableLambda
-from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Checkpointer

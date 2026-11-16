@@ -8,14 +8,13 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import START, StateGraph
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalPolicy, GoalSpec
 from langgoap.graph.builder import GoapGraph
 from langgoap.graph.nodes import GoapExecutor, GoapObserver, GoapPlanner
-from langgoap.graph.state import GoapState, GoapStateChannels, successful_action_names
+from langgoap.graph.state import GoapStateChannels, successful_action_names
 from langgoap.types import ReplanStrategy
 from tests.conftest import make_action as _action
 
