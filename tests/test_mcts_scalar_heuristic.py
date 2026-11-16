@@ -195,9 +195,7 @@ class TestMCTSStrategyWithHeuristic:
     ) -> None:
         from langgoap.planner.mcts import (
             MCTSExploration,
-            MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         def progress(state: PlanningState, goal: GoalSpec) -> float:
@@ -225,9 +223,7 @@ class TestMCTSStrategyWithHeuristic:
         budget while the flat-reward one cannot discriminate children."""
         from langgoap.planner.mcts import (
             MCTSExploration,
-            MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         def progress(state: PlanningState, goal: GoalSpec) -> float:

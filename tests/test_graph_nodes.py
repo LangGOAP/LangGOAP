@@ -19,13 +19,12 @@ from langgoap.graph.nodes import (
     _is_better_plan,
 )
 from langgoap.graph.state import (
-    ActionResult,
     GoapState,
     GoapStateChannels,
     plan_from_state,
 )
 from langgoap.guards import FunctionalGuard, GuardResult, GuardSeverity
-from langgoap.planner.types import Plan, PlanMetadata
+from langgoap.planner.types import Plan
 from langgoap.score import BendableScore, HardSoftScore, SimpleScore
 from langgoap.state import PlanningState
 from langgoap.types import ReplanStrategy

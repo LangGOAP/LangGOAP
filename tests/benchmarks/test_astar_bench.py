@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import pytest
 
-from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
 from langgoap.planner.astar import plan
 from langgoap.state import PlanningState

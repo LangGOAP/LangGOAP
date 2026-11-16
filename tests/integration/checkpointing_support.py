@@ -7,13 +7,10 @@ same three contracts are asserted against every backend (issue #43).
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from typing import Any, Iterator
+from typing import Any
 from uuid import uuid4
 
-import pytest
 from langchain_core.runnables import RunnableConfig
-from langgraph.checkpoint.memory import MemorySaver
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec

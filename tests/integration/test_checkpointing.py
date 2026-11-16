@@ -46,13 +46,12 @@ environments without ``langgraph-checkpoint-postgres`` /
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Any, Iterator
+from typing import Iterator
 
 import pytest
 
 from tests.integration.checkpointing_support import (
     _assert_threads_isolated_async,
-    _assert_threads_isolated_sync,
     _run_mid_plan_resume_async,
     _run_mid_plan_resume_sync,
 )

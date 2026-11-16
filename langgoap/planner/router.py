@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Literal, Mapping, Protocol, cast, runtime_checkable
+from typing import Any, Literal, Protocol, cast, runtime_checkable
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec

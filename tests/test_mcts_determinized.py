@@ -24,15 +24,12 @@ import random
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-import pytest
-
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
 from langgoap.planner.mcts import (
     MCTSExploration,
     MCTSReuseConfig,
     MCTSStrategy,
-    MCTSTracingConfig,
     StochasticRollout,
 )
 from langgoap.state import PlanningState

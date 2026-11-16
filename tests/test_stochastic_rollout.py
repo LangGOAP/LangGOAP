@@ -133,9 +133,7 @@ class TestMCTSStrategyTransitionModel:
     def test_defaults_to_deterministic_model(self) -> None:
         from langgoap.planner.mcts import (
             MCTSExploration,
-            MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
         from langgoap.planner.transitions import DeterministicTransitionModel
 
@@ -145,9 +143,7 @@ class TestMCTSStrategyTransitionModel:
     def test_accepts_custom_model(self) -> None:
         from langgoap.planner.mcts import (
             MCTSExploration,
-            MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         model = _CountingModel()
@@ -160,9 +156,7 @@ class TestMCTSStrategyTransitionModel:
     def test_tree_expansion_uses_model_expected(self) -> None:
         from langgoap.planner.mcts import (
             MCTSExploration,
-            MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         model = _CountingModel()
@@ -188,9 +182,7 @@ class TestMCTSStrategyTransitionModel:
         :class:`StochasticRollout` so ``sample`` is actually exercised."""
         from langgoap.planner.mcts import (
             MCTSExploration,
-            MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         model = _CountingModel()

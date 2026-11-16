@@ -20,12 +20,11 @@ from __future__ import annotations
 import pytest
 
 from langgoap.actions import ActionSpec
-from langgoap.goals import GoalSpec, ObjectiveDirection
+from langgoap.goals import GoalSpec
 from langgoap.planner.astar import plan as astar_plan
 from langgoap.planner.csp import CSPStatus, optimize_plans, validate_plan
 from langgoap.planner.types import Plan
 from langgoap.state import PlanningState
-from tests.benchmarks.conftest import linear_chain
 
 # ---------------------------------------------------------------------------
 # Helpers — build plans with resource annotations

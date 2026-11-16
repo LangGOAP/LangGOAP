@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
-from typing import Any, Mapping
+from typing import Any
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalPolicy, GoalSpec

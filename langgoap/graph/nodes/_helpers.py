@@ -14,13 +14,11 @@ cross-import each other.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
 from langgoap.planner.types import Plan
 from langgoap.score import SimpleScore
-from langgoap.tracing import PlanningTracer
 
 logger = logging.getLogger("langgoap.graph.nodes")
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from langgoap.goals import GoalSpec
 from langgoap.graph.state import ActionResult, GoapState
-from langgoap.planner.types import Plan
 
 
 class TestActionResult:

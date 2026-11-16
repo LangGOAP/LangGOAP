@@ -19,7 +19,6 @@ from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
 from langgoap.planner.mcts import (
     MCTSExploration,
-    MCTSReuseConfig,
     MCTSStrategy,
     MCTSTracingConfig,
 )

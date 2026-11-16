@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from langgoap import ActionSpec, GoalPolicy, GoalSpec, GoapGraph, ReplanStrategy
 
 # ---------------------------------------------------------------------------

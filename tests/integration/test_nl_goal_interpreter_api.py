@@ -14,9 +14,14 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from dotenv import load_dotenv
+
+if TYPE_CHECKING:
+    from langchain_anthropic import ChatAnthropic
+    from langchain_openai import ChatOpenAI
 
 from langgoap import (
     ActionSpec,
@@ -75,7 +80,7 @@ class TestGoalInterpreterOpenAI:
     """Live tests against OpenAI's structured-output API."""
 
     @pytest.fixture
-    def llm(self) -> "ChatOpenAI":  # type: ignore[name-defined]
+    def llm(self) -> "ChatOpenAI":
         key = os.environ.get("OPENAI_API_KEY", "")
         if not key or key.startswith("sk-..."):
             pytest.skip("OPENAI_API_KEY not set in .env")
@@ -173,7 +178,7 @@ class TestGoalInterpreterAnthropic:
     """Live tests against Anthropic's structured-output API."""
 
     @pytest.fixture
-    def llm(self) -> "ChatAnthropic":  # type: ignore[name-defined]
+    def llm(self) -> "ChatAnthropic":
         key = os.environ.get("ANTHROPIC_API_KEY", "")
         if not key or key.startswith("sk-ant-..."):
             pytest.skip("ANTHROPIC_API_KEY not set in .env")

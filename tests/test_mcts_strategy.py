@@ -36,10 +36,7 @@ def two_step_actions() -> list[ActionSpec]:
 class TestMCTSStrategyProtocol:
     def test_satisfies_planning_strategy_protocol(self) -> None:
         from langgoap.planner.mcts import (
-            MCTSExploration,
-            MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         assert isinstance(MCTSStrategy(), PlanningStrategy)
@@ -49,9 +46,7 @@ class TestMCTSStrategyPlanning:
     def test_finds_two_step_plan(self, two_step_actions: list[ActionSpec]) -> None:
         from langgoap.planner.mcts import (
             MCTSExploration,
-            MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         strategy = MCTSStrategy(
@@ -74,9 +69,7 @@ class TestMCTSStrategyPlanning:
     ) -> None:
         from langgoap.planner.mcts import (
             MCTSExploration,
-            MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         strategy = MCTSStrategy(
@@ -93,9 +86,7 @@ class TestMCTSStrategyPlanning:
     def test_infeasible_goal_returns_none(self) -> None:
         from langgoap.planner.mcts import (
             MCTSExploration,
-            MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         actions = [
@@ -119,7 +110,6 @@ class TestMCTSStrategyPlanning:
             MCTSExploration,
             MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         actions = [
@@ -142,9 +132,7 @@ class TestMCTSStrategyPlanning:
     ) -> None:
         from langgoap.planner.mcts import (
             MCTSExploration,
-            MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         strategy = MCTSStrategy(
@@ -172,9 +160,7 @@ class TestMCTSPlanCompilesInLangGraph:
         """End-to-end: plan an MCTS plan and execute it via GoapGraph."""
         from langgoap.planner.mcts import (
             MCTSExploration,
-            MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         graph = GoapGraph(two_step_actions).compile()

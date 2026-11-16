@@ -90,9 +90,7 @@ class TestStochasticExpansionInsertsChanceLayer:
         from langgoap.planner.mcts import (
             ChanceNode,
             MCTSExploration,
-            MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         model = _SlipCounterModel(slip_p=0.3)
@@ -129,9 +127,7 @@ class TestDeterministicFastPath:
         ``root.children`` is populated as today."""
         from langgoap.planner.mcts import (
             MCTSExploration,
-            MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         goal = GoalSpec(conditions={"done": True})
@@ -233,9 +229,7 @@ class TestChanceNodeConvergence:
         ``pos=0`` from slip) across repeated visits."""
         from langgoap.planner.mcts import (
             MCTSExploration,
-            MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         model = _RiskyMDPModel(slip_p=0.7)
@@ -274,9 +268,7 @@ class TestChanceNodeConvergence:
         is the core mathematical guarantee the layer delivers."""
         from langgoap.planner.mcts import (
             MCTSExploration,
-            MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         model = _RiskyMDPModel(slip_p=0.7)
@@ -306,9 +298,7 @@ class TestChanceNodeConvergence:
         chance child must have exactly one sampled successor."""
         from langgoap.planner.mcts import (
             MCTSExploration,
-            MCTSReuseConfig,
             MCTSStrategy,
-            MCTSTracingConfig,
         )
 
         model = _RiskyMDPModel(slip_p=0.0)

@@ -31,7 +31,6 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-import pytest
 from langgraph.store.memory import InMemoryStore
 from tutorial_examples.data.flexible_job_shop_instance import (
     ALL_STANDARD_COST_USD,

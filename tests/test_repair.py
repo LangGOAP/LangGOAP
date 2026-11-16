@@ -9,7 +9,7 @@ import pytest
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
 from langgoap.planner.repair import RepairResult, RepairStrategy, repair_plan
-from langgoap.planner.types import Plan, PlanMetadata
+from langgoap.planner.types import Plan
 from langgoap.score import SimpleScore
 from langgoap.state import PlanningState
 

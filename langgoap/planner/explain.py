@@ -19,8 +19,6 @@ from typing import TYPE_CHECKING, Any, Mapping
 from langgoap.goals import ConstraintSpec, GoalSpec
 from langgoap.planner.csp import (
     CSPMetadata,
-    CSPStatus,
-    ResourceUsage,
     compute_resource_totals,
 )
 

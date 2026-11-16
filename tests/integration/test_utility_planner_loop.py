@@ -23,8 +23,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalPolicy, GoalSpec
 from langgoap.graph.builder import GoapGraph

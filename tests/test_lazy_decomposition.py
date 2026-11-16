@@ -263,7 +263,6 @@ def test_truncated_csp_plan_carries_fresh_score_and_metadata() -> None:
     must describe the truncated action list only.
     """
     from langgoap.goals import ConstraintSpec
-    from langgoap.planner.strategy import TwoPhasePipelineStrategy
     from langgoap.score import HardSoftScore
 
     actions: list[ActionSpec] = []

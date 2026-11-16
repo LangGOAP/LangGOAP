@@ -27,7 +27,7 @@ from langgoap.planner.csp import (
     schedule_plan,
     validate_plan,
 )
-from langgoap.planner.types import Plan, PlanMetadata
+from langgoap.planner.types import Plan
 from tests.conftest import make_action, make_plan
 
 # ---------------------------------------------------------------------------
