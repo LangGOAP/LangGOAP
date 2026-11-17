@@ -27,6 +27,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
+from langgoap.planner.astar import relevant_actions
 from langgoap.planner.transitions import (
     DeterministicTransitionModel,
     TransitionModel,
@@ -549,7 +550,12 @@ class MCTSStrategy:
             )
 
         blacklist = set(blacklisted_actions or ())
-        filtered_actions = [a for a in actions if a.name not in blacklist]
+        # Blacklisted actions are out; so are actions that cannot move the goal,
+        # which would otherwise soak up rollouts and tree expansions.  When no
+        # action writes a goal key at all, keep them all: the anytime fallback
+        # still owes the caller a step of progress on a goal the tree cannot see.
+        allowed = [a for a in actions if a.name not in blacklist]
+        filtered_actions = relevant_actions(goal.conditions, allowed) or allowed
         rng = random.Random(self.exploration.seed)
         policy: RolloutPolicy = self.rollout_policy or self._default_rollout(rng)
 

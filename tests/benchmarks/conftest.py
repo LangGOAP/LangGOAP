@@ -124,6 +124,45 @@ def branching(
     return actions, goal, start
 
 
+def layered_distractors(
+    n_layers: int, width: int, extra: int
+) -> tuple[list[ActionSpec], GoalSpec, PlanningState]:
+    """Return (actions, goal, start): a chain of layers with useless but reachable actions.
+
+    Each layer offers ``width`` alternative actions that advance it (costs
+    1.0, 1.5, ...) and ``extra`` cheap actions that only set a private flag
+    nobody reads.  Those distractors are applicable at every step, so a
+    planner that does not drop them explores every combination of their
+    flags: this is the shape of a real tool set, where most actions do not
+    serve the goal at hand.
+    """
+    actions: list[ActionSpec] = []
+    for layer in range(n_layers):
+        for w in range(width):
+            actions.append(
+                ActionSpec(
+                    name=f"l{layer}_w{w}",
+                    preconditions={f"s{layer}": True},
+                    effects={f"s{layer + 1}": True},
+                    cost=1.0 + w * 0.5,
+                )
+            )
+        for e in range(extra):
+            actions.append(
+                ActionSpec(
+                    name=f"l{layer}_x{e}",
+                    preconditions={f"s{layer}": True},
+                    effects={f"junk{layer}_{e}": True},
+                    cost=0.5,
+                )
+            )
+    goal = GoalSpec(conditions={f"s{n_layers}": True})
+    start = PlanningState.from_dict(
+        {"s0": True, **{f"s{i}": False for i in range(1, n_layers + 1)}}
+    )
+    return actions, goal, start
+
+
 # ---------------------------------------------------------------------------
 # Pytest fixtures (re-usable across benchmark modules)
 # ---------------------------------------------------------------------------

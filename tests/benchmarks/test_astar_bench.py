@@ -22,7 +22,12 @@ import pytest
 from langgoap.goals import GoalSpec
 from langgoap.planner.astar import plan
 from langgoap.state import PlanningState
-from tests.benchmarks.conftest import branching, linear_chain, wide_pool
+from tests.benchmarks.conftest import (
+    branching,
+    layered_distractors,
+    linear_chain,
+    wide_pool,
+)
 
 # ---------------------------------------------------------------------------
 # 1. Plan depth scaling — linear chain
@@ -124,3 +129,25 @@ def test_bench_astar_blacklist_fallback(benchmark: object) -> None:
     result = benchmark(run)  # type: ignore[call-arg]
     assert result is not None
     assert len(result.actions) == 5
+
+
+# ---------------------------------------------------------------------------
+# 5. Distractors — reachable actions that serve no goal
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("layers", "width", "extra"), [(6, 3, 2), (10, 4, 4), (20, 5, 6)]
+)
+def test_bench_astar_distractors(
+    benchmark: object, layers: int, width: int, extra: int
+) -> None:
+    """A* on a chain of layers with cheap, reachable, useless actions at every step.
+
+    Without goal-relevance pruning the search explores every combination of
+    the distractors' flags and is exponential in the depth; with it the
+    search is linear, as for the plain chain.
+    """
+    actions, goal, start = layered_distractors(layers, width, extra)
+    result = benchmark(plan, start, goal, actions)  # type: ignore[call-arg]
+    assert result is not None and len(result.actions) == layers

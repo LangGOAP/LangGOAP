@@ -176,6 +176,57 @@ def _is_reachable(
 
 
 # ---------------------------------------------------------------------------
+# Relevance pruning
+# ---------------------------------------------------------------------------
+
+
+def relevant_actions(
+    goal_conditions: Mapping[str, Any], actions: list[ActionSpec]
+) -> list[ActionSpec]:
+    """Drop the actions that cannot contribute to ``goal_conditions``.
+
+    A key is relevant when the goal reads it or when an action that writes a
+    relevant key reads it in a precondition (a backward closure over keys).
+    An action is kept when it writes at least one relevant key; dynamic
+    effects count through their declared ``effect_keys``, and when a relevant
+    action has dynamic effects nothing is dropped at all, because such an
+    effect may read any key.
+
+    Dropping the rest is sound: preconditions and goal conditions only ever
+    read relevant keys, so an action that writes none of them cannot change
+    what any later action or the goal sees. All it could do in a plan is add
+    cost. Searching through such actions multiplies the state space by every
+    combination of the facts they write, which is what made domains with a
+    few reachable but useless actions exponentially slower than their size.
+    """
+    relevant: set[str] = set(goal_conditions)
+    footprints = [(action, action.effect_key_set()) for action in actions]
+    kept: list[ActionSpec] = []
+    pending = footprints
+    frontier = set(relevant)
+    while frontier and pending:
+        still: list[tuple[ActionSpec, frozenset[str]]] = []
+        newly: set[str] = set()
+        for action, written in pending:
+            if written & frontier:
+                kept.append(action)
+                newly.update(k for k in action.preconditions if k not in relevant)
+            else:
+                still.append((action, written))
+        relevant |= newly
+        frontier = newly
+        pending = still
+    if any(a.has_dynamic_effects for a in kept):
+        # A callable effect reads whatever it likes from the state, so the keys
+        # a relevant action depends on are unknown: every action may matter.
+        # Same conservatism as the backward optimisation pass.
+        return list(actions)
+    order = {id(a): i for i, a in enumerate(actions)}
+    kept.sort(key=lambda a: order[id(a)])
+    return kept
+
+
+# ---------------------------------------------------------------------------
 # Two-pass optimization
 # ---------------------------------------------------------------------------
 
@@ -322,6 +373,9 @@ def _search(
                 },
             )
         return None, 0
+
+    # Only the actions that can move the goal take part in the search.
+    actions = relevant_actions(goal_conditions, actions)
 
     # Sort actions by descending precondition count (specificity tie-breaking)
     sorted_actions = sorted(actions, key=lambda a: len(a.preconditions), reverse=True)
@@ -475,7 +529,10 @@ def _expand_neighbors(
             continue
         if not current.state.satisfies(action.preconditions):
             continue
-        new_state = current.state.apply(action.get_effects(current_dict))
+        effects = action.get_effects(current_dict)
+        if current.state.satisfies(effects):
+            continue  # no-op transition: every effect already holds, nothing to copy
+        new_state = current.state.apply(effects)
         if new_state == current.state:
             continue  # no-op transition
         cost = action.get_cost(current_dict)
