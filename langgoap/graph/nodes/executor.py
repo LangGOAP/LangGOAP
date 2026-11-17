@@ -8,6 +8,8 @@ import random
 import time
 from typing import Any
 
+from langgraph.errors import GraphBubbleUp
+
 from langgoap.actions import ActionSpec, ensure_unique_action_names
 from langgoap.graph.nodes._execution import (
     HistoryState,
@@ -207,6 +209,10 @@ class GoapExecutor:
                 world_state,
                 check_effects=returned_dict,
             )
+        except (
+            GraphBubbleUp
+        ):  # interrupt() inside an action: let LangGraph pause the graph
+            raise
         except Exception as e:
             result = _build_failure(action, e, state_before, world_state)
         self._tracer.on_action_complete(result)
@@ -290,6 +296,10 @@ class GoapExecutor:
                 world_state,
                 check_effects=returned_dict,
             )
+        except (
+            GraphBubbleUp
+        ):  # interrupt() inside an action: let LangGraph pause the graph
+            raise
         except Exception as e:
             result = _build_failure(action, e, state_before, world_state)
         await self._tracer.aon_action_complete(result)
@@ -335,6 +345,10 @@ def _execute_with_retries_sync(
             if action.execute is not None:
                 return action.execute(world_state)
             return None
+        except (
+            GraphBubbleUp
+        ):  # interrupt() inside an action: let LangGraph pause the graph
+            raise
         except Exception as exc:
             last_exc = exc
             if qos is None or not qos.should_retry(exc, attempt):
@@ -362,6 +376,10 @@ async def _execute_with_retries_async(
     for attempt in range(1, max_attempts + 1):
         try:
             return await async_execute_action(action, world_state)
+        except (
+            GraphBubbleUp
+        ):  # interrupt() inside an action: let LangGraph pause the graph
+            raise
         except Exception as exc:
             last_exc = exc
             if qos is None or not qos.should_retry(exc, attempt):

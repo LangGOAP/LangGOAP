@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `interrupt()` inside an action's `execute` or `aexecute` now pauses the graph
+  instead of being recorded as a failed action. Every executor handler
+  (sequential and parallel, sync and async, with and without `ActionQos`
+  retries) lets LangGraph's `GraphBubbleUp` exceptions propagate, so an action
+  can wait for an external event and `Command(resume=...)` resumes it with the
+  value it returns applied as usual; a wait that returns a different outcome
+  than its declared effect makes the planner replan, as drift always does (#89).
 - `AnytimePlanningStrategy` forwards the planner's tracer. Its fast path
   called A* directly and dropped the tracer that `rebind_inner_tracer` had
   bound into the inner strategy, so a tracer given to `GoapGraph` saw no
