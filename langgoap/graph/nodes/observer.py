@@ -8,6 +8,7 @@ After each action execution the observer decides whether to:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -34,7 +35,7 @@ from langgoap.types import ReplanStrategy
 
 def _get_last_failed_action(state: GoapState) -> str | None:
     """Extract the action name from the last failed ActionResult in history."""
-    history: list[ActionResult] = state.get("execution_history", [])
+    history: Sequence[ActionResult] = state.get("execution_history", [])
     for result in reversed(history):
         if not result.success:
             return result.action_name
@@ -284,7 +285,7 @@ class GoapObserver:
         # Realised figures come from the execution history, not from the
         # final plan: after replans the plan omits earlier executed steps
         # and never shows failures (issue #51).
-        history: list[ActionResult] = state.get("execution_history", [])
+        history: Sequence[ActionResult] = state.get("execution_history", [])
         successes = [h for h in history if h.success]
         failures = [h for h in history if not h.success]
         actual_cost = 0.0

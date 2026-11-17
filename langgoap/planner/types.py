@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -65,6 +65,62 @@ class PlanMetadata:
         )
 
 
+class LazyStates(Sequence[PlanningState]):
+    """The expected states of a plan rebuilt from JSON, materialised on first read.
+
+    Every graph node rehydrates the plan from the state channel. Building one
+    :class:`PlanningState` per step on every node made a run quadratic in the
+    plan's length; the observer reads one state per step, so the sequence
+    keeps the raw dicts and converts each entry the first time it is indexed.
+    It compares, hashes and concatenates like the tuple it stands in for.
+    """
+
+    __slots__ = ("_raw", "_built")
+
+    def __init__(self, raw: Sequence[Mapping[str, Any]]) -> None:
+        self._raw = tuple(raw)
+        self._built: list[PlanningState | None] = [None] * len(self._raw)
+
+    def _at(self, index: int) -> PlanningState:
+        state = self._built[index]
+        if state is None:
+            state = PlanningState.from_dict(dict(self._raw[index]))
+            self._built[index] = state
+        return state
+
+    def __len__(self) -> int:
+        return len(self._raw)
+
+    def __getitem__(self, index: Any) -> Any:
+        if isinstance(index, slice):
+            return tuple(self._at(i) for i in range(*index.indices(len(self._raw))))
+        if index < 0:
+            index += len(self._raw)
+        if not 0 <= index < len(self._raw):
+            raise IndexError("expected state index out of range")
+        return self._at(index)
+
+    def __iter__(self) -> Iterator[PlanningState]:
+        return (self._at(i) for i in range(len(self._raw)))
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, (LazyStates, tuple, list)):
+            return tuple(self) == tuple(other)
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(tuple(self))
+
+    def __add__(self, other: Any) -> tuple[PlanningState, ...]:
+        return tuple(self) + tuple(other)
+
+    def __radd__(self, other: Any) -> tuple[PlanningState, ...]:
+        return tuple(other) + tuple(self)
+
+    def __repr__(self) -> str:
+        return f"LazyStates({len(self._raw)} states)"
+
+
 @dataclass(frozen=True, slots=True)
 class Plan:
     """A sequence of actions that achieves a goal from a given start state.
@@ -83,7 +139,7 @@ class Plan:
     """
 
     actions: tuple[ActionSpec, ...]
-    expected_states: tuple[PlanningState, ...] = ()
+    expected_states: Sequence[PlanningState] = ()
     total_cost: float = 0.0
     metadata: PlanMetadata = field(default_factory=PlanMetadata)
     score: Score = field(default_factory=lambda: SimpleScore(scalar=0.0))
@@ -185,10 +241,7 @@ class Plan:
             specs.append(spec if spec is not None else ActionSpec.from_dict(stored))
         return cls(
             actions=tuple(specs),
-            expected_states=tuple(
-                PlanningState.from_dict(dict(st))
-                for st in data.get("expected_states") or ()
-            ),
+            expected_states=LazyStates(tuple(data.get("expected_states") or ())),
             total_cost=float(data.get("total_cost", 0.0)),
             metadata=PlanMetadata.from_dict(data.get("metadata") or {}),
             score=score_from_dict(data.get("score") or {}),
