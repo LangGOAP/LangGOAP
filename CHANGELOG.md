@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+
+- A* drops the actions that cannot contribute to the goal before searching
+  (`relevant_actions`: a backward closure over the keys the goal reads and the
+  precondition keys of actions that write relevant keys). Reachable but useless
+  actions used to multiply the state space by every combination of the facts
+  they set; a chain of 6 layers with 2 such actions per layer explored 377
+  nodes and took 93 ms, now 7 nodes and 0.4 ms, and shapes that did not finish
+  within 10 minutes (20 layers, 5 alternatives and 6 distractors each) plan in
+  6 ms. Pruning is skipped whenever a relevant action has callable effects,
+  which may read any key. Plans are unchanged where the search finished before.
+- A* no longer copies the state for an action whose effects already hold, and
+  `PlanningState.apply` builds the new state without re-probing every value for
+  hashability (values are validated when actions and states are constructed).
+- A plan rebuilt from the state channel materialises its expected states, and
+  the history its `ActionResult` entries, only when they are read
+  (`LazyStates`, `LazyHistory`); both compare, index, slice and concatenate like
+  the tuple and list they replace. Every graph node rehydrates the state, so
+  rebuilding the whole plan and history per node made a run quadratic in its
+  length: in the benchmark suite a 60-step run went from 306 ms to 99 ms and a
+  120-step run from 1121 ms to 198 ms on the same machine (the full before and
+  after table is in the pull request).
+- The planning-key set is remembered per action list instead of being recomputed
+  by every node on every step.
+
+### Changed
+
+- `Plan.expected_states` is typed `Sequence[PlanningState]` and
+  `GoapState["execution_history"]` `Sequence[ActionResult]`; both are tuples
+  and lists when built in-process and lazy sequences when rehydrated from a
+  checkpoint or the state channel.
+
 ### Fixed
 
 - `interrupt()` inside an action's `execute` or `aexecute` now pauses the graph

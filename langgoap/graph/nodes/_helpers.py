@@ -23,6 +23,29 @@ from langgoap.score import SimpleScore
 logger = logging.getLogger("langgoap.graph.nodes")
 
 
+#: The union of precondition and effect keys per action list, remembered by the
+#: list's identity and a fingerprint of its names so a rebuilt list is not confused
+#: with a stale one.  Every graph node asked for it on every step (#92).
+_ACTION_KEYS: dict[int, tuple[tuple[str, ...], frozenset[str]]] = {}
+
+
+def _action_keys(actions: list[ActionSpec]) -> frozenset[str]:
+    names = tuple(a.name for a in actions)
+    cached = _ACTION_KEYS.get(id(actions))
+    if cached is not None and cached[0] == names:
+        return cached[1]
+    keys: set[str] = set()
+    for action in actions:
+        keys.update(action.preconditions.keys())
+        keys.update(action.effect_key_set())
+    if (
+        len(_ACTION_KEYS) > 64
+    ):  # a handful of graphs per process; never let it grow unbounded
+        _ACTION_KEYS.clear()
+    _ACTION_KEYS[id(actions)] = (names, frozenset(keys))
+    return frozenset(keys)
+
+
 def _planning_keys(actions: list[ActionSpec], goal: GoalSpec) -> set[str]:
     """Compute the set of world-state keys relevant to A* planning.
 
@@ -31,10 +54,8 @@ def _planning_keys(actions: list[ActionSpec], goal: GoalSpec) -> set[str]:
     ``world_state`` dict down to the hashable boolean flags that
     the planner operates on.
     """
-    keys: set[str] = set(goal.conditions.keys())
-    for action in actions:
-        keys.update(action.preconditions.keys())
-        keys.update(action.effect_key_set())
+    keys = set(_action_keys(actions))
+    keys.update(goal.conditions.keys())
     return keys
 
 
