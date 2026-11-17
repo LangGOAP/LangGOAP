@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.3.0] — 2026-11-17
+
 ### Performance
 
 - A* drops the actions that cannot contribute to the goal before searching
