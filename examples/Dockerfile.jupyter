@@ -31,7 +31,7 @@ if [ -d "/home/jupyter/workspace/langgoap" ]; then\n\
     pip install -e /home/jupyter/workspace/langgoap\n\
 else\n\
     echo "Installing langgoap from PyPI..."\n\
-    pip install "langgoap>=0.2.0"\n\
+    pip install "langgoap>=0.3.0"\n\
 fi\n\
 exec jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --ServerApp.token="" --ServerApp.password="" --ServerApp.allow_root=True --NotebookApp.disable_check_xsrf=True --FileContentsManager.checkpoints_kwargs="{\"root_dir\":\"/tmp/checkpoints\"}"' > /home/jupyter/start-jupyter.sh && \
     chmod +x /home/jupyter/start-jupyter.sh
