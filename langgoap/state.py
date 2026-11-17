@@ -142,12 +142,17 @@ class PlanningState:
         Existing keys are overwritten; new keys are added.
         The original state is not modified.
         """
-        updated = self.to_dict()
+        updated = dict(self._view())
         updated.update(effects)
-        new = PlanningState.from_dict(updated)
-        if not self.context:
-            return new
-        return PlanningState(conditions=new.conditions, context=self.context)
+        try:
+            # The hot path of A*: every value already hashed once, so build the
+            # frozenset directly instead of probing each value again.
+            conditions = frozenset(updated.items())
+        except TypeError:
+            # An unhashable value slipped in (dynamic effects): fall back to the
+            # dropping constructor, which also logs which key was skipped.
+            conditions = PlanningState.from_dict(updated).conditions
+        return PlanningState(conditions=conditions, context=self.context)
 
     def as_context(self) -> dict[str, Any]:
         """The world state as user callables should see it.
