@@ -50,7 +50,7 @@ import logging
 import threading
 import uuid
 from collections import OrderedDict
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Annotated, Any, cast
 
@@ -250,9 +250,65 @@ def history_to_state(entries: Iterable[Any]) -> list[dict[str, Any]]:
     return [_as_action_result(e).to_dict() for e in entries]
 
 
-def history_from_state(entries: Iterable[Any]) -> list[ActionResult]:
-    """Rebuild :class:`ActionResult` objects from ``execution_history``."""
-    return [_as_action_result(e) for e in entries]
+class LazyHistory(Sequence[ActionResult]):
+    """``execution_history`` rebuilt from the channel, one entry at a time, when read.
+
+    Every node rehydrates the state; rebuilding every :class:`ActionResult` on
+    every node made a run quadratic in its length.  Reads index, iterate, slice,
+    reverse, compare and concatenate like the list this stands in for.
+    """
+
+    __slots__ = ("_raw", "_built")
+
+    def __init__(self, raw: Iterable[Any]) -> None:
+        self._raw = tuple(raw)
+        self._built: list[ActionResult | None] = [None] * len(self._raw)
+
+    def _at(self, index: int) -> ActionResult:
+        entry = self._built[index]
+        if entry is None:
+            entry = _as_action_result(self._raw[index])
+            self._built[index] = entry
+        return entry
+
+    def __len__(self) -> int:
+        return len(self._raw)
+
+    def __getitem__(self, index: Any) -> Any:
+        if isinstance(index, slice):
+            return [self._at(i) for i in range(*index.indices(len(self._raw)))]
+        if index < 0:
+            index += len(self._raw)
+        if not 0 <= index < len(self._raw):
+            raise IndexError("execution_history index out of range")
+        return self._at(index)
+
+    def __iter__(self) -> Iterator[ActionResult]:
+        return (self._at(i) for i in range(len(self._raw)))
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, (LazyHistory, list, tuple)):
+            return list(self) == list(other)
+        return NotImplemented
+
+    def __hash__(self) -> int:  # pragma: no cover - histories are never hashed
+        return hash(tuple(self))
+
+    def __add__(self, other: Any) -> list[ActionResult]:
+        return list(self) + list(other)
+
+    def __radd__(self, other: Any) -> list[ActionResult]:
+        return list(other) + list(self)
+
+    def __repr__(self) -> str:
+        return f"LazyHistory({len(self._raw)} entries)"
+
+
+def history_from_state(entries: Iterable[Any]) -> LazyHistory:
+    """Rebuild :class:`ActionResult` objects from ``execution_history``, lazily."""
+    if isinstance(entries, LazyHistory):
+        return entries
+    return LazyHistory(entries)
 
 
 #: Default value of every bookkeeping channel.  LangGraph returns only the
@@ -410,7 +466,7 @@ class GoapState(TypedDict, total=False):
     goal: GoalSpec | MultiGoal | None
     plan: Plan | None
     current_step: int
-    execution_history: list[ActionResult]
+    execution_history: Sequence[ActionResult]
     replan_count: int
     replan_reason: str | None
     status: str

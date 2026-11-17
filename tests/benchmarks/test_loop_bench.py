@@ -72,6 +72,19 @@ def test_bench_loop_20_steps(benchmark: object) -> None:
     assert result["status"] == "goal_achieved"
 
 
+@pytest.mark.parametrize("steps", [60, 120])
+def test_bench_loop_long(benchmark: object, steps: int) -> None:
+    """Full GoapGraph.invoke() for a long linear plan.
+
+    Every node rehydrates the state; anything rebuilt per node that grows
+    with the plan or the history makes the run quadratic, and this is where
+    it shows.
+    """
+    graph, goal, ws = _chain_graph(steps)
+    result = benchmark(graph.invoke, goal=goal, world_state=ws)  # type: ignore[call-arg]
+    assert result["status"] == "goal_achieved"
+
+
 # ---------------------------------------------------------------------------
 # MultiGoal sequential — sub-goal chaining overhead
 # ---------------------------------------------------------------------------

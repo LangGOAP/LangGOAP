@@ -140,7 +140,7 @@ def repair_plan(
 
     # Merge prefix + suffix into a single Plan.
     all_actions = tuple(prefix_actions) + suffix_plan.actions
-    all_states = tuple(prefix_states) + suffix_plan.expected_states
+    all_states = tuple(prefix_states) + tuple(suffix_plan.expected_states)
     total_cost = prefix_cost + suffix_plan.total_cost
 
     repaired = Plan(
