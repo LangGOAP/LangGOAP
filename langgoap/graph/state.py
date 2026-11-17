@@ -233,16 +233,53 @@ def plan_to_state(plan: Plan | Mapping[str, Any] | None) -> dict[str, Any] | Non
     raise TypeError(f"plan must be a Plan or dict, got {type(plan).__name__}")
 
 
+_PLAN_CACHE_MAX = 16
+_PLAN_CACHE: OrderedDict[
+    tuple[int, tuple[int, ...]], tuple[Any, int, Plan, tuple[ActionSpec, ...]]
+] = OrderedDict()
+_PLAN_LOCK = threading.Lock()
+
+
+def _specs(actions: ActionsLike) -> tuple[ActionSpec, ...]:
+    if actions is None:
+        return ()
+    if isinstance(actions, Mapping):
+        return tuple(actions.values())
+    return tuple(actions)
+
+
 def plan_from_state(data: Any, actions: ActionsLike = None) -> Plan | None:
     """Rebuild a :class:`~langgoap.planner.types.Plan` from the channel value.
 
     *actions* is the live action list used to rebind callables by name.
+
+    LangGraph hands the same channel object to every node until the planner
+    writes a new plan, so the rebuilt plan is remembered for that object and
+    those live specs in a small process-local cache: a run rebinds its plan
+    once per planning round instead of on every node (#92).  The executor and
+    the observer each hold their own list over the same specs, so the key is
+    the specs' identities, not the list's.  The cache pins the channel value
+    and the specs, so their identities cannot be reused while cached; a value
+    whose stored action list changed length is rebuilt.
     """
     if data is None or isinstance(data, Plan):
         return data
     if not data:
         return None
-    return Plan.from_dict(data, actions=actions)
+    specs = _specs(actions)
+    key = (id(data), tuple(map(id, specs)))
+    length = len(data.get("actions") or ())
+    with _PLAN_LOCK:
+        hit = _PLAN_CACHE.get(key)
+        if hit is not None and hit[0] is data and hit[1] == length:
+            _PLAN_CACHE.move_to_end(key)
+            return hit[2]
+    rebuilt = Plan.from_dict(data, actions=specs if actions is not None else None)
+    with _PLAN_LOCK:
+        _PLAN_CACHE[key] = (data, length, rebuilt, specs)
+        while len(_PLAN_CACHE) > _PLAN_CACHE_MAX:
+            _PLAN_CACHE.popitem(last=False)
+    return rebuilt
 
 
 def history_to_state(entries: Iterable[Any]) -> list[dict[str, Any]]:

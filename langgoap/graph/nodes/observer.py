@@ -28,7 +28,6 @@ from langgoap.history import (
     compute_goal_hash,
 )
 from langgoap.planner.types import Plan
-from langgoap.state import PlanningState
 from langgoap.tracing import NullTracer, PlanningTracer, SafeTracerProxy
 from langgoap.types import ReplanStrategy
 
@@ -462,21 +461,30 @@ class GoapObserver:
         world_state: dict[str, Any],
         current_step: int,
     ) -> Command[str] | None:
-        """Return a replan command when planning-relevant state has deviated."""
-        # Compare only planning-relevant keys so that changes to execution
-        # context (documents, generations, etc.) don't trigger replanning.
-        pkeys = _planning_keys(self._actions, goal)
-        planning_state = PlanningState.from_dict(world_state, keys=pkeys)
-        expected_raw = plan_obj.expected_states[current_step - 1]
-        # Filter expected state to the same planning keys so
-        # manually-constructed plans (e.g. in tests) don't cause
-        # false deviations from non-planning keys.
-        expected = PlanningState.from_dict(expected_raw.to_dict(), keys=pkeys)
-        if planning_state != expected:
-            return Command(
-                goto="planner",
-                update={"replan_reason": "state_deviation"},
-            )
+        """Return a replan command when planning-relevant state has deviated.
+
+        Only planning keys are compared (those in action preconditions and
+        effects and in the goal conditions), so execution context such as
+        documents or generations never triggers a replan, and a hand-built
+        plan whose expected states carry other keys causes no false deviation.
+        The two sides are compared key by key instead of building two
+        ``PlanningState`` objects per step (#93); as ``PlanningState.from_dict``
+        did, an unhashable world value counts as absent.
+        """
+        expected = plan_obj.expected_states[current_step - 1].to_dict()
+        for key in _planning_keys(self._actions, goal):
+            in_world = key in world_state
+            in_plan = key in expected
+            if in_world:
+                try:
+                    hash(world_state[key])
+                except TypeError:
+                    in_world = False
+            if in_world != in_plan or (in_world and world_state[key] != expected[key]):
+                return Command(
+                    goto="planner",
+                    update={"replan_reason": "state_deviation"},
+                )
         return None
 
 
