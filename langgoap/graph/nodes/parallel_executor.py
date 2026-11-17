@@ -12,6 +12,8 @@ import asyncio
 import random
 from typing import Any
 
+from langgraph.errors import GraphBubbleUp
+
 from langgoap.actions import ActionSpec, ensure_unique_action_names
 from langgoap.graph.nodes._execution import (
     HistoryState,
@@ -297,6 +299,10 @@ class ParallelGoapExecutor:
                 action_result = _build_success(
                     action, idx, state_before, merged_world, check_effects=returned_dict
                 )
+            except (
+                GraphBubbleUp
+            ):  # interrupt() inside an action: let LangGraph pause the graph
+                raise
             except Exception as exc:
                 action_result = _build_failure(action, exc, state_before, merged_world)
                 self._tracer.on_action_complete(action_result)
@@ -394,6 +400,10 @@ class ParallelGoapExecutor:
                 result = _build_success(
                     action, idx, state_before, ws_snapshot, check_effects=returned_dict
                 )
+            except (
+                GraphBubbleUp
+            ):  # interrupt() inside an action: let LangGraph pause the graph
+                raise
             except Exception as exc:
                 result = _build_failure(action, exc, state_before, ws_snapshot)
 
