@@ -117,11 +117,14 @@ jobs:
       - name: Wait for Test PyPI to list the version
         env:
           VERSION: ${{ needs.build.outputs.version }}
-        # The simple index takes a while to list a fresh upload; asking for it
-        # sooner fails with "no version of langgoap==VERSION" (#111).
+        # The index takes a while to list a fresh upload, and uv answers from its
+        # cached copy of the page unless told to refresh it (#111, #114).
         run: |
           for attempt in $(seq 1 30); do
-            if curl -fsS https://test.pypi.org/simple/langgoap/ | grep -q "langgoap-$VERSION"; then
+            if uv pip install --system --dry-run --refresh-package langgoap \
+                 --index-strategy unsafe-best-match \
+                 --extra-index-url https://test.pypi.org/simple/ \
+                 "langgoap==$VERSION" >/dev/null 2>&1; then
               echo "✅ Test PyPI lists langgoap==$VERSION (attempt $attempt)"
               exit 0
             fi
@@ -141,6 +144,7 @@ jobs:
           for attempt in 1 2 3 4 5; do
             echo "Attempt $attempt of 5..."
             if uv pip install --system \
+              --refresh-package langgoap \
               --index-strategy unsafe-best-match \
               --extra-index-url https://test.pypi.org/simple/ \
               "langgoap==$VERSION"; then
@@ -183,6 +187,7 @@ jobs:
             -o /tmp/dev-requirements.txt
           uv pip install --python /tmp/wheel-venv/bin/python -r /tmp/dev-requirements.txt
           uv pip install --python /tmp/wheel-venv/bin/python \
+            --refresh-package langgoap \
             --index-strategy unsafe-best-match \
             --extra-index-url https://test.pypi.org/simple/ \
             "langgoap[checkpoint-postgres,checkpoint-redis]==$VERSION"
