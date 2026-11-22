@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] — 2026-11-22
+
+### Changed
+
+- Release workflow (#111): every job that installs the fresh upload from
+  Test PyPI first waits for the index to list the version's files, up to
+  five minutes, and the validation install retries five times at growing
+  intervals. The 0.3.2 run had asked within a second of the upload and
+  failed on timing alone. No change to the package.
+- Release drafter configuration in the v7 shape: list fields written as lists and
+  the autolabeler as its own workflow step, ahead of the release-drafter 7 bump.
+
 ## [0.3.2] — 2026-11-22
 
 ### Changed

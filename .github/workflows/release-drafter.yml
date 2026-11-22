@@ -18,7 +18,17 @@ jobs:
 
     runs-on: ubuntu-latest
     steps:
+      # The draft is updated on pushes to main.
       - uses: release-drafter/release-drafter@v6
+        if: github.event_name == 'push'
+        with:
+          config-name: release-drafter-config.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # From release-drafter v7 the autolabeler is its own action; it reads the
+      # same config and labels pull requests from their titles.
+      - uses: release-drafter/release-drafter/autolabeler@v7
+        if: github.event_name == 'pull_request_target'
         with:
           config-name: release-drafter-config.yml
         env:
