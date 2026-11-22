@@ -35,6 +35,6 @@ jobs:
       - name: Run Claude Code
         id: claude
         # Pinned to the commit the ``beta`` tag pointed at on 2026-11-15 (v0.0.63).
-        uses: anthropics/claude-code-action@4fa93a88de49bbef68b10eb15aabedf28ca0e1ed
+        uses: anthropics/claude-code-action@f431adaf77e0fecf918431e75a2b5b45b85af002
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
