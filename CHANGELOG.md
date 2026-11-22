@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-11-22
+
+### Changed
+
+- Routine log lines are DEBUG (#109): "Planning for goal", "Plan found",
+  "Replanning (replan #n)", the MultiGoal sub-goal rounds, the CSP pipeline's
+  validation and selection lines, and the executors' "Executing action" /
+  "running action" lines fire on every round or step and are now emitted at
+  DEBUG. Lines that report an event (a stuck handler resolving a failure, the
+  blacklist fallback, an infeasible primary plan, an early termination, a
+  rejected approval or form) stay at INFO. The routine lines are emitted
+  inside the planner's timed span, so a host that configures an expensive
+  handler on the root logger at INFO (mcp's `MCPServer` installs a rich one)
+  saw its rendering counted in `duration_ms`; now nothing routine reaches such
+  a handler. Set the `langgoap` logger to DEBUG to see the lines again.
+
 ## [0.3.1] — 2026-11-22
 
 ### Added

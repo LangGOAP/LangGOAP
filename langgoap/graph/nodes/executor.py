@@ -187,7 +187,7 @@ class GoapExecutor:
         current_step: int,
         action: ActionSpec,
     ) -> dict[str, Any]:
-        logger.info(
+        logger.debug(
             "Executing action %r (step %d/%d)",
             action.name,
             current_step + 1,
@@ -300,7 +300,7 @@ class GoapExecutor:
         current_step: int,
         action: ActionSpec,
     ) -> dict[str, Any]:
-        logger.info(
+        logger.debug(
             "Executing action %r async (step %d/%d)",
             action.name,
             current_step + 1,
