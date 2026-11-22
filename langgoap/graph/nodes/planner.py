@@ -851,6 +851,8 @@ class GoapPlanner:
             "replan_count": replan_count,
             # Clear any stale no-plan explanation from a previous failed attempt.
             "no_plan_explanation": None,
+            # A new plan prepares its waits afresh.
+            "prepared_wait": None,
             **extra_updates,
         }
         if used_blacklisted:

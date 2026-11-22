@@ -331,6 +331,7 @@ STATE_DEFAULTS: Mapping[str, Any] = {
     "skipped_subgoals": [],
     "no_plan_explanation": None,
     "reflection_context": [],
+    "prepared_wait": None,
 }
 
 
@@ -442,6 +443,13 @@ class GoapState(TypedDict, total=False):
         the planner skipped because they could not be planned
         (``MultiGoal(on_infeasible="skip")``).  Absent or empty otherwise;
         when non-empty the run finishes with ``status="partial"``.
+    ``prepared_wait``
+        The name of the wait (:meth:`ActionSpec.wait
+        <langgoap.actions.ActionSpec.wait>`) at ``current_step`` that has run
+        its ``execute`` and paused at least once, so the executor does not
+        prepare it again when a resume that changed nothing sends it back to
+        the same step; ``None`` otherwise.  Cleared when the wait ends and
+        by every new plan.
     ``no_plan_explanation``
         Serialised :class:`~langgoap.planner.explain.NoPlanExplanation`
         (via ``.to_dict()``) produced when A* returns ``None``.  ``None``
@@ -477,6 +485,20 @@ class GoapState(TypedDict, total=False):
     no_plan_explanation: dict[str, Any] | None
     reflection_context: list[str]
     wall_clock_started_at: float | None
+    prepared_wait: str | None
+
+
+def interrupt_payload(pending: Any) -> dict[str, Any]:
+    """A pending interrupt's payload as a dict.
+
+    A mapping payload (an approval, a form, a wait) is returned as is; any
+    other value an action passed to ``interrupt()`` is returned under
+    ``"value"`` with ``"type": "interrupt"``.
+    """
+    value = getattr(pending, "value", pending)
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {"type": "interrupt", "value": value}
 
 
 class GoapResult(dict[str, Any]):
@@ -519,12 +541,7 @@ class GoapResult(dict[str, Any]):
         A payload that is not a dict is returned under ``"value"``.
         """
         pending = self.get("__interrupt__") or ()
-        if not pending:
-            return None
-        value = getattr(pending[0], "value", pending[0])
-        if isinstance(value, Mapping):
-            return dict(value)
-        return {"type": "interrupt", "value": value}
+        return interrupt_payload(pending[0]) if pending else None
 
     def summary(self) -> str:
         """A compact, printable report: status, the actions run, the final world state."""
@@ -573,6 +590,7 @@ class GoapStateChannels(TypedDict, total=False):
     no_plan_explanation: dict[str, Any] | None
     reflection_context: list[str]
     wall_clock_started_at: float | None
+    prepared_wait: str | None
 
 
 __all__ = [
@@ -584,6 +602,7 @@ __all__ = [
     "goal_to_state",
     "history_from_state",
     "history_to_state",
+    "interrupt_payload",
     "plan_from_state",
     "plan_to_state",
     "rehydrate_state",

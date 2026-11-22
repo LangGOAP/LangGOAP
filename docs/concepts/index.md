@@ -428,11 +428,13 @@ their assumed values.
 **Waits.** `ActionSpec.wait(name, preconditions, effects, ...)` is an action
 that pauses the graph until the world changes. It interrupts with
 `{"type": "goap_action_wait", "action": name}`; every resume makes it call
-`on_resume`, ask the sensors, and complete only when one of its keys differs
-from the value it had when the wait began. It completes with what the
-sensors report, whatever the plan expected. An `execute` given to a wait
-prepares it and runs again on every resume, because LangGraph re-enters the
-node, so it must be idempotent.
+`on_resume` once, ask the sensors once, and complete only when one of its keys
+differs from the value it had when the wait began; otherwise it pauses again,
+so notifying a thread often is cheap and never replays earlier resumes. It
+completes with what the sensors report, whatever the plan expected. An
+`execute` given to a wait prepares it; it runs before the first pause and once
+more on the first resume (LangGraph replays a paused task), so it must be
+idempotent.
 
 **Threads.** Given a `goal`, the graph object runs threads itself:
 

@@ -155,6 +155,34 @@ class TestThreadIdInHooks:
         assert tracer.thread_ids["sensor"] == "sensor-1"
 
 
+def test_every_instance_of_a_tracer_class_gets_its_own_thread_id() -> None:
+    """The hook-signature lookup is remembered per function, not per instance."""
+    first, second = ThreadCapturingTracer(), ThreadCapturingTracer()
+    GoapGraph(ACTIONS, goal=GOAL, tracer=first).start(
+        world_state={"done": False}, thread_id="one"
+    )
+    GoapGraph(ACTIONS, goal=GOAL, tracer=second).start(
+        world_state={"done": False}, thread_id="two"
+    )
+    assert first.thread_ids["action_complete"] == "one"
+    assert second.thread_ids["action_complete"] == "two"
+
+
+def test_a_hook_taking_keyword_arguments_receives_thread_id() -> None:
+    class Catching(NullTracer):
+        def __init__(self) -> None:
+            self.kwargs: dict[str, Any] = {}
+
+        def on_action_complete(self, result: Any, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+    tracer = Catching()
+    GoapGraph(ACTIONS, goal=GOAL, tracer=tracer).start(
+        world_state={"done": False}, thread_id="kw"
+    )
+    assert tracer.kwargs == {"thread_id": "kw"}
+
+
 def test_multi_tracer_children_receive_thread_id() -> None:
     from langgoap.tracing import MultiTracer
 

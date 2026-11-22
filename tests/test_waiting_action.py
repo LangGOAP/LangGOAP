@@ -28,6 +28,22 @@ class TestWaitingAction:
         graph.start(world_state={"x": False}, thread_id="t")
         assert graph.waiting_action("t") == "hold"
 
+    def test_a_wait_whose_payload_hides_its_name_is_not_named(self) -> None:
+        """A payload may override the ``action`` entry; an empty one gives None,
+        never the string "None"."""
+        graph = GoapGraph(
+            [
+                ActionSpec.wait(
+                    "hold", {"x": False}, {"x": True}, payload={"action": None}
+                )
+            ],
+            goal=GOAL,
+            sensors=[_sensor(False)],
+        )
+        graph.start(world_state={"x": False}, thread_id="t")
+        assert graph.waiting("t") == {"type": "goap_action_wait", "action": None}
+        assert graph.waiting_action("t") is None
+
     def test_returns_none_when_not_waiting(self) -> None:
         graph = GoapGraph(
             [ActionSpec("flip", {"x": False}, {"x": True})],

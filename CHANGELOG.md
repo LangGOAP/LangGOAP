@@ -14,7 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tracer hooks receive `thread_id` (#104): every hook whose signature accepts
   a `thread_id` keyword gets the run's thread id (`None` outside a run), also
   through `MultiTracer`. Hooks that do not declare it are called as before, so
-  a tracer shared by many threads needs no `current_thread_id()` calls.
+  a tracer shared by many threads needs no `current_thread_id()` calls. The
+  signature lookup is remembered per hook function, so hooks that fire per
+  search expansion stay cheap.
 - `GoapGraph.waiting_action(thread_id)` (#105): the name of the wait action a
   thread is paused on, or `None` when it is not in a wait (finished, unknown,
   or paused on an approval or form).
@@ -27,10 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default stays `effects="declared"`.
 - `ActionSpec.wait(...)`: an action that pauses the graph (interrupt payload
   type `goap_action_wait`) until a sensed value of one of its keys changes,
-  with `on_resume` and `payload` options. The parallel executor runs a wait
-  alone, like an approval gate. New fields `ActionSpec.is_wait`, `on_resume`
-  and `wait_payload`; `@goap_action(is_wait=True, ...)` and a `GoapAction`
-  subclass with `is_wait = True` declare a wait too.
+  with `on_resume` and `payload` options. Each resume runs `on_resume` and the
+  sensors once; a resume that changed nothing pauses the wait again in a fresh
+  task (the state key `prepared_wait` remembers that its `execute` has run),
+  so a notification costs the same however many came before it. The parallel
+  executor runs a wait alone, like an approval gate. New fields
+  `ActionSpec.is_wait`, `on_resume` and `wait_payload`;
+  `@goap_action(is_wait=True, ...)` and a `GoapAction` subclass with
+  `is_wait = True` declare a wait too.
 - Thread API on `GoapGraph`: `goal=`, `checkpointer=`, `on_stop=` and
   `max_actions=` on the constructor, and `start`, `notify`, `resume`, `waiting`
   (plus `astart`, `anotify`, `aresume`, `awaiting`) per thread id. Runs are
