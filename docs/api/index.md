@@ -121,6 +121,7 @@ when the two drift apart.
    langgoap.GoapObserver
    langgoap.ParallelGoapExecutor
    langgoap.GoapState
+   langgoap.GoapResult
    langgoap.GoapStateChannels
    langgoap.ActionResult
    langgoap.rehydrate_state
@@ -382,6 +383,7 @@ Constants:
    langgoap.LoggingTracer
    langgoap.MultiTracer
    langgoap.LangSmithTracer
+   langgoap.current_thread_id
 ```
 
 ## Execution history

@@ -479,6 +479,60 @@ class GoapState(TypedDict, total=False):
     wall_clock_started_at: float | None
 
 
+class GoapResult(dict[str, Any]):
+    """The state a run stopped in, with the questions people ask of it (issue #101).
+
+    It **is** the :class:`GoapState` dict, so ``result["status"]``,
+    ``result.get(...)``, iteration and equality work as before; the
+    properties save taking it apart by hand.  Returned by
+    :meth:`GoapGraph.invoke <langgoap.graph.builder.GoapGraph.invoke>`,
+    ``ainvoke``, ``rehydrate`` and the thread API, and usable on the raw
+    JSON-native state of a compiled graph: ``GoapResult(compiled.invoke(...))``.
+    """
+
+    __slots__ = ()
+
+    @property
+    def status(self) -> str | None:
+        """``"goal_achieved"``, ``"no_plan"``, ``"terminated"``, ... or ``None``."""
+        return self.get("status")
+
+    @property
+    def succeeded(self) -> bool:
+        """``True`` when the goal was achieved."""
+        return self.get("status") == "goal_achieved"
+
+    @property
+    def actions(self) -> list[str]:
+        """Names of the actions that succeeded, in execution order."""
+        return successful_action_names(self) if "execution_history" in self else []
+
+    @property
+    def world_state(self) -> dict[str, Any]:
+        """The world state where the run stopped."""
+        return dict(self.get("world_state") or {})
+
+    @property
+    def interrupt(self) -> dict[str, Any] | None:
+        """The payload the run is paused on (an approval, a form, a wait), or ``None``.
+
+        A payload that is not a dict is returned under ``"value"``.
+        """
+        pending = self.get("__interrupt__") or ()
+        if not pending:
+            return None
+        value = getattr(pending[0], "value", pending[0])
+        if isinstance(value, Mapping):
+            return dict(value)
+        return {"type": "interrupt", "value": value}
+
+    def summary(self) -> str:
+        """A compact, printable report: status, the actions run, the final world state."""
+        from langgoap.integrations.deepagents import format_goap_result
+
+        return format_goap_result(dict(self))
+
+
 class GoapStateChannels(TypedDict, total=False):
     """LangGraph channel schema for the GOAP loop: the JSON-native state.
 
@@ -523,6 +577,7 @@ class GoapStateChannels(TypedDict, total=False):
 
 __all__ = [
     "ActionResult",
+    "GoapResult",
     "GoapState",
     "GoapStateChannels",
     "goal_from_state",

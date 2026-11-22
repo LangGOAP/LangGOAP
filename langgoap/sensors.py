@@ -27,6 +27,8 @@ import asyncio
 import logging
 from typing import Any, Callable, Protocol, runtime_checkable
 
+from langgoap._worker import run_in_worker
+
 logger = logging.getLogger(__name__)
 
 
@@ -84,6 +86,31 @@ class FunctionalSensor:
         return self._fn(world_state)
 
 
+def as_sensor(
+    sensor: Sensor | AsyncSensor | Callable[[dict[str, Any]], dict[str, Any]],
+) -> Sensor | AsyncSensor:
+    """Return *sensor* as a sensor object; a plain function is wrapped.
+
+    A callable ``(world_state) -> updates`` becomes a
+    :class:`FunctionalSensor` named after the function, so
+    ``GoapGraph(sensors=[read_platform])`` needs no wrapper (issue #96).
+    """
+    if hasattr(sensor, "sense") or hasattr(sensor, "asense"):
+        return sensor  # type: ignore[return-value]
+    if asyncio.iscoroutinefunction(sensor):
+        raise TypeError(
+            "An async function cannot be passed as a sensor directly; implement "
+            "AsyncSensor (a `name` and an `asense` coroutine) instead."
+        )
+    if callable(sensor):
+        name = getattr(sensor, "__name__", None) or type(sensor).__name__
+        return FunctionalSensor(name, sensor)
+    raise TypeError(
+        f"A sensor must implement Sensor / AsyncSensor or be a callable, got "
+        f"{type(sensor).__name__}."
+    )
+
+
 async def _run_sensor_async(
     sensor: Sensor | AsyncSensor,
     world_state: dict[str, Any],
@@ -95,8 +122,7 @@ async def _run_sensor_async(
     """
     if hasattr(sensor, "asense"):
         return await sensor.asense(world_state)
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, sensor.sense, world_state)
+    return await run_in_worker(sensor.sense, world_state)
 
 
 def _record_sensor_result(
@@ -180,6 +206,7 @@ __all__ = [
     "AsyncSensor",
     "FunctionalSensor",
     "Sensor",
+    "as_sensor",
     "run_sensors_async",
     "run_sensors_sync",
 ]

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import inspect
 import warnings
 from collections.abc import Mapping
@@ -11,6 +10,7 @@ from datetime import timedelta
 from types import MappingProxyType
 from typing import Any, Callable, Iterable, cast
 
+from langgoap._worker import run_in_worker
 from langgoap.qos import ActionQos
 from langgoap.state import require_hashable_values
 from langgoap.types import CostFunction
@@ -44,7 +44,9 @@ class ActionSpec:
     """Specification of a GOAP action for planning.
 
     Attributes:
-        name: Unique identifier for the action.
+        name: Unique identifier for the action.  May be omitted when
+            ``execute`` (or ``aexecute``) is a named function or method: the
+            action is then named after it (issue #98).
         preconditions: World state conditions that must hold before execution.
             Stored as an immutable MappingProxyType to match the frozen
             contract of this dataclass.
@@ -90,9 +92,18 @@ class ActionSpec:
         duration: Estimated wall-clock duration.
             Used by the CSP optimizer for temporal scheduling.
         metadata: Arbitrary key-value metadata (description, tags, etc.).
+        observe: Extra state keys to read from the sensors after this action
+            runs, besides its effect keys.  Used with
+            ``GoapGraph(effects="observed")`` and by waits (issue #96).
+        is_wait: ``True`` for an action built with :meth:`wait`: the executor
+            pauses the graph until a sensed value of one of the action's keys
+            changes.
+        on_resume: For a wait, a callable ``(world_state) -> None`` (sync or
+            async) run after every resume, before the sensors are asked.
+        wait_payload: For a wait, extra entries for its interrupt payload.
     """
 
-    name: str
+    name: str = ""
     # Accept any Mapping at construction; __post_init__ wraps them in
     # MappingProxyType for true immutability.
     preconditions: Mapping[str, Any] = field(
@@ -117,8 +128,37 @@ class ActionSpec:
     resources: Mapping[str, float] | None = None
     duration: timedelta | None = None
     metadata: Mapping[str, Any] | None = None
+    # Observed effects and waits (issue #96)
+    observe: tuple[str, ...] = ()
+    is_wait: bool = False
+    on_resume: Callable[..., Any] | None = None
+    wait_payload: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
+        if not self.name:
+            function = self.execute if self.execute is not None else self.aexecute
+            derived = getattr(function, "__name__", None)
+            if not derived or derived == "<lambda>":
+                raise ValueError(
+                    "ActionSpec needs a name: pass name=..., or an execute / "
+                    "aexecute that is a named function (a lambda or a "
+                    "functools.partial has no name to default to)."
+                )
+            object.__setattr__(self, "name", derived)
+        if isinstance(self.observe, str):
+            raise TypeError(
+                "ActionSpec.observe must be an iterable of state keys, not a "
+                f"string; did you mean observe=({self.observe!r},)?"
+            )
+        if not isinstance(self.observe, tuple):
+            object.__setattr__(self, "observe", tuple(self.observe))
+        if not self.is_wait and (
+            self.on_resume is not None or self.wait_payload is not None
+        ):
+            raise ValueError(
+                f"ActionSpec({self.name!r}): on_resume and wait_payload only "
+                "apply to a wait; build the action with ActionSpec.wait(...)."
+            )
         # preconditions is always a Mapping; wrap for immutability.
         if not isinstance(self.preconditions, MappingProxyType):
             object.__setattr__(
@@ -179,7 +219,7 @@ class ActionSpec:
                 owner=f"ActionSpec({self.name!r})",
                 field_name="effects",
             )
-        for attr in ("resources", "metadata"):
+        for attr in ("resources", "metadata", "wait_payload"):
             val = getattr(self, attr)
             if val is not None and not isinstance(val, MappingProxyType):
                 object.__setattr__(self, attr, MappingProxyType(dict(val)))
@@ -222,6 +262,11 @@ class ActionSpec:
                 self.duration.total_seconds() if self.duration is not None else None
             ),
             "metadata": dict(self.metadata) if self.metadata is not None else None,
+            "observe": list(self.observe),
+            "is_wait": self.is_wait,
+            "wait_payload": (
+                dict(self.wait_payload) if self.wait_payload is not None else None
+            ),
         }
 
     @classmethod
@@ -260,6 +305,60 @@ class ActionSpec:
             resources=data.get("resources"),
             duration=timedelta(seconds=duration) if duration is not None else None,
             metadata=data.get("metadata"),
+            observe=tuple(data.get("observe") or ()),
+            is_wait=bool(data.get("is_wait", False)),
+            wait_payload=data.get("wait_payload"),
+        )
+
+    @classmethod
+    def wait(
+        cls,
+        name: str,
+        preconditions: Mapping[str, Any] | None = None,
+        effects: Mapping[str, Any] | EffectFunction | None = None,
+        *,
+        observe: Iterable[str] = (),
+        on_resume: Callable[..., Any] | None = None,
+        payload: Mapping[str, Any] | None = None,
+        **options: Any,
+    ) -> ActionSpec:
+        """An action that pauses the graph until the world changes (issue #96).
+
+        The executor interrupts with ``{"type": "goap_action_wait", "action":
+        name, **payload}``.  Every resume (``GoapGraph.notify`` or
+        ``Command(resume=...)``) makes the wait call ``on_resume``, ask the
+        graph's sensors, and complete only when one of its keys (the effect
+        keys, ``observe`` and the graph's ``always_observe``) differs from the
+        value it had when the wait began.  It completes with what the sensors
+        report, whatever the plan expected; the observer re-plans on a
+        deviation as for any action.
+
+        ``execute`` / ``aexecute`` may be given in ``options`` to prepare the
+        wait (send the offer, start the timer).  LangGraph re-enters the node
+        on every resume, so the callable runs before the first pause **and
+        again on each resume**: it must be idempotent.
+
+        A graph with a wait needs sensors and, at run time, a checkpointer.
+
+        Example::
+
+            ActionSpec.wait(
+                "await_payment",
+                {"paid": False},
+                {"paid": True},
+                observe=("payment_failed",),
+                on_resume=confirm_if_paid,
+            )
+        """
+        return cls(
+            name,
+            preconditions or {},
+            effects if effects is not None else {},
+            observe=tuple(observe),
+            is_wait=True,
+            on_resume=on_resume,
+            wait_payload=payload,
+            **options,
         )
 
     @property
@@ -406,6 +505,10 @@ def goap_action(
     resources: dict[str, float] | None = None,
     duration: timedelta | None = None,
     metadata: dict[str, Any] | None = None,
+    observe: Iterable[str] = (),
+    is_wait: bool = False,
+    on_resume: Callable[..., Any] | None = None,
+    wait_payload: Mapping[str, Any] | None = None,
 ) -> Callable[[Callable[..., Any]], ActionSpec]:
     """Decorator that converts a function into an ActionSpec.
 
@@ -472,6 +575,10 @@ def goap_action(
             resources=resources,
             duration=duration,
             metadata=metadata,
+            observe=tuple(observe),
+            is_wait=is_wait,
+            on_resume=on_resume,
+            wait_payload=wait_payload,
         )
 
     return wrapper
@@ -519,6 +626,13 @@ class GoapAction:
     duration: timedelta | None = None
     #: Free-form, JSON-serialisable metadata attached to the action.
     metadata: dict[str, Any] | None = None
+    #: Extra state keys read from the sensors after the action (observed effects).
+    observe: tuple[str, ...] = ()
+    #: ``True`` makes the action a wait (see :meth:`ActionSpec.wait`):
+    #: :meth:`execute` prepares it and :meth:`on_resume` runs on every resume.
+    is_wait: bool = False
+    #: Extra entries for a wait's interrupt payload.
+    wait_payload: dict[str, Any] | None = None
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -543,8 +657,12 @@ class GoapAction:
 
         The default delegates to :meth:`execute` via ``run_in_executor``.
         """
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self.execute, state)
+        return await run_in_worker(self.execute, state)
+
+    def on_resume(self, state: dict[str, Any]) -> Any:
+        """For a wait (``is_wait = True``): called after every resume, before
+        the sensors are asked.  Override it; may be ``async``."""
+        return None
 
     def validate_effects(
         self, pre_state: dict[str, Any], post_state: dict[str, Any]
@@ -583,6 +701,11 @@ class GoapAction:
         if type(self).aexecute is not GoapAction.aexecute:
             custom_aexecute = self.aexecute
 
+        # A wait's on_resume, only when the subclass provides one.
+        custom_on_resume = None
+        if self.is_wait and type(self).on_resume is not GoapAction.on_resume:
+            custom_on_resume = self.on_resume
+
         effects: Mapping[str, Any] | EffectFunction
         if callable(self.effects) and not isinstance(self.effects, Mapping):
             effects = self.effects
@@ -607,4 +730,8 @@ class GoapAction:
             resources=self.resources,
             duration=self.duration,
             metadata=self.metadata,
+            observe=tuple(self.observe),
+            is_wait=self.is_wait,
+            on_resume=custom_on_resume,
+            wait_payload=self.wait_payload,
         )

@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Protocol, runtime_checkable
 
+from langgoap._worker import run_in_worker
 from langgoap.actions import ActionSpec
 
 logger = logging.getLogger(__name__)
@@ -209,8 +210,7 @@ async def _run_guard_async(
         if hasattr(guard, "acheck"):
             # Protocol duck-typing: hasattr confirms acheck exists on the union.
             return await guard.acheck(action, world_state)
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, guard.check, action, world_state)
+        return await run_in_worker(guard.check, action, world_state)
     except Exception as exc:
         logger.warning("Guard %r raised: %s", guard.name, exc)
         return GuardResult(

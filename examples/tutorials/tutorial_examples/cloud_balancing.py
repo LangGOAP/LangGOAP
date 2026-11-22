@@ -63,7 +63,6 @@ def _assign_action(process: Process, computer: Computer) -> ActionSpec:
         name=f"assign_{process.name}_to_{computer.name}",
         preconditions={_assigned_key(process.name): False},
         effects=effects,
-        cost=1.0,
         resources=resources,
         execute=_make_execute(effects),
     )

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from langgoap.tracing._context import supported_kwargs
 from langgoap.tracing._protocol import PlanningTracer
 
 logger = logging.getLogger("langgoap.tracing")
@@ -36,10 +37,11 @@ class MultiTracer:
             result.extend(getattr(t, "reflections", []))
         return result
 
-    def _fan_sync(self, method: str, *args: Any) -> None:
+    def _fan_sync(self, method: str, *args: Any, **kwargs: Any) -> None:
         for t in self._tracers:
             try:
-                getattr(t, method)(*args)
+                hook = getattr(t, method)
+                hook(*args, **supported_kwargs(hook, kwargs))
             except Exception as exc:
                 logger.warning(
                     "Tracer %r raised during %s: %s",
@@ -48,10 +50,11 @@ class MultiTracer:
                     exc,
                 )
 
-    async def _fan_async(self, method: str, *args: Any) -> None:
+    async def _fan_async(self, method: str, *args: Any, **kwargs: Any) -> None:
         for t in self._tracers:
             try:
-                await getattr(t, method)(*args)
+                hook = getattr(t, method)
+                await hook(*args, **supported_kwargs(hook, kwargs))
             except Exception as exc:
                 logger.warning(
                     "Tracer %r raised during %s: %s",
@@ -87,8 +90,10 @@ class MultiTracer:
     def on_strategy_chosen(self, strategy_name: str) -> None:
         self._fan_sync("on_strategy_chosen", strategy_name)
 
-    def on_replan(self, reason: str, new_plan: Any) -> None:
-        self._fan_sync("on_replan", reason, new_plan)
+    def on_replan(
+        self, reason: str, new_plan: Any, duration_ms: float | None = None
+    ) -> None:
+        self._fan_sync("on_replan", reason, new_plan, duration_ms=duration_ms)
 
     def on_goal_achieved(self, final_state: Any) -> None:
         self._fan_sync("on_goal_achieved", final_state)
@@ -147,8 +152,10 @@ class MultiTracer:
     async def aon_strategy_chosen(self, strategy_name: str) -> None:
         await self._fan_async("aon_strategy_chosen", strategy_name)
 
-    async def aon_replan(self, reason: str, new_plan: Any) -> None:
-        await self._fan_async("aon_replan", reason, new_plan)
+    async def aon_replan(
+        self, reason: str, new_plan: Any, duration_ms: float | None = None
+    ) -> None:
+        await self._fan_async("aon_replan", reason, new_plan, duration_ms=duration_ms)
 
     async def aon_goal_achieved(self, final_state: Any) -> None:
         await self._fan_async("aon_goal_achieved", final_state)

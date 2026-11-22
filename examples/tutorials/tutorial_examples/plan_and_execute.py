@@ -193,21 +193,18 @@ def plan_and_execute_actions(
             name="search_web",
             preconditions={"has_task": True},
             effects={"has_search_results": True},
-            cost=1.0,
             execute=_make_search_web(llm, search_tool=search_tool),
         ),
         ActionSpec(
             name="extract_facts",
             preconditions={"has_search_results": True},
             effects={"has_extracted_facts": True},
-            cost=1.0,
             execute=_make_extract_facts(llm),
         ),
         ActionSpec(
             name="compose_response",
             preconditions={"has_extracted_facts": True},
             effects={"response_ready": True},
-            cost=1.0,
             execute=_make_compose_response(llm),
         ),
     ]

@@ -403,6 +403,66 @@ preconditions no action can establish with a three-valued
 `ConditionStatus`; resolved values are written back to the state so a
 resumed run does not ask again.
 
+### Acting on a live system: observed effects, waits and threads
+
+When actions change a real system, what an action declares and what
+happened can differ, most steps wait for an outside event, and many runs are
+in flight at once. Three additions keep that out of application code.
+
+**Observed effects.** With `GoapGraph(..., sensors=[...], effects="observed")`
+the executor assumes an action's declared effects (and any dict it returns),
+then asks the sensors and lets what they report for the action's keys win.
+The action's keys are its effect keys, `ActionSpec(observe=...)` and the
+graph's `always_observe`. An action no longer re-reads and returns its own
+facts, `execute` may return nothing, and a decision-only action needs no
+`execute` at all. Planning still searches over declared effects; a sensed
+value that contradicts the plan is the observer's deviation and leads to a
+re-plan. `effects="merged"` is the same without sensors: the declared
+effects are applied and a returned dict is merged on top, so an action
+returns only what it adds. The default, `effects="declared"`, is the earlier
+behaviour: a returned dict is the truth and must set every declared effect
+key. As at
+planning time, a sensor that raises is logged and skipped, so its keys keep
+their assumed values.
+
+**Waits.** `ActionSpec.wait(name, preconditions, effects, ...)` is an action
+that pauses the graph until the world changes. It interrupts with
+`{"type": "goap_action_wait", "action": name}`; every resume makes it call
+`on_resume`, ask the sensors, and complete only when one of its keys differs
+from the value it had when the wait began. It completes with what the
+sensors report, whatever the plan expected. An `execute` given to a wait
+prepares it and runs again on every resume, because LangGraph re-enters the
+node, so it must be idempotent.
+
+**Threads.** Given a `goal`, the graph object runs threads itself:
+
+```python
+graph = GoapGraph(actions, goal={"delivered": True}, sensors=[read_platform],
+                  effects="observed", max_actions=60, on_stop=after)
+graph.start({"order_id": "o-1"}, thread_id="o-1")
+graph.notify("o-1", event)            # wakes a wait; never answers a question
+graph.resume(True, thread_id="o-1")   # answers an approval or a form; never ends a wait
+graph.waiting("o-1")                  # the interrupt payload, or None
+```
+
+Runs are serialised through a mailbox: a call made while a run is in
+progress, such as an action that publishes an event, is delivered after it,
+and `on_stop(thread_id, state)` is called each time a run stops. A call
+returns the state when it ran immediately and `None` when it was queued or
+had nothing to do. Calls may come from several OS threads; runs stay
+serialised. `astart`, `anotify`, `aresume` and `awaiting` are the async forms. The initial world state only needs what no
+sensor can derive, since sensors run before the first plan too.
+
+`invoke`, `ainvoke` and the thread calls return a `GoapResult`: the state
+dict with `status`, `succeeded`, `actions` (the names of the actions that
+succeeded), `interrupt` and `summary()`. A goal may be written as a plain
+mapping of conditions, and an action given a named `execute` function needs
+no `name`.
+
+Tracer hooks, actions and sensors can call `current_thread_id()` to learn
+which thread they are running for, and `on_replan` receives `duration_ms`
+like the other planning hooks.
+
 ## Checkpointing
 
 Any LangGraph checkpointer works with its stock serializer because the
