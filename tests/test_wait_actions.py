@@ -186,6 +186,120 @@ class TestWait:
         assert done["status"] == "goal_achieved"
         assert resumed == ["async"]
 
+    @pytest.mark.parametrize("executor", ["sequential", "parallel"])
+    def test_each_resume_looks_once(self, executor: str) -> None:
+        """A notification that changes nothing costs one on_resume and one sensor
+        pass, however many came before it: the wait does not replay its history."""
+        kitchen = Kitchen()
+
+        def on_resume(world_state: dict[str, Any]) -> None:
+            kitchen.resumed += 1
+
+        def prepare(world_state: dict[str, Any]) -> None:
+            kitchen.prepared += 1
+
+        sensed: list[int] = []
+
+        def sense(world_state: dict[str, Any]) -> dict[str, Any]:
+            sensed.append(1)
+            return {"kitchen": kitchen.status}
+
+        graph = GoapGraph(
+            _actions(kitchen, on_resume=on_resume, execute=prepare),
+            goal={"delivered": True},
+            sensors=[sense],
+            executor=executor,
+        )
+        graph.start(thread_id="order-1")
+        assert (kitchen.prepared, kitchen.resumed, len(sensed)) == (1, 0, 1)
+        for n in range(1, 6):
+            before = len(sensed)
+            graph.notify("order-1", {"kind": "noise"})
+            assert graph.waiting_action("order-1") == "await_kitchen"
+            assert kitchen.resumed == n
+            assert len(sensed) - before == 1
+            # LangGraph replays the paused task once (the first resume re-runs
+            # the execute that paused); after that the wait is known to be
+            # prepared and execute is not run again.
+            assert kitchen.prepared == 2
+        kitchen.status = "ready"
+        done = graph.notify("order-1")
+        assert done is not None and done.succeeded
+        assert done.actions == ["await_kitchen", "dispatch"]
+        assert done["prepared_wait"] is None
+
+    def test_what_execute_returned_reaches_the_final_state(self) -> None:
+        """However many idle notifications the wait sat through."""
+        kitchen = Kitchen()
+        graph = GoapGraph(
+            _actions(kitchen, execute=lambda ws: {"ticket": "k-7"}),
+            goal={"delivered": True},
+            sensors=[kitchen.sense],
+        )
+        graph.start(thread_id="order-1")
+        for _ in range(3):
+            graph.notify("order-1")
+        kitchen.status = "ready"
+        done = graph.notify("order-1")
+        assert done is not None and done.succeeded
+        assert done.world_state["ticket"] == "k-7"
+
+    def test_a_new_plan_prepares_the_wait_afresh(self) -> None:
+        """The marker a paused wait leaves is cleared by the planner, so a
+        later plan that waits by the same name runs its execute again."""
+        kitchen = Kitchen()
+        prepared: list[str] = []
+        actions = [
+            ActionSpec.wait(
+                "await_kitchen",
+                {"kitchen": "cooking"},
+                {"kitchen": "ready"},
+                execute=lambda ws: prepared.append(kitchen.status),
+            ),
+            ActionSpec("dispatch", {"kitchen": "ready"}, {"delivered": True}),
+            ActionSpec(
+                "recook",
+                {"kitchen": "rejected"},
+                {"kitchen": "cooking"},
+                execute=lambda ws: setattr(kitchen, "status", "cooking"),
+            ),
+        ]
+        graph = GoapGraph(actions, goal={"delivered": True}, sensors=[kitchen.sense])
+        graph.start(thread_id="o")
+        graph.notify("o")  # idle: the wait is marked prepared
+        first_plan = len(prepared)
+        kitchen.status = "rejected"
+        graph.notify("o")  # the wait ends with the truth; re-plan: recook, wait again
+        assert graph.waiting_action("o") == "await_kitchen"
+        assert len(prepared) > first_plan  # prepared again under the new plan
+        kitchen.status = "ready"
+        done = graph.notify("o")
+        assert done is not None and done.succeeded
+
+    @pytest.mark.parametrize("executor", ["sequential", "parallel"])
+    async def test_each_resume_looks_once_on_the_async_path(
+        self, executor: str
+    ) -> None:
+        kitchen = Kitchen()
+        resumed: list[str] = []
+
+        async def on_resume(world_state: dict[str, Any]) -> None:
+            resumed.append("look")
+
+        graph = GoapGraph(
+            _actions(kitchen, on_resume=on_resume),
+            goal={"delivered": True},
+            sensors=[kitchen.sense],
+            executor=executor,
+        )
+        await graph.astart(thread_id="order-1")
+        for n in range(1, 6):
+            await graph.anotify("order-1")
+            assert len(resumed) == n
+        kitchen.status = "ready"
+        done = await graph.anotify("order-1")
+        assert done is not None and done.succeeded
+
     def test_parallel_executor_runs_a_wait_alone(self) -> None:
         kitchen = Kitchen()
         ran: list[str] = []

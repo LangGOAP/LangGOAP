@@ -15,13 +15,17 @@ from langgoap.actions import ActionSpec, ensure_unique_action_names
 from langgoap.graph.nodes._execution import (
     HistoryState,
     Observation,
+    StillWaiting,
     _build_failure,
     _build_guard_block,
     _build_success,
     _check_human_approval,
     _compact_history,
+    _is_prepared,
     _planning_keys_for,
     _prepare_execution,
+    _settle_wait,
+    _still_waiting,
     _validate_history_state,
 )
 from langgoap.graph.nodes._helpers import logger
@@ -167,7 +171,22 @@ class GoapExecutor:
             return prep
         world_state, plan_obj, current_step, action = prep
         action = self._rebind(action)
+        try:
+            result = self._act_sync(state, world_state, plan_obj, current_step, action)
+        except StillWaiting as still:
+            # Nothing the wait watches has changed: no step, no record.  The
+            # observer routes back to this step and the wait pauses again.
+            return _still_waiting(still)
+        return _settle_wait(action, result)
 
+    def _act_sync(
+        self,
+        state: GoapState,
+        world_state: dict[str, Any],
+        plan_obj: Any,
+        current_step: int,
+        action: ActionSpec,
+    ) -> dict[str, Any]:
         logger.info(
             "Executing action %r (step %d/%d)",
             action.name,
@@ -208,11 +227,15 @@ class GoapExecutor:
         state_before = dict(world_state)
 
         try:
-            raw = _execute_with_retries_sync(
-                action,
-                world_state,
-                tracer=self._tracer,
-                rng=self._backoff_rng,
+            raw = (
+                None  # a wait sent back to its step after a resume: prepared already
+                if _is_prepared(state, action)
+                else _execute_with_retries_sync(
+                    action,
+                    world_state,
+                    tracer=self._tracer,
+                    rng=self._backoff_rng,
+                )
             )
             returned_dict = self._observation.settle_sync(
                 raw,
@@ -232,6 +255,8 @@ class GoapExecutor:
             GraphBubbleUp
         ):  # interrupt() inside an action: let LangGraph pause the graph
             raise
+        except StillWaiting:
+            raise  # handled by _run_sync
         except Exception as e:
             result = _build_failure(action, e, state_before, world_state)
         self._tracer.on_action_complete(result)
@@ -259,7 +284,22 @@ class GoapExecutor:
             return prep
         world_state, plan_obj, current_step, action = prep
         action = self._rebind(action)
+        try:
+            result = await self._act_async(
+                state, world_state, plan_obj, current_step, action
+            )
+        except StillWaiting as still:
+            return _still_waiting(still)  # see _run_sync
+        return _settle_wait(action, result)
 
+    async def _act_async(
+        self,
+        state: GoapState,
+        world_state: dict[str, Any],
+        plan_obj: Any,
+        current_step: int,
+        action: ActionSpec,
+    ) -> dict[str, Any]:
         logger.info(
             "Executing action %r async (step %d/%d)",
             action.name,
@@ -295,11 +335,15 @@ class GoapExecutor:
         state_before = dict(world_state)  # includes the operator's answer (#75)
 
         try:
-            raw = await _execute_with_retries_async(
-                action,
-                world_state,
-                tracer=self._tracer,
-                rng=self._backoff_rng,
+            raw = (
+                None
+                if _is_prepared(state, action)
+                else await _execute_with_retries_async(
+                    action,
+                    world_state,
+                    tracer=self._tracer,
+                    rng=self._backoff_rng,
+                )
             )
             returned_dict = await self._observation.settle_async(
                 raw,
@@ -319,6 +363,8 @@ class GoapExecutor:
             GraphBubbleUp
         ):  # interrupt() inside an action: let LangGraph pause the graph
             raise
+        except StillWaiting:
+            raise  # handled by _run_async
         except Exception as e:
             result = _build_failure(action, e, state_before, world_state)
         await self._tracer.aon_action_complete(result)

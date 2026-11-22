@@ -23,7 +23,7 @@ import inspect
 import logging
 from typing import Any, Callable
 
-from langgoap.tracing._context import current_thread_id, supported_kwargs
+from langgoap.tracing._context import hook_kwargs
 from langgoap.tracing._protocol import PlanningTracer
 
 logger = logging.getLogger("langgoap.tracing")
@@ -100,20 +100,13 @@ async def _async_noop(*args: Any, **kwargs: Any) -> None:
     return None
 
 
-def _with_thread(kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Add the run's ``thread_id`` unless the caller passed one."""
-    if "thread_id" in kwargs:
-        return kwargs
-    return {**kwargs, "thread_id": current_thread_id()}
-
-
 def _wrap_callable(attr: Callable[..., Any], name: str) -> Callable[..., Any]:
     """Return a sync or async wrapper around ``attr`` that swallows exceptions."""
     if inspect.iscoroutinefunction(attr) or name.startswith("aon_"):
 
         async def _async_wrapper(*args: Any, **kwargs: Any) -> None:
             try:
-                await attr(*args, **supported_kwargs(attr, _with_thread(kwargs)))
+                await attr(*args, **hook_kwargs(attr, kwargs))
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning("Tracer raised during %s: %s", name, exc)
 
@@ -121,7 +114,7 @@ def _wrap_callable(attr: Callable[..., Any], name: str) -> Callable[..., Any]:
 
     def _sync_wrapper(*args: Any, **kwargs: Any) -> None:
         try:
-            attr(*args, **supported_kwargs(attr, _with_thread(kwargs)))
+            attr(*args, **hook_kwargs(attr, kwargs))
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("Tracer raised during %s: %s", name, exc)
 

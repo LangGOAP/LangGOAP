@@ -45,6 +45,7 @@ from langgoap.graph.state import (
     GoapResult,
     GoapStateChannels,
     goal_to_state,
+    interrupt_payload,
     rehydrate_state,
     state_defaults,
 )
@@ -410,13 +411,15 @@ class GoapGraph:
         was given.
         """
         if self._compiled is None:
-            self._compiled = self.compile(
-                checkpointer=(
-                    self._checkpointer
-                    if self._checkpointer is not None
-                    else InMemorySaver()
-                )
-            )
+            with self._lock:  # two OS threads starting at once compile once
+                if self._compiled is None:
+                    self._compiled = self.compile(
+                        checkpointer=(
+                            self._checkpointer
+                            if self._checkpointer is not None
+                            else InMemorySaver()
+                        )
+                    )
         return self._compiled
 
     @staticmethod
@@ -429,10 +432,7 @@ class GoapGraph:
             return None
         for task in snapshot.tasks:
             for pending in getattr(task, "interrupts", ()):
-                value = pending.value
-                if isinstance(value, dict):
-                    return dict(value)
-                return {"type": "interrupt", "value": value}
+                return interrupt_payload(pending)
         return None
 
     def waiting(self, thread_id: str) -> dict[str, Any] | None:
@@ -455,11 +455,10 @@ class GoapGraph:
         event a waiting thread expects (issue #105).
         """
         pending = self.waiting(thread_id)
-        if pending is None:
+        if pending is None or pending.get("type") != WAIT_INTERRUPT:
             return None
-        if isinstance(pending, dict) and pending.get("type") == "goap_action_wait":
-            return str(pending.get("action") or pending.get("waiting"))
-        return None
+        name = pending.get("action")
+        return str(name) if name else None
 
     def _resolve_goal(
         self, goal: GoalSpec | MultiGoal | Mapping[str, Any] | None

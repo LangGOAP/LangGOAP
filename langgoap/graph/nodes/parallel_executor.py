@@ -18,13 +18,17 @@ from langgoap.actions import ActionSpec, ensure_unique_action_names
 from langgoap.graph.nodes._execution import (
     HistoryState,
     Observation,
+    StillWaiting,
     _build_failure,
     _build_guard_block,
     _build_success,
     _check_human_approval,
     _compact_history,
+    _is_prepared,
     _planning_keys_for,
     _prepare_execution,
+    _settle_wait,
+    _still_waiting,
     _validate_history_state,
 )
 from langgoap.graph.nodes._helpers import logger
@@ -46,6 +50,7 @@ from langgoap.guards import (
     run_guards_sync,
 )
 from langgoap.planner.transitions import TransitionModel
+from langgoap.planner.types import Plan
 from langgoap.sensors import AsyncSensor, Sensor
 from langgoap.tracing import NullTracer, PlanningTracer, SafeTracerProxy
 
@@ -254,8 +259,22 @@ class ParallelGoapExecutor:
         prep = _prepare_execution(state)
         if isinstance(prep, dict):
             return prep
-        world_state, plan_obj, current_step, _first_action = prep
+        world_state, plan_obj, current_step, first_action = prep
+        try:
+            result = self._act_wave_sync(state, world_state, plan_obj, current_step)
+        except StillWaiting as still:
+            # A wait runs alone in its wave.  Nothing it watches has changed:
+            # no step, no record; the observer routes back and it pauses again.
+            return _still_waiting(still)
+        return _settle_wait(first_action, result)
 
+    def _act_wave_sync(
+        self,
+        state: GoapState,
+        world_state: dict[str, Any],
+        plan_obj: Plan,
+        current_step: int,
+    ) -> dict[str, Any]:
         deps = self._get_deps(plan_obj.actions)
         group = _find_parallel_group(plan_obj.actions, current_step, deps)
         merged_world: dict[str, Any] = dict(world_state)
@@ -302,11 +321,15 @@ class ParallelGoapExecutor:
             state_before = dict(merged_world)
 
             try:
-                raw = _execute_with_retries_sync(
-                    action,
-                    merged_world,
-                    tracer=self._tracer,
-                    rng=self._backoff_rng,
+                raw = (
+                    None  # a prepared wait, back at its step after a resume
+                    if _is_prepared(state, action)
+                    else _execute_with_retries_sync(
+                        action,
+                        merged_world,
+                        tracer=self._tracer,
+                        rng=self._backoff_rng,
+                    )
                 )
                 returned_dict = self._observation.settle_sync(
                     raw,
@@ -322,6 +345,8 @@ class ParallelGoapExecutor:
                 GraphBubbleUp
             ):  # interrupt() inside an action: let LangGraph pause the graph
                 raise
+            except StillWaiting:
+                raise  # handled by _run_wave_sync
             except Exception as exc:
                 action_result = _build_failure(action, exc, state_before, merged_world)
                 self._tracer.on_action_complete(action_result)
@@ -361,8 +386,22 @@ class ParallelGoapExecutor:
         prep = _prepare_execution(state)
         if isinstance(prep, dict):
             return prep
-        world_state, plan_obj, current_step, _first_action = prep
+        world_state, plan_obj, current_step, first_action = prep
+        try:
+            result = await self._act_wave_async(
+                state, world_state, plan_obj, current_step
+            )
+        except StillWaiting as still:
+            return _still_waiting(still)  # see _run_wave_sync
+        return _settle_wait(first_action, result)
 
+    async def _act_wave_async(
+        self,
+        state: GoapState,
+        world_state: dict[str, Any],
+        plan_obj: Plan,
+        current_step: int,
+    ) -> dict[str, Any]:
         deps = self._get_deps(plan_obj.actions)
         group = _find_parallel_group(plan_obj.actions, current_step, deps)
 
@@ -403,11 +442,15 @@ class ParallelGoapExecutor:
             state_before = dict(ws_snapshot)  # includes the operator's answer (#75)
 
             try:
-                raw = await _execute_with_retries_async(
-                    action,
-                    ws_snapshot,
-                    tracer=self._tracer,
-                    rng=self._backoff_rng,
+                raw = (
+                    None
+                    if _is_prepared(state, action)
+                    else await _execute_with_retries_async(
+                        action,
+                        ws_snapshot,
+                        tracer=self._tracer,
+                        rng=self._backoff_rng,
+                    )
                 )
                 returned_dict = await self._observation.settle_async(
                     raw,
@@ -423,6 +466,8 @@ class ParallelGoapExecutor:
                 GraphBubbleUp
             ):  # interrupt() inside an action: let LangGraph pause the graph
                 raise
+            except StillWaiting:
+                raise  # handled by _run_wave_async
             except Exception as exc:
                 result = _build_failure(action, exc, state_before, ws_snapshot)
 

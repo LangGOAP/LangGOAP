@@ -82,6 +82,49 @@ def _validate_effects_mode(value: str) -> EffectsMode:
     return value  # type: ignore[return-value]
 
 
+class StillWaiting(Exception):
+    """A wait looked after a resume and nothing it watches has changed.
+
+    Raised by :meth:`Observation.settle_sync` and :meth:`settle_async` with
+    the wait's name and the world state as the wait left it.  The executors
+    turn it into :func:`_still_waiting`: no step is taken and nothing is
+    recorded, so the observer routes back to the same step and the wait
+    pauses again in a fresh task.  Looping on ``interrupt()`` inside one task
+    would make LangGraph replay every earlier resume, because a resumed task
+    re-runs from its first line: after N notifications that changed nothing,
+    the next one would call ``on_resume`` and the sensors N + 1 times.
+    """
+
+    def __init__(self, action_name: str, world_state: dict[str, Any]) -> None:
+        super().__init__(action_name)
+        self.action_name = action_name
+        self.world_state = world_state
+
+
+def _still_waiting(still: StillWaiting) -> dict[str, Any]:
+    """The executor update for a wait that looked and saw no change.
+
+    ``prepared_wait`` tells the fresh task that the wait's ``execute`` has run,
+    so it is not run again; the world state keeps what ``execute`` returned,
+    so it reaches the final state however many notifications the wait sits
+    through.
+    """
+    return {"world_state": still.world_state, "prepared_wait": still.action_name}
+
+
+def _is_prepared(state: GoapState, action: ActionSpec) -> bool:
+    """True when *action* is the wait ``prepared_wait`` names: skip its ``execute``."""
+    return action.is_wait and state.get("prepared_wait") == action.name
+
+
+def _settle_wait(action: ActionSpec, result: dict[str, Any]) -> dict[str, Any]:
+    """Clear ``prepared_wait`` once a wait is over, whatever the outcome, so a
+    later wait by the same name is prepared afresh."""
+    if action.is_wait:
+        return {**result, "prepared_wait": None}
+    return result
+
+
 class Observation:
     """What the executors do with an action's outcome (issue #96).
 
@@ -94,7 +137,9 @@ class Observation:
     * ``effects="observed"``: as ``"merged"``, then the sensors are asked and
       what they report for the action's keys wins.
     * a wait (``ActionSpec.wait``) pauses until a sensed value of one of its
-      keys changes, whatever the mode.
+      keys changes, whatever the mode.  Each resume runs ``on_resume`` and
+      the sensors once; a resume that changed nothing raises
+      :class:`StillWaiting`.
 
     The action's keys are its effect keys, ``ActionSpec.observe`` and the
     graph-level ``always_observe``.  Shared by the sequential and the parallel
@@ -183,23 +228,21 @@ class Observation:
         if action.is_wait:
             if isinstance(raw, dict):
                 world_state.update(raw)
-            payload = self._wait_payload(action)
-            while True:  # any resume makes it look again; only a change ends it
-                interrupt(payload)
-                if action.on_resume is not None:
-                    outcome = action.on_resume(world_state)
-                    if inspect.isawaitable(outcome):
-                        getattr(outcome, "close", lambda: None)()
-                        raise RuntimeError(
-                            f"Wait {action.name!r} has an async on_resume. Use "
-                            "GoapGraph.astart()/anotify() or compiled.ainvoke()."
-                        )
-                fresh = self._changed(
-                    action, world_state, self._sense_sync(world_state)
-                )
-                if fresh is not None:
-                    world_state.update(fresh)
-                    return False
+            # Raises on a task's first pass; returns the resume value after one.
+            interrupt(self._wait_payload(action))
+            if action.on_resume is not None:
+                outcome = action.on_resume(world_state)
+                if inspect.isawaitable(outcome):
+                    getattr(outcome, "close", lambda: None)()
+                    raise RuntimeError(
+                        f"Wait {action.name!r} has an async on_resume. Use "
+                        "GoapGraph.astart()/anotify() or compiled.ainvoke()."
+                    )
+            fresh = self._changed(action, world_state, self._sense_sync(world_state))
+            if fresh is None:
+                raise StillWaiting(action.name, world_state)
+            world_state.update(fresh)
+            return False
         if self.mode == "declared":
             return _apply_result(
                 raw, action, world_state, transition_model=transition_model, rng=rng
@@ -233,19 +276,18 @@ class Observation:
         if action.is_wait:
             if isinstance(raw, dict):
                 world_state.update(raw)
-            payload = self._wait_payload(action)
-            while True:
-                interrupt(payload)
-                if action.on_resume is not None:
-                    outcome = action.on_resume(world_state)
-                    if inspect.isawaitable(outcome):
-                        await outcome
-                fresh = self._changed(
-                    action, world_state, await self._sense_async(world_state)
-                )
-                if fresh is not None:
-                    world_state.update(fresh)
-                    return False
+            interrupt(self._wait_payload(action))
+            if action.on_resume is not None:
+                outcome = action.on_resume(world_state)
+                if inspect.isawaitable(outcome):
+                    await outcome
+            fresh = self._changed(
+                action, world_state, await self._sense_async(world_state)
+            )
+            if fresh is None:
+                raise StillWaiting(action.name, world_state)
+            world_state.update(fresh)
+            return False
         if self.mode == "declared":
             return _apply_result(
                 raw, action, world_state, transition_model=transition_model, rng=rng

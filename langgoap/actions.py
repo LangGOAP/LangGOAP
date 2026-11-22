@@ -326,17 +326,19 @@ class ActionSpec:
 
         The executor interrupts with ``{"type": "goap_action_wait", "action":
         name, **payload}``.  Every resume (``GoapGraph.notify`` or
-        ``Command(resume=...)``) makes the wait call ``on_resume``, ask the
-        graph's sensors, and complete only when one of its keys (the effect
-        keys, ``observe`` and the graph's ``always_observe``) differs from the
-        value it had when the wait began.  It completes with what the sensors
-        report, whatever the plan expected; the observer re-plans on a
-        deviation as for any action.
+        ``Command(resume=...)``) makes the wait call ``on_resume`` once, ask
+        the graph's sensors once, and complete only when one of its keys (the
+        effect keys, ``observe`` and the graph's ``always_observe``) differs
+        from the value it had when the wait began; otherwise it pauses again
+        in a fresh task, so a resume costs the same however many came before
+        it.  It completes with what the sensors report, whatever the plan
+        expected; the observer re-plans on a deviation as for any action.
 
         ``execute`` / ``aexecute`` may be given in ``options`` to prepare the
-        wait (send the offer, start the timer).  LangGraph re-enters the node
-        on every resume, so the callable runs before the first pause **and
-        again on each resume**: it must be idempotent.
+        wait (send the offer, start the timer).  It runs before the first
+        pause and, because LangGraph replays a paused task on resume, once
+        more on the first resume; it must be idempotent.  A dict it returns
+        is part of the state the wait completes with.
 
         A graph with a wait needs sensors and, at run time, a checkpointer.
 

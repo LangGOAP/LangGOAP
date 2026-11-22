@@ -30,6 +30,7 @@ BOOKKEEPING = {
     "skipped_subgoals": [],
     "no_plan_explanation": None,
     "reflection_context": [],
+    "prepared_wait": None,
 }
 
 

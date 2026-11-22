@@ -13,7 +13,7 @@ import pytest
 from langgraph.checkpoint.memory import MemorySaver
 from pydantic import BaseModel
 
-from langgoap import ActionSpec, GoalSpec, GoapGraph
+from langgoap import ActionSpec, GoalSpec, GoapGraph, GoapResult
 
 
 class Shop:
@@ -168,6 +168,40 @@ class TestMailbox:
             "stop:cook:goal_achieved",
             "stop:waiter:goal_achieved",
         ]
+
+    def test_calls_made_from_on_stop_are_delivered_after_it(self) -> None:
+        """on_stop reacts to each stop (an application that cancels an order
+        publishes an event its own listener turns into a notify): the calls
+        are queued and run once the current one is over, in order."""
+        shop = Shop()
+        seen: list[str] = []
+        holder: dict[str, GoapGraph] = {}
+
+        def after(thread_id: str, state: GoapResult) -> None:
+            paused = state.interrupt
+            seen.append(f"stop:{paused['type'] if paused else state.status}")
+            if paused is None:
+                return
+            if paused["type"] == "goap_action_wait":
+                shop.kitchen = "ready"
+                assert holder["g"].notify(thread_id) is None  # queued, not run here
+            else:
+                assert holder["g"].resume(True, thread_id=thread_id) is None
+
+        graph = _graph(shop, on_stop=after)
+        holder["g"] = graph
+        result = graph.start(thread_id="t")
+        assert seen == [
+            "stop:goap_action_wait",
+            "stop:goap_action_approval",
+            "stop:goal_achieved",
+        ]
+        # The caller gets the answer to its own call, the first pause.
+        assert result is not None and result.interrupt == {
+            "type": "goap_action_wait",
+            "action": "await_kitchen",
+        }
+        assert graph.waiting("t") is None
 
     def test_on_stop_sees_the_interrupt(self) -> None:
         stops: list[Any] = []
