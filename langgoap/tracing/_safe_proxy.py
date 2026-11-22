@@ -8,6 +8,10 @@ the proxy wraps the user-supplied tracer, call sites can invoke hooks
 directly (``self._tracer.on_action_start(action, state)``) without
 their own try/except scaffolding.
 
+Every hook also receives ``thread_id`` (the run's thread, or ``None``) when
+its signature accepts it (issue #104), so a tracer shared by many threads
+needs no :func:`current_thread_id` calls of its own.
+
 Both sync (``on_*``) and async (``aon_*``) hooks are guarded.  Errors
 are logged at ``WARNING`` level via the ``langgoap.tracing`` logger;
 they are never propagated.
@@ -19,7 +23,7 @@ import inspect
 import logging
 from typing import Any, Callable
 
-from langgoap.tracing._context import supported_kwargs
+from langgoap.tracing._context import current_thread_id, supported_kwargs
 from langgoap.tracing._protocol import PlanningTracer
 
 logger = logging.getLogger("langgoap.tracing")
@@ -96,13 +100,20 @@ async def _async_noop(*args: Any, **kwargs: Any) -> None:
     return None
 
 
+def _with_thread(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Add the run's ``thread_id`` unless the caller passed one."""
+    if "thread_id" in kwargs:
+        return kwargs
+    return {**kwargs, "thread_id": current_thread_id()}
+
+
 def _wrap_callable(attr: Callable[..., Any], name: str) -> Callable[..., Any]:
     """Return a sync or async wrapper around ``attr`` that swallows exceptions."""
     if inspect.iscoroutinefunction(attr) or name.startswith("aon_"):
 
         async def _async_wrapper(*args: Any, **kwargs: Any) -> None:
             try:
-                await attr(*args, **supported_kwargs(attr, kwargs))
+                await attr(*args, **supported_kwargs(attr, _with_thread(kwargs)))
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning("Tracer raised during %s: %s", name, exc)
 
@@ -110,7 +121,7 @@ def _wrap_callable(attr: Callable[..., Any], name: str) -> Callable[..., Any]:
 
     def _sync_wrapper(*args: Any, **kwargs: Any) -> None:
         try:
-            attr(*args, **supported_kwargs(attr, kwargs))
+            attr(*args, **supported_kwargs(attr, _with_thread(kwargs)))
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("Tracer raised during %s: %s", name, exc)
 

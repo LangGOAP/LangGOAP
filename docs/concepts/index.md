@@ -459,6 +459,9 @@ succeeded), `interrupt` and `summary()`. A goal may be written as a plain
 mapping of conditions, and an action given a named `execute` function needs
 no `name`.
 
+A tracer hook that declares a `thread_id` keyword receives the run's thread
+id, and `graph.waiting_action(thread_id)` names the wait a thread is paused in.
+
 Tracer hooks, actions and sensors can call `current_thread_id()` to learn
 which thread they are running for, and `on_replan` receives `duration_ms`
 like the other planning hooks.

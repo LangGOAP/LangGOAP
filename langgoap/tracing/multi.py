@@ -7,6 +7,7 @@ from typing import Any
 
 from langgoap.tracing._context import supported_kwargs
 from langgoap.tracing._protocol import PlanningTracer
+from langgoap.tracing._safe_proxy import _with_thread
 
 logger = logging.getLogger("langgoap.tracing")
 
@@ -41,7 +42,7 @@ class MultiTracer:
         for t in self._tracers:
             try:
                 hook = getattr(t, method)
-                hook(*args, **supported_kwargs(hook, kwargs))
+                hook(*args, **supported_kwargs(hook, _with_thread(kwargs)))
             except Exception as exc:
                 logger.warning(
                     "Tracer %r raised during %s: %s",
@@ -54,7 +55,7 @@ class MultiTracer:
         for t in self._tracers:
             try:
                 hook = getattr(t, method)
-                await hook(*args, **supported_kwargs(hook, kwargs))
+                await hook(*args, **supported_kwargs(hook, _with_thread(kwargs)))
             except Exception as exc:
                 logger.warning(
                     "Tracer %r raised during %s: %s",

@@ -9,9 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.1] — 2026-11-22
 
-
 ### Added
 
+- Tracer hooks receive `thread_id` (#104): every hook whose signature accepts
+  a `thread_id` keyword gets the run's thread id (`None` outside a run), also
+  through `MultiTracer`. Hooks that do not declare it are called as before, so
+  a tracer shared by many threads needs no `current_thread_id()` calls.
+- `GoapGraph.waiting_action(thread_id)` (#105): the name of the wait action a
+  thread is paused on, or `None` when it is not in a wait (finished, unknown,
+  or paused on an approval or form).
 - Observed effects (`GoapGraph(effects="observed")`, #96). After an action
   runs, its declared effects and any dict it returned are assumed, the sensors
   are asked, and what they report for the action's keys wins: the effect keys,
