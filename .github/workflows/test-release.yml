@@ -114,6 +114,23 @@ jobs:
       - name: Upgrade setuptools with UV
         run: uv pip install --system "setuptools>=40.8.0" wheel
 
+      - name: Wait for Test PyPI to list the version
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        # The simple index takes a while to list a fresh upload; asking for it
+        # sooner fails with "no version of langgoap==VERSION" (#111).
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS https://test.pypi.org/simple/langgoap/ | grep -q "langgoap-$VERSION"; then
+              echo "✅ Test PyPI lists langgoap==$VERSION (attempt $attempt)"
+              exit 0
+            fi
+            echo "⏳ Not listed yet (attempt $attempt of 30); waiting 10s..."
+            sleep 10
+          done
+          echo "❌ Test PyPI did not list langgoap==$VERSION within 5 minutes"
+          exit 1
+
       - name: Install from Test PyPI
         env:
           VERSION: ${{ needs.build.outputs.version }}
@@ -121,8 +138,8 @@ jobs:
         # Test PyPI = extra index so the not-yet-on-PyPI langgoap==VERSION
         # can be found. unsafe-best-match lets UV pull deps from either.
         run: |
-          for attempt in 1 2 3; do
-            echo "Attempt $attempt of 3..."
+          for attempt in 1 2 3 4 5; do
+            echo "Attempt $attempt of 5..."
             if uv pip install --system \
               --index-strategy unsafe-best-match \
               --extra-index-url https://test.pypi.org/simple/ \
@@ -131,14 +148,14 @@ jobs:
               exit 0
             fi
 
-            if [ $attempt -lt 3 ]; then
-              delay=$((attempt * 10))
+            if [ $attempt -lt 5 ]; then
+              delay=$((attempt * 15))
               echo "⏳ Install failed, waiting ${delay}s before retry..."
               sleep $delay
             fi
           done
 
-          echo "❌ Failed to install after 3 attempts"
+          echo "❌ Failed to install after 5 attempts"
           exit 1
 
       - name: Verify package import
