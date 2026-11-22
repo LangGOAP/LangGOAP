@@ -55,9 +55,11 @@ categories:
       - 'bug'
       - 'BUG'
   - title: '📚 Documentation'
-    label: 'documentation'
+    labels:
+      - 'documentation'
   - title: '🧰 Maintenance'
-    label: 'maintenance'
+    labels:
+      - 'maintenance'
 change-template: '- $TITLE (#$NUMBER)'
 exclude-labels:
   - 'skip-changelog'
