@@ -90,6 +90,23 @@ jobs:
       - name: Upgrade setuptools with UV
         run: uv pip install --system "setuptools>=40.8.0" wheel
 
+      - name: Wait for Test PyPI to list the version
+        env:
+          VERSION: ${{ needs.test-release.outputs.version }}
+        # The simple index takes a while to list a fresh upload; asking for it
+        # sooner fails with "no version of langgoap==VERSION" (#111).
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS https://test.pypi.org/simple/langgoap/ | grep -q "langgoap-$VERSION"; then
+              echo "✅ Test PyPI lists langgoap==$VERSION (attempt $attempt)"
+              exit 0
+            fi
+            echo "⏳ Not listed yet (attempt $attempt of 30); waiting 10s..."
+            sleep 10
+          done
+          echo "❌ Test PyPI did not list langgoap==$VERSION within 5 minutes"
+          exit 1
+
       - name: Install from Test PyPI
         env:
           VERSION: ${{ needs.test-release.outputs.version }}
@@ -178,6 +195,23 @@ jobs:
 
       - name: Upgrade setuptools with UV
         run: uv pip install --system "setuptools>=40.8.0" wheel
+
+      - name: Wait for Test PyPI to list the version
+        env:
+          VERSION: ${{ needs.test-release.outputs.version }}
+        # The simple index takes a while to list a fresh upload; asking for it
+        # sooner fails with "no version of langgoap==VERSION" (#111).
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS https://test.pypi.org/simple/langgoap/ | grep -q "langgoap-$VERSION"; then
+              echo "✅ Test PyPI lists langgoap==$VERSION (attempt $attempt)"
+              exit 0
+            fi
+            echo "⏳ Not listed yet (attempt $attempt of 30); waiting 10s..."
+            sleep 10
+          done
+          echo "❌ Test PyPI did not list langgoap==$VERSION within 5 minutes"
+          exit 1
 
       - name: Install from Test PyPI
         env:
