@@ -448,6 +448,19 @@ class GoapGraph:
             self.compiled.get_state(self._thread_config(thread_id))
         )
 
+    def waiting_action(self, thread_id: str) -> str | None:
+        """The action name the thread is paused on if it is a wait, else ``None``.
+
+        Convenience over :meth:`waiting` for the common case of deciding which
+        event a waiting thread expects (issue #105).
+        """
+        pending = self.waiting(thread_id)
+        if pending is None:
+            return None
+        if isinstance(pending, dict) and pending.get("type") == "goap_action_wait":
+            return str(pending.get("action") or pending.get("waiting"))
+        return None
+
     def _resolve_goal(
         self, goal: GoalSpec | MultiGoal | Mapping[str, Any] | None
     ) -> GoalSpec | MultiGoal:
