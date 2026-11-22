@@ -8,6 +8,7 @@ validation.  Kept module-private so the ``executor.py`` and
 
 from __future__ import annotations
 
+import inspect
 import random
 from collections.abc import Iterable, Mapping
 from dataclasses import replace
@@ -22,6 +23,7 @@ from langgoap.graph.state import ActionResult, GoapState
 from langgoap.guards import GuardResult
 from langgoap.planner.transitions import TransitionModel
 from langgoap.planner.types import Plan
+from langgoap.sensors import AsyncSensor, Sensor, run_sensors_async, run_sensors_sync
 
 
 def _apply_result(
@@ -66,6 +68,193 @@ def _apply_result(
         return False
     world_state.update(action.get_effects(world_state))
     return False
+
+
+EffectsMode = Literal["declared", "merged", "observed"]
+EFFECTS_MODES: tuple[str, ...] = ("declared", "merged", "observed")
+#: ``type`` of the interrupt payload a wait pauses the graph with.
+WAIT_INTERRUPT = "goap_action_wait"
+
+
+def _validate_effects_mode(value: str) -> EffectsMode:
+    if value not in EFFECTS_MODES:
+        raise ValueError(f"effects must be one of {EFFECTS_MODES}, got {value!r}")
+    return value  # type: ignore[return-value]
+
+
+class Observation:
+    """What the executors do with an action's outcome (issue #96).
+
+    * ``effects="declared"`` (default): the pre-0.3.1 behaviour of
+      :func:`_apply_result`: a returned dict is the truth, otherwise the
+      declared effects are.
+    * ``effects="merged"`` (issue #97): the declared effects are applied and
+      a returned dict is merged on top, so an action returns only what it
+      adds or what differs.
+    * ``effects="observed"``: as ``"merged"``, then the sensors are asked and
+      what they report for the action's keys wins.
+    * a wait (``ActionSpec.wait``) pauses until a sensed value of one of its
+      keys changes, whatever the mode.
+
+    The action's keys are its effect keys, ``ActionSpec.observe`` and the
+    graph-level ``always_observe``.  Shared by the sequential and the parallel
+    executor so the sync and async paths cannot diverge.
+    """
+
+    def __init__(
+        self,
+        sensors: list[Sensor | AsyncSensor] | None = None,
+        *,
+        effects: str = "declared",
+        always_observe: Iterable[str] = (),
+        tracer: Any = None,
+    ) -> None:
+        self.sensors: list[Sensor | AsyncSensor] = list(sensors or [])
+        self.mode: EffectsMode = _validate_effects_mode(effects)
+        if isinstance(always_observe, str):
+            raise TypeError("always_observe must be an iterable of state keys")
+        self.always_observe: tuple[str, ...] = tuple(always_observe)
+        self._tracer = tracer
+
+    def keys(self, action: ActionSpec) -> tuple[str, ...]:
+        return tuple(
+            dict.fromkeys(
+                (*action.effect_key_set(), *action.observe, *self.always_observe)
+            )
+        )
+
+    # -- shared pieces ---------------------------------------------------
+
+    def _assume(
+        self,
+        raw: Any,
+        action: ActionSpec,
+        world_state: dict[str, Any],
+        transition_model: TransitionModel | None,
+        rng: random.Random | None,
+    ) -> None:
+        """Declared effects first, then whatever the action itself reported."""
+        _apply_result(
+            None, action, world_state, transition_model=transition_model, rng=rng
+        )
+        if raw is not None:
+            _apply_result(raw, action, world_state)
+
+    @staticmethod
+    def _wait_payload(action: ActionSpec) -> dict[str, Any]:
+        return {
+            "type": WAIT_INTERRUPT,
+            "action": action.name,
+            **dict(action.wait_payload or {}),
+        }
+
+    def _changed(
+        self, action: ActionSpec, world_state: dict[str, Any], sensed: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        fresh = {k: sensed[k] for k in self.keys(action) if k in sensed}
+        if any(fresh[k] != world_state.get(k) for k in fresh):
+            return fresh
+        return None
+
+    # -- sync ------------------------------------------------------------
+
+    def _sense_sync(self, world_state: dict[str, Any]) -> dict[str, Any]:
+        sensed: dict[str, Any] = {}
+        for name, updates in run_sensors_sync(self.sensors, dict(world_state)):
+            if self._tracer is not None:
+                self._tracer.on_sensor_complete(name, updates)
+            sensed.update(updates)
+        return sensed
+
+    def settle_sync(
+        self,
+        raw: Any,
+        action: ActionSpec,
+        world_state: dict[str, Any],
+        *,
+        transition_model: TransitionModel | None = None,
+        rng: random.Random | None = None,
+    ) -> bool:
+        """Bring ``world_state`` to the action's outcome, in place.
+
+        Returns ``True`` only when a returned dict was applied as the truth
+        (``effects="declared"``), the one case the default effect check covers.
+        """
+        if action.is_wait:
+            if isinstance(raw, dict):
+                world_state.update(raw)
+            payload = self._wait_payload(action)
+            while True:  # any resume makes it look again; only a change ends it
+                interrupt(payload)
+                if action.on_resume is not None:
+                    outcome = action.on_resume(world_state)
+                    if inspect.isawaitable(outcome):
+                        getattr(outcome, "close", lambda: None)()
+                        raise RuntimeError(
+                            f"Wait {action.name!r} has an async on_resume. Use "
+                            "GoapGraph.astart()/anotify() or compiled.ainvoke()."
+                        )
+                fresh = self._changed(
+                    action, world_state, self._sense_sync(world_state)
+                )
+                if fresh is not None:
+                    world_state.update(fresh)
+                    return False
+        if self.mode == "declared":
+            return _apply_result(
+                raw, action, world_state, transition_model=transition_model, rng=rng
+            )
+        self._assume(raw, action, world_state, transition_model, rng)
+        if self.mode == "observed":
+            sensed = self._sense_sync(world_state)
+            world_state.update({k: sensed[k] for k in self.keys(action) if k in sensed})
+        return False
+
+    # -- async -----------------------------------------------------------
+
+    async def _sense_async(self, world_state: dict[str, Any]) -> dict[str, Any]:
+        sensed: dict[str, Any] = {}
+        for name, updates in await run_sensors_async(self.sensors, dict(world_state)):
+            if self._tracer is not None:
+                await self._tracer.aon_sensor_complete(name, updates)
+            sensed.update(updates)
+        return sensed
+
+    async def settle_async(
+        self,
+        raw: Any,
+        action: ActionSpec,
+        world_state: dict[str, Any],
+        *,
+        transition_model: TransitionModel | None = None,
+        rng: random.Random | None = None,
+    ) -> bool:
+        """Async sibling of :meth:`settle_sync`."""
+        if action.is_wait:
+            if isinstance(raw, dict):
+                world_state.update(raw)
+            payload = self._wait_payload(action)
+            while True:
+                interrupt(payload)
+                if action.on_resume is not None:
+                    outcome = action.on_resume(world_state)
+                    if inspect.isawaitable(outcome):
+                        await outcome
+                fresh = self._changed(
+                    action, world_state, await self._sense_async(world_state)
+                )
+                if fresh is not None:
+                    world_state.update(fresh)
+                    return False
+        if self.mode == "declared":
+            return _apply_result(
+                raw, action, world_state, transition_model=transition_model, rng=rng
+            )
+        self._assume(raw, action, world_state, transition_model, rng)
+        if self.mode == "observed":
+            sensed = await self._sense_async(world_state)
+            world_state.update({k: sensed[k] for k in self.keys(action) if k in sensed})
+        return False
 
 
 def _build_success(

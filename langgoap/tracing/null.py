@@ -38,7 +38,9 @@ class NullTracer:
     def on_strategy_chosen(self, strategy_name: str) -> None:
         pass
 
-    def on_replan(self, reason: str, new_plan: Any) -> None:
+    def on_replan(
+        self, reason: str, new_plan: Any, duration_ms: float | None = None
+    ) -> None:
         pass
 
     def on_goal_achieved(self, final_state: Any) -> None:
@@ -74,7 +76,9 @@ class NullTracer:
     async def aon_strategy_chosen(self, strategy_name: str) -> None:
         pass
 
-    async def aon_replan(self, reason: str, new_plan: Any) -> None:
+    async def aon_replan(
+        self, reason: str, new_plan: Any, duration_ms: float | None = None
+    ) -> None:
         pass
 
     async def aon_goal_achieved(self, final_state: Any) -> None:

@@ -60,6 +60,7 @@ from langgoap.graph.nodes import (
 )
 from langgoap.graph.state import (
     ActionResult,
+    GoapResult,
     GoapState,
     GoapStateChannels,
     rehydrate_state,
@@ -204,6 +205,7 @@ from langgoap.tracing import (
     NullTracer,
     PlanningTracer,
     SafeTracerProxy,
+    current_thread_id,
 )
 from langgoap.types import (
     CostFunction,
@@ -272,6 +274,7 @@ __all__ = [
     "GoapObserver",
     "ParallelGoapExecutor",
     "GoapState",
+    "GoapResult",
     "GoapStateChannels",
     "ActionResult",
     "rehydrate_state",
@@ -396,6 +399,7 @@ __all__ = [
     "LoggingTracer",
     "MultiTracer",
     "LangSmithTracer",
+    "current_thread_id",
     # Execution history
     "ExecutionRecord",
     "StoreExecutionHistory",

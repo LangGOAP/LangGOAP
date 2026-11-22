@@ -950,7 +950,7 @@ class GoapPlanner:
             self._tracer.on_plan_failed(updates.get("status", "no_plan"), duration_ms)
         elif was_replan:
             reason = state.get("replan_reason") or "unknown"
-            self._tracer.on_replan(reason, plan)
+            self._tracer.on_replan(reason, plan, duration_ms=duration_ms)
         else:
             self._tracer.on_plan_complete(plan, duration_ms)
         observed_ws = resolved_ws if resolved_ws is not None else sensor_ws
@@ -999,7 +999,7 @@ class GoapPlanner:
             )
         elif was_replan:
             reason = state.get("replan_reason") or "unknown"
-            await self._tracer.aon_replan(reason, plan)
+            await self._tracer.aon_replan(reason, plan, duration_ms=duration_ms)
         else:
             await self._tracer.aon_plan_complete(plan, duration_ms)
         observed_ws = resolved_ws if resolved_ws is not None else sensor_ws

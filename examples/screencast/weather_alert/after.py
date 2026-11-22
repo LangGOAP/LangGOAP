@@ -27,7 +27,6 @@ from typing import Any, Callable
 from langgoap import (
     ActionQos,
     ActionSpec,
-    FunctionalSensor,
     FunctionalStuckHandler,
     GoalSpec,
     GoapGraph,
@@ -299,32 +298,23 @@ def initial_world_state(weather: dict[str, Any]) -> dict[str, Any]:
 def build_graph(smtp: FakeSmtp | None = None) -> GoapGraph:
     return GoapGraph(
         build_actions(smtp),
-        sensors=[FunctionalSensor("assess", assess)],
+        goal=build_goal(),
+        sensors=[assess],
         stuck_handlers=[FunctionalStuckHandler("operator_withheld", operator_withheld)],
     )
 
 
 if __name__ == "__main__":
-    from langchain_core.runnables import RunnableConfig
-    from langgraph.checkpoint.memory import MemorySaver
-    from langgraph.types import Command
-
     for label, weather in SCENARIOS.items():
         print("=" * 60)
         print(f"  AFTER (GOAP) — {label.upper()}: {weather['city']}")
         print("=" * 60)
         graph = build_graph()
-        compiled = graph.compile(checkpointer=MemorySaver())
-        config: RunnableConfig = {"configurable": {"thread_id": label}}
-        result = compiled.invoke(
-            graph.initial_state(build_goal(), initial_world_state(weather)),
-            config=config,
-        )
-        if "__interrupt__" in result:
-            ask = result["__interrupt__"][0].value
+        result = graph.start(initial_world_state(weather), thread_id=label)
+        if (ask := result.interrupt) is not None:
             print(f"  [human] {ask['type']} for {ask['action']} -> approve")
-            result = compiled.invoke(Command(resume=True), config=config)
+            result = graph.resume(True, thread_id=label)
         print(
-            f"  status: {result['status']}  steps: {[h['action_name'] for h in result['execution_history']]}"
+            f"  status: {result.status}  steps: {[h.action_name for h in result['execution_history']]}"
         )
         print()

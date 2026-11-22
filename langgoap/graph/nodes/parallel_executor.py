@@ -10,14 +10,14 @@ from __future__ import annotations
 
 import asyncio
 import random
-from typing import Any
+from typing import Any, Iterable
 
 from langgraph.errors import GraphBubbleUp
 
 from langgoap.actions import ActionSpec, ensure_unique_action_names
 from langgoap.graph.nodes._execution import (
     HistoryState,
-    _apply_result,
+    Observation,
     _build_failure,
     _build_guard_block,
     _build_success,
@@ -46,7 +46,13 @@ from langgoap.guards import (
     run_guards_sync,
 )
 from langgoap.planner.transitions import TransitionModel
+from langgoap.sensors import AsyncSensor, Sensor
 from langgoap.tracing import NullTracer, PlanningTracer, SafeTracerProxy
+
+
+def _pauses(action: ActionSpec) -> bool:
+    """True for an action that interrupts the graph: an approval gate or a wait."""
+    return bool(action.require_human_approval) or action.is_wait
 
 
 def _find_parallel_group(
@@ -81,10 +87,11 @@ def _find_parallel_group(
 
         deps = build_dependency_graph(plan_actions)
 
-    # A human-approval gate pauses the graph with ``interrupt()``.  It must
-    # never share a wave: siblings launched alongside it would run their
-    # side effects before the interrupt and run them again after resume.
-    if plan_actions[current_step].require_human_approval:
+    # A human-approval gate pauses the graph with ``interrupt()``, and so
+    # does a wait.  Neither may share a wave: siblings launched alongside
+    # would run their side effects before the interrupt and run them again
+    # after resume.
+    if _pauses(plan_actions[current_step]):
         return [current_step]
 
     group: list[int] = [current_step]
@@ -94,7 +101,7 @@ def _find_parallel_group(
         # Stop if j depends on any action already in the group.
         if any(d in group_set for d in deps[j]):
             break
-        if plan_actions[j].require_human_approval:
+        if _pauses(plan_actions[j]):
             break
         group.append(j)
         group_set.add(j)
@@ -156,6 +163,9 @@ class ParallelGoapExecutor:
             reused across waves.  Back-off jitter uses a separate stream.
         history_state: See :class:`GoapExecutor`; applied to every record of
             a wave.
+        sensors: See :class:`GoapExecutor`.
+        effects: See :class:`GoapExecutor`.
+        always_observe: See :class:`GoapExecutor`.
     """
 
     def __init__(
@@ -167,10 +177,19 @@ class ParallelGoapExecutor:
         rng: random.Random | None = None,
         actions: list[ActionSpec] | None = None,
         history_state: HistoryState = "full",
+        sensors: list[Sensor | AsyncSensor] | None = None,
+        effects: str = "declared",
+        always_observe: Iterable[str] = (),
     ) -> None:
         self._history_state = _validate_history_state(history_state)
         # See ``GoapExecutor.__init__`` for the SafeTracerProxy rationale.
         self._tracer: PlanningTracer = SafeTracerProxy(tracer or NullTracer())
+        self._observation = Observation(
+            sensors,
+            effects=effects,
+            always_observe=always_observe,
+            tracer=self._tracer,
+        )
         self._guards: list[ActionGuard | AsyncActionGuard] = guards or []
         self._transition_model: TransitionModel | None = transition_model
         self._rng: random.Random = rng if rng is not None else random.Random()
@@ -289,7 +308,7 @@ class ParallelGoapExecutor:
                     tracer=self._tracer,
                     rng=self._backoff_rng,
                 )
-                returned_dict = _apply_result(
+                returned_dict = self._observation.settle_sync(
                     raw,
                     action,
                     merged_world,
@@ -390,7 +409,7 @@ class ParallelGoapExecutor:
                     tracer=self._tracer,
                     rng=self._backoff_rng,
                 )
-                returned_dict = _apply_result(
+                returned_dict = await self._observation.settle_async(
                     raw,
                     action,
                     ws_snapshot,

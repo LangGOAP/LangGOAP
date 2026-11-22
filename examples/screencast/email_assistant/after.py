@@ -22,10 +22,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 
-from langgoap import ActionSpec, FunctionalSensor, GoalSpec, GoapGraph
+from langgoap import ActionSpec, GoalSpec, GoapGraph
 
 EMAILS: dict[str, dict[str, str]] = {
     "newsletter": {
@@ -218,14 +217,13 @@ def initial_world_state(email: dict[str, str]) -> dict[str, Any]:
     return {"email": dict(email)}
 
 
-def build_graph() -> GoapGraph:
-    return GoapGraph(build_actions(), sensors=[FunctionalSensor("triage", triage)])
+def build_graph(checkpointer: Any = None) -> GoapGraph:
+    return GoapGraph(
+        build_actions(), goal=build_goal(), sensors=[triage], checkpointer=checkpointer
+    )
 
 
 if __name__ == "__main__":
-    from langgraph.checkpoint.memory import MemorySaver
-    from langgraph.types import Command
-
     answers = {
         "send_cal_invite": {
             "title": "Q3 roadmap review",
@@ -240,20 +238,13 @@ if __name__ == "__main__":
         print(f"  AFTER (GOAP) — {label.upper()}: {email['subject']}")
         print("=" * 60)
         graph = build_graph()
-        compiled = graph.compile(checkpointer=MemorySaver())
-        config: RunnableConfig = {"configurable": {"thread_id": label}}
-        result = compiled.invoke(
-            graph.initial_state(build_goal(), initial_world_state(email)), config=config
-        )
-        while "__interrupt__" in result:
-            ask = result["__interrupt__"][0].value
+        result = graph.start(initial_world_state(email), thread_id=label)
+        while (ask := graph.waiting(label)) is not None:
             print(
                 f"  [human] {ask['type']} for {ask['action']} -> {answers[ask['action']]}"
             )
-            result = compiled.invoke(
-                Command(resume=answers[ask["action"]]), config=config
-            )
+            result = graph.resume(answers[ask["action"]], thread_id=label)
         print(
-            f"  status: {result['status']}  steps: {[h['action_name'] for h in result['execution_history']]}"
+            f"  status: {result.status}  steps: {[h.action_name for h in result['execution_history']]}"
         )
         print()

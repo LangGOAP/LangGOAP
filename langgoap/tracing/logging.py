@@ -7,6 +7,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from langgoap.tracing._context import supported_kwargs
+
 logger = logging.getLogger("langgoap.tracing")
 
 
@@ -54,8 +56,12 @@ class LoggingTracer:
     def on_strategy_chosen(self, strategy_name: str) -> None:
         logger.info("strategy_chosen name=%s", strategy_name)
 
-    def on_replan(self, reason: str, new_plan: Any) -> None:
-        logger.info("replan reason=%s new_plan=%r", reason, new_plan)
+    def on_replan(
+        self, reason: str, new_plan: Any, duration_ms: float | None = None
+    ) -> None:
+        logger.info(
+            "replan reason=%s new_plan=%r duration_ms=%s", reason, new_plan, duration_ms
+        )
 
     def on_goal_achieved(self, final_state: Any) -> None:
         logger.info("goal_achieved final_state=%r", final_state)
@@ -90,8 +96,14 @@ class LoggingTracer:
     async def aon_strategy_chosen(self, strategy_name: str) -> None:
         self.on_strategy_chosen(strategy_name)
 
-    async def aon_replan(self, reason: str, new_plan: Any) -> None:
-        self.on_replan(reason, new_plan)
+    async def aon_replan(
+        self, reason: str, new_plan: Any, duration_ms: float | None = None
+    ) -> None:
+        self.on_replan(
+            reason,
+            new_plan,
+            **supported_kwargs(self.on_replan, {"duration_ms": duration_ms}),
+        )
 
     async def aon_goal_achieved(self, final_state: Any) -> None:
         self.on_goal_achieved(final_state)

@@ -9,6 +9,8 @@ Public surface:
 * :class:`MultiTracer` \u2014 fan a single event out to multiple tracers.
 * :class:`LangSmithTracer` \u2014 LangSmith adapter that emits each
   planner/executor cycle as a structured run tree.
+* :func:`current_thread_id` \u2014 the thread a hook, action or sensor is
+  running for.
 
 This module re-exports the same names that the previous single-file
 ``langgoap.tracing`` module exposed; ``from langgoap.tracing import X``
@@ -17,6 +19,7 @@ continues to work for ``X`` in the list above.
 
 from __future__ import annotations
 
+from langgoap.tracing._context import current_thread_id
 from langgoap.tracing._protocol import PlanningTracer
 from langgoap.tracing._safe_proxy import SafeTracerProxy
 from langgoap.tracing.langsmith import LangSmithTracer
@@ -31,4 +34,5 @@ __all__ = [
     "MultiTracer",
     "LangSmithTracer",
     "SafeTracerProxy",
+    "current_thread_id",
 ]

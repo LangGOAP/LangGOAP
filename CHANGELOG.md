@@ -7,7 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+## [0.3.1] — 2026-11-22
+
+
+### Added
+
+- Observed effects (`GoapGraph(effects="observed")`, #96). After an action
+  runs, its declared effects and any dict it returned are assumed, the sensors
+  are asked, and what they report for the action's keys wins: the effect keys,
+  the new `ActionSpec.observe` and the graph's `always_observe`. Actions no
+  longer re-read and return their own facts, and a decision-only action needs
+  no `execute`. Works with both executors on the sync and async paths. The
+  default stays `effects="declared"`.
+- `ActionSpec.wait(...)`: an action that pauses the graph (interrupt payload
+  type `goap_action_wait`) until a sensed value of one of its keys changes,
+  with `on_resume` and `payload` options. The parallel executor runs a wait
+  alone, like an approval gate. New fields `ActionSpec.is_wait`, `on_resume`
+  and `wait_payload`; `@goap_action(is_wait=True, ...)` and a `GoapAction`
+  subclass with `is_wait = True` declare a wait too.
+- Thread API on `GoapGraph`: `goal=`, `checkpointer=`, `on_stop=` and
+  `max_actions=` on the constructor, and `start`, `notify`, `resume`, `waiting`
+  (plus `astart`, `anotify`, `aresume`, `awaiting`) per thread id. Runs are
+  serialised through a mailbox, so a call made while a run is in progress is
+  delivered after it, including calls from other OS threads; `notify` never
+  answers a question and `resume` never ends a wait.
+- `sensors=` accepts plain functions `(world_state) -> updates`
+  (`langgoap.sensors.as_sensor`).
+- `current_thread_id()` tells a tracer hook, action or sensor which thread it
+  is running for.
+- `GoapGraph(effects="merged")` (#97): the declared effects are applied and a
+  returned dict is merged on top, so an action returns only what it adds or
+  what differs. The default stays `"declared"`, where a returned dict must set
+  every declared effect key.
+- `ActionSpec.name` may be omitted when `execute` or `aexecute` is a named
+  function or method; the action is named after it (#98). A lambda or a
+  `functools.partial` still needs an explicit name.
+- `GoapGraph.invoke` and `ainvoke` accept a plain mapping of conditions as the
+  goal and fall back to the graph's `goal=` (#100).
+- `GoapResult` (#101): `invoke`, `ainvoke`, `rehydrate` and the thread API
+  return the state dict as a `dict` subclass with `status`, `succeeded`,
+  `actions`, `world_state`, `interrupt` and `summary()`. Every existing lookup
+  on the result keeps working.
+
+### Fixed
+
+- Synchronous actions, sensors, guards and condition resolvers that the async
+  path runs in a worker thread now run in the caller's context, so LangGraph's
+  run config (and `current_thread_id()`) reaches them.
+- `on_replan` and `aon_replan` receive `duration_ms`, like `on_plan_complete`.
+  It is passed by keyword and only to hooks that declare it, so tracers written
+  against the earlier signature keep working.
+
+### Documentation
+
+- `GoapGraph.initial_state` and the concepts page say that the initial world
+  state may be partial, because sensors run before the first plan too.
+- Examples: the human-in-the-loop scripts for the email assistant and the
+  weather alert use the thread API (#102), with unchanged output; `cost=1.0`
+  is dropped from the five example files where every action has the default
+  cost (#99).
+
 
 ## [0.3.0] — 2026-11-17
 

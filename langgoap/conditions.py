@@ -32,6 +32,8 @@ import asyncio
 import logging
 from typing import Any, Callable, Protocol, runtime_checkable
 
+from langgoap._worker import run_in_worker
+
 logger = logging.getLogger(__name__)
 
 
@@ -352,7 +354,6 @@ async def aresolve_conditions(
     executor for sync-only resolvers.
     """
     updated = dict(world_state)
-    loop = asyncio.get_running_loop()
 
     for key in keys:
         if not overwrite and key in updated:
@@ -363,9 +364,7 @@ async def aresolve_conditions(
                 if hasattr(resolver, "aresolve"):
                     status = await resolver.aresolve(key, updated)
                 elif hasattr(resolver, "resolve"):
-                    status = await loop.run_in_executor(
-                        None, resolver.resolve, key, updated
-                    )
+                    status = await run_in_worker(resolver.resolve, key, updated)
                 else:
                     continue
                 if status == ConditionStatus.TRUE:

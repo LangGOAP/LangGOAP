@@ -6,14 +6,15 @@ import asyncio
 import inspect
 import random
 import time
-from typing import Any
+from typing import Any, Iterable
 
 from langgraph.errors import GraphBubbleUp
 
+from langgoap._worker import run_in_worker
 from langgoap.actions import ActionSpec, ensure_unique_action_names
 from langgoap.graph.nodes._execution import (
     HistoryState,
-    _apply_result,
+    Observation,
     _build_failure,
     _build_guard_block,
     _build_success,
@@ -33,6 +34,7 @@ from langgoap.guards import (
     run_guards_sync,
 )
 from langgoap.planner.transitions import TransitionModel
+from langgoap.sensors import AsyncSensor, Sensor
 from langgoap.tracing import NullTracer, PlanningTracer, SafeTracerProxy
 
 
@@ -76,6 +78,14 @@ class GoapExecutor:
             ``"planning"`` only planning-relevant keys.  Bounds checkpoint
             growth with rich world states (issue #74); the realised cost is
             recorded separately, so accounting is unaffected.
+        sensors: The graph's sensors, asked after an action when
+            ``effects="observed"`` and by every wait (issue #96).
+        effects: ``"declared"`` (default) believes a returned dict, else the
+            declared effects.  ``"merged"`` applies the declared effects and
+            merges a returned dict on top.  ``"observed"`` does the same, then
+            lets the sensors overrule them for the action's keys.
+        always_observe: State keys read from the sensors after every action,
+            besides each action's effect keys and ``ActionSpec.observe``.
     """
 
     def __init__(
@@ -87,6 +97,9 @@ class GoapExecutor:
         rng: random.Random | None = None,
         actions: list[ActionSpec] | None = None,
         history_state: HistoryState = "full",
+        sensors: list[Sensor | AsyncSensor] | None = None,
+        effects: str = "declared",
+        always_observe: Iterable[str] = (),
     ) -> None:
         self._history_state = _validate_history_state(history_state)
         # Wrap the tracer in SafeTracerProxy at construction so call
@@ -94,6 +107,12 @@ class GoapExecutor:
         # without per-call try/except scaffolding.  Idempotent if the
         # caller already passed a SafeTracerProxy.
         self._tracer: PlanningTracer = SafeTracerProxy(tracer or NullTracer())
+        self._observation = Observation(
+            sensors,
+            effects=effects,
+            always_observe=always_observe,
+            tracer=self._tracer,
+        )
         self._guards: list[ActionGuard | AsyncActionGuard] = guards or []
         self._transition_model: TransitionModel | None = transition_model
         self._rng: random.Random = rng if rng is not None else random.Random()
@@ -195,7 +214,7 @@ class GoapExecutor:
                 tracer=self._tracer,
                 rng=self._backoff_rng,
             )
-            returned_dict = _apply_result(
+            returned_dict = self._observation.settle_sync(
                 raw,
                 action,
                 world_state,
@@ -282,7 +301,7 @@ class GoapExecutor:
                 tracer=self._tracer,
                 rng=self._backoff_rng,
             )
-            returned_dict = _apply_result(
+            returned_dict = await self._observation.settle_async(
                 raw,
                 action,
                 world_state,
@@ -408,8 +427,7 @@ async def async_execute_action(action: ActionSpec, world_state: dict[str, Any]) 
     if action.execute is not None:
         if inspect.iscoroutinefunction(action.execute):
             return await action.execute(world_state)
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, action.execute, world_state)
+        return await run_in_worker(action.execute, world_state)
     return None
 
 

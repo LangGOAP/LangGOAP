@@ -75,7 +75,16 @@ class PlanningTracer(Protocol):
         """
         ...
 
-    def on_replan(self, reason: str, new_plan: Any) -> None: ...
+    def on_replan(
+        self, reason: str, new_plan: Any, duration_ms: float | None = None
+    ) -> None:
+        """Called when a planning round produced a replacement plan.
+
+        ``duration_ms`` is the wall-clock of that round, as for
+        ``on_plan_complete`` (new in 0.3.1; a tracer whose ``on_replan`` does
+        not declare it is called without it).
+        """
+        ...
 
     def on_goal_achieved(self, final_state: Any) -> None: ...
 
@@ -131,7 +140,9 @@ class PlanningTracer(Protocol):
 
     async def aon_strategy_chosen(self, strategy_name: str) -> None: ...
 
-    async def aon_replan(self, reason: str, new_plan: Any) -> None: ...
+    async def aon_replan(
+        self, reason: str, new_plan: Any, duration_ms: float | None = None
+    ) -> None: ...
 
     async def aon_goal_achieved(self, final_state: Any) -> None: ...
 

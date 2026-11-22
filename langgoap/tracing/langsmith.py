@@ -20,6 +20,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from langgoap.tracing._context import supported_kwargs
 from langgoap.tracing._helpers import (
     describe_action,
     describe_goal,
@@ -376,7 +377,9 @@ class LangSmithTracer:
             extra={"metadata": {"strategy_chosen": strategy_name}},
         )
 
-    def on_replan(self, reason: str, new_plan: Any) -> None:
+    def on_replan(
+        self, reason: str, new_plan: Any, duration_ms: float | None = None
+    ) -> None:
         # The planner has fired on_plan_start already (which opened a
         # new root); this hook only updates that root's metadata with
         # the replan reason and the refreshed plan.  No new run is
@@ -530,8 +533,14 @@ class LangSmithTracer:
     async def aon_strategy_chosen(self, strategy_name: str) -> None:
         self.on_strategy_chosen(strategy_name)
 
-    async def aon_replan(self, reason: str, new_plan: Any) -> None:
-        self.on_replan(reason, new_plan)
+    async def aon_replan(
+        self, reason: str, new_plan: Any, duration_ms: float | None = None
+    ) -> None:
+        self.on_replan(
+            reason,
+            new_plan,
+            **supported_kwargs(self.on_replan, {"duration_ms": duration_ms}),
+        )
 
     async def aon_goal_achieved(self, final_state: Any) -> None:
         self.on_goal_achieved(final_state)
