@@ -282,7 +282,7 @@ class ParallelGoapExecutor:
 
         for idx in group:
             action = self._rebind(plan_obj.actions[idx])
-            logger.info(
+            logger.debug(
                 "ParallelExecutor: running action %r (wave idx %d/%d)",
                 action.name,
                 group.index(idx) + 1,

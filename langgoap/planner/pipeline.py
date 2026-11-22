@@ -292,7 +292,7 @@ def plan(
 
     # Phase 2: CSP validation
     csp_meta = validate_plan(primary, goal)
-    logger.info(
+    logger.debug(
         "CSP validation: status=%s for plan %s",
         csp_meta.status.value,
         primary.action_names,
@@ -335,7 +335,7 @@ def plan(
             max_alternatives,
         )
     else:
-        logger.info(
+        logger.debug(
             "Goal states preferences; comparing primary plan against up to %d "
             "alternatives",
             max_alternatives,
@@ -361,7 +361,7 @@ def plan(
     best_plan, opt_meta = optimize_plans(candidates, goal)
 
     if opt_meta.status in (CSPStatus.FEASIBLE, CSPStatus.OPTIMAL):
-        logger.info(
+        logger.debug(
             "CSP selected plan %s (status=%s, candidates=%d)",
             best_plan.action_names,
             opt_meta.status.value,

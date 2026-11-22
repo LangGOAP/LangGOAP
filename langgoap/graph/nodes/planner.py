@@ -464,7 +464,7 @@ class GoapPlanner:
             last_idx = idx
             if _is_goal_satisfied(candidate, world_state):
                 if not was_replan:
-                    logger.info(
+                    logger.debug(
                         "MultiGoal (sequential) sub-goal %d/%d already satisfied, "
                         "preflight advance: %s",
                         idx + 1,
@@ -473,7 +473,7 @@ class GoapPlanner:
                     )
                 continue
             if not was_replan:
-                logger.info(
+                logger.debug(
                     "Planning for MultiGoal (sequential, subgoal %d/%d): %s",
                     idx + 1,
                     total,
@@ -679,7 +679,7 @@ class GoapPlanner:
         replan_count = state.get("replan_count", 0)
         if was_replan:
             replan_count += 1
-            logger.info(
+            logger.debug(
                 "Replanning (replan #%d), reason=%s, world_state=%s",
                 replan_count,
                 state.get("replan_reason"),
@@ -753,7 +753,7 @@ class GoapPlanner:
                         was_replan,
                     )
                 best_idx, best_plan = resolved
-                logger.info(
+                logger.debug(
                     "MultiGoal 'any' mode: picked sub-goal %d with cost %.2f",
                     best_idx,
                     best_plan.total_cost,
@@ -767,7 +767,7 @@ class GoapPlanner:
         else:
             effective_goal = raw_goal
             if not was_replan:
-                logger.info("Planning for goal %s", dict(effective_goal.conditions))
+                logger.debug("Planning for goal %s", dict(effective_goal.conditions))
             pkeys = _planning_keys(self.actions, effective_goal)
             start = PlanningState.from_dict(world_state, keys=pkeys)
             # Pass prior_plan/current_step on replans so repair-style
@@ -838,7 +838,7 @@ class GoapPlanner:
                 was_replan,
             )
 
-        logger.info(
+        logger.debug(
             "Plan found: %s (cost=%.2f, nodes_explored=%d)",
             result.action_names,
             result.total_cost,
