@@ -37,7 +37,9 @@ from langgoap.graph.nodes import (
     ParallelGoapExecutor,
 )
 from langgoap.graph.nodes._execution import (
+    PRESENSED,
     WAIT_INTERRUPT,
+    Observation,
     _validate_effects_mode,
     _validate_history_state,
 )
@@ -250,6 +252,18 @@ class GoapGraph:
         self._sensors: list[Sensor | AsyncSensor] | None = (
             [as_sensor(sensor) for sensor in sensors] if sensors else None
         )
+        # The thread API looks before waking a wait (#116): the same sensing the
+        # executor does, run outside the graph on the thread's last state.
+        self._observation = Observation(
+            self._sensors,
+            effects=self._effects,
+            always_observe=self._always_observe,
+            tracer=self._tracer,
+        )
+        self._by_name: dict[str, ActionSpec] = {
+            action.name: action for action in actions
+        }
+        self._known: dict[str, tuple[dict[str, Any] | None, GoapResult]] = {}
         self._guards = guards
         self._resolvers = resolvers
         self._record_expansions = record_expansions
@@ -444,6 +458,9 @@ class GoapGraph:
         returned as is when it is a dict, else under ``"value"``.  ``None``
         means the thread is unknown, finished, or not paused on an interrupt.
         """
+        known = self._known.get(thread_id)
+        if known is not None:
+            return known[0]
         return self._pending_interrupt(
             self.compiled.get_state(self._thread_config(thread_id))
         )
@@ -474,6 +491,9 @@ class GoapGraph:
 
     async def awaiting(self, thread_id: str) -> dict[str, Any] | None:
         """Async :meth:`waiting`, for checkpointers that are async-only."""
+        known = self._known.get(thread_id)
+        if known is not None:
+            return known[0]
         return self._pending_interrupt(
             await self.compiled.aget_state(self._thread_config(thread_id))
         )
@@ -555,6 +575,83 @@ class GoapGraph:
                 return None
             return self._mailbox.popleft()
 
+    def _remember(self, thread_id: str, state: GoapResult) -> None:
+        """Keep what the thread is paused on and its state; forget a finished thread."""
+        pending = state.interrupt
+        if pending is None:
+            self._known.pop(thread_id, None)
+        else:
+            self._known[thread_id] = (pending, state)
+
+    def _wait_to_look_at(
+        self, thread_id: str, pending: dict[str, Any] | None
+    ) -> tuple[ActionSpec, GoapResult] | None:
+        """The wait action and the last state of a known thread paused in a wait."""
+        known = self._known.get(thread_id)
+        if known is None or pending is None or pending.get("type") != WAIT_INTERRUPT:
+            return None
+        action = self._by_name.get(str(pending.get("action")))
+        if action is None or not action.is_wait:
+            return None
+        return action, known[1]
+
+    @staticmethod
+    def _looked(
+        base: dict[str, Any],
+        world_state: dict[str, Any],
+        sensed: dict[str, Any],
+        fresh: Any,
+    ) -> Any:
+        """``None`` when nothing moved, else the resume value that carries the outcome.
+
+        Only what ``on_resume`` changed travels, so a value the wait's ``execute``
+        returned on the replay is kept underneath it.
+        """
+        updates = {
+            k: v for k, v in world_state.items() if k not in base or base[k] != v
+        }
+        removed = [k for k in base if k not in world_state]
+        if fresh is None and not updates and not removed:
+            return None
+        return Command(
+            resume={
+                PRESENSED: {"updates": updates, "removed": removed, "sensed": sensed}
+            }
+        )
+
+    def _look_sync(
+        self, thread_id: str, pending: dict[str, Any] | None
+    ) -> tuple[bool, Any]:
+        """Look before waking: ``(looked, value)``.
+
+        ``looked`` is False when the thread is not a known wait (the caller falls
+        back to a plain resume).  Otherwise ``value`` is ``None`` when nothing
+        changed, so the graph need not run, or the resume value to run it with.
+        """
+        found = self._wait_to_look_at(thread_id, pending)
+        if found is None:
+            return False, None
+        action, state = found
+        base = state["world_state"]
+        world_state = dict(base)
+        sensed = self._observation.look_sync(action, world_state)
+        fresh = self._observation.changed(action, world_state, sensed)
+        return True, self._looked(base, world_state, sensed, fresh)
+
+    async def _look_async(
+        self, thread_id: str, pending: dict[str, Any] | None
+    ) -> tuple[bool, Any]:
+        """Async :meth:`_look_sync`."""
+        found = self._wait_to_look_at(thread_id, pending)
+        if found is None:
+            return False, None
+        action, state = found
+        base = state["world_state"]
+        world_state = dict(base)
+        sensed = await self._observation.look_async(action, world_state)
+        fresh = self._observation.changed(action, world_state, sensed)
+        return True, self._looked(base, world_state, sensed, fresh)
+
     def _post(self, thread_id: str, kind: str, payload: Any) -> GoapResult | None:
         """Run now, or queue behind the run in progress.
 
@@ -570,12 +667,27 @@ class GoapGraph:
             while (call := self._next_call()) is not None:
                 thread, call_kind, call_payload, result = call
                 pending = None if call_kind == "start" else self.waiting(thread)
-                graph_input = self._input_for(call_kind, call_payload, pending)
-                if graph_input is None:
-                    continue
-                state = self.rehydrate(
-                    self.compiled.invoke(graph_input, self._thread_config(thread))
+                looked, value = (
+                    self._look_sync(thread, pending)
+                    if call_kind == "notify"
+                    else (False, None)
                 )
+                if (
+                    looked and value is None
+                ):  # nothing changed: the thread stays as it is
+                    state = self._known[thread][1]
+                else:
+                    graph_input = (
+                        value
+                        if looked
+                        else self._input_for(call_kind, call_payload, pending)
+                    )
+                    if graph_input is None:
+                        continue
+                    state = self.rehydrate(
+                        self.compiled.invoke(graph_input, self._thread_config(thread))
+                    )
+                    self._remember(thread, state)
                 result[0] = state
                 if self._on_stop is not None:
                     self._on_stop(thread, state)
@@ -615,14 +727,29 @@ class GoapGraph:
             while (call := self._next_call()) is not None:
                 thread, call_kind, call_payload, result = call
                 pending = None if call_kind == "start" else await self.awaiting(thread)
-                graph_input = self._input_for(call_kind, call_payload, pending)
-                if graph_input is None:
-                    continue
-                state = self.rehydrate(
-                    await self.compiled.ainvoke(
-                        graph_input, self._thread_config(thread)
-                    )
+                looked, value = (
+                    await self._look_async(thread, pending)
+                    if call_kind == "notify"
+                    else (False, None)
                 )
+                if (
+                    looked and value is None
+                ):  # nothing changed: the thread stays as it is
+                    state = self._known[thread][1]
+                else:
+                    graph_input = (
+                        value
+                        if looked
+                        else self._input_for(call_kind, call_payload, pending)
+                    )
+                    if graph_input is None:
+                        continue
+                    state = self.rehydrate(
+                        await self.compiled.ainvoke(
+                            graph_input, self._thread_config(thread)
+                        )
+                    )
+                    self._remember(thread, state)
                 result[0] = state
                 if self._on_stop is not None:
                     stopped = self._on_stop(thread, state)

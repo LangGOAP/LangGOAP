@@ -430,11 +430,12 @@ that pauses the graph until the world changes. It interrupts with
 `{"type": "goap_action_wait", "action": name}`; every resume makes it call
 `on_resume` once, ask the sensors once, and complete only when one of its keys
 differs from the value it had when the wait began; otherwise it pauses again,
-so notifying a thread often is cheap and never replays earlier resumes. It
-completes with what the sensors report, whatever the plan expected. An
-`execute` given to a wait prepares it; it runs before the first pause and once
-more on the first resume (LangGraph replays a paused task), so it must be
-idempotent.
+so notifying a thread often is cheap and never replays earlier resumes;
+through the thread API a notify that changes nothing does not run the graph
+at all. It completes with what the sensors report, whatever the plan expected.
+An `execute` given to a wait prepares it; it runs before the first pause and
+once more on the resume that runs the graph again (LangGraph replays a paused
+task), so it must be idempotent.
 
 **Threads.** Given a `goal`, the graph object runs threads itself:
 

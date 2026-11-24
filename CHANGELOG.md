@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+
+- A notify that changes nothing no longer runs the graph (#116). The thread
+  API keeps what each thread it runs is paused on and its last state; on
+  `notify` of a wait it runs the wait's `on_resume` and the sensors on that
+  state first and invokes the graph only when a watched key or the state
+  moved, handing the already-sensed outcome in so nothing runs twice.
+  `waiting()` and `waiting_action()` answer from that record for a thread the
+  object has run and read the checkpoint otherwise. Same contract: each notify
+  runs `on_resume` and the sensors once, an unchanged notify leaves the thread
+  in the same wait, `on_stop` is called either way, `resume()` is untouched.
+  Measured (`tests/benchmarks/test_thread_bench.py`, minimum of 20+ rounds, i7
+  laptop): an unchanged notify 2.84 ms (in-memory saver) and 3.31 ms (SQLite)
+  before, 0.005 ms after; fifty waiting threads woken by one world change 155
+  and 182 ms before, 0.2 ms after; start, an idle notify and the notify that
+  ends the wait 7.7 ms before, 4.6 ms after.
+  One visible difference: the execute of a wait is no longer replayed by an
+  unchanged notify, only by the run that ends the wait.
+
 ## [0.3.3] — 2026-11-22
 
 ### Changed
