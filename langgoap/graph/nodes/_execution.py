@@ -74,6 +74,8 @@ EffectsMode = Literal["declared", "merged", "observed"]
 EFFECTS_MODES: tuple[str, ...] = ("declared", "merged", "observed")
 #: ``type`` of the interrupt payload a wait pauses the graph with.
 WAIT_INTERRUPT = "goap_action_wait"
+PRESENSED = "__langgoap_presensed__"
+"""Key of a resume value carrying a wait's outcome sensed outside the graph (#116)."""
 
 
 def _validate_effects_mode(value: str) -> EffectsMode:
@@ -193,13 +195,53 @@ class Observation:
             **dict(action.wait_payload or {}),
         }
 
-    def _changed(
+    def changed(
         self, action: ActionSpec, world_state: dict[str, Any], sensed: dict[str, Any]
     ) -> dict[str, Any] | None:
+        """The watched keys whose sensed value differs from *world_state*, or ``None``."""
         fresh = {k: sensed[k] for k in self.keys(action) if k in sensed}
         if any(fresh[k] != world_state.get(k) for k in fresh):
             return fresh
         return None
+
+    _changed = changed
+
+    @staticmethod
+    def presensed(resumed: Any) -> dict[str, Any] | None:
+        """The outcome the thread API sensed before resuming, if the resume value carries one."""
+        if isinstance(resumed, dict):
+            pre = resumed.get(PRESENSED)
+            if isinstance(pre, dict):
+                return pre
+        return None
+
+    def look_sync(
+        self, action: ActionSpec, world_state: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Run the wait's ``on_resume`` on *world_state* in place, then the sensors.
+
+        Returns what the sensors reported.  Used inside the executor on a resume and by
+        the thread API before it decides whether to run the graph at all (#116).
+        """
+        if action.on_resume is not None:
+            outcome = action.on_resume(world_state)
+            if inspect.isawaitable(outcome):
+                getattr(outcome, "close", lambda: None)()
+                raise RuntimeError(
+                    f"Wait {action.name!r} has an async on_resume. Use "
+                    "GoapGraph.astart()/anotify() or compiled.ainvoke()."
+                )
+        return self._sense_sync(world_state)
+
+    async def look_async(
+        self, action: ActionSpec, world_state: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Async sibling of :meth:`look_sync`."""
+        if action.on_resume is not None:
+            outcome = action.on_resume(world_state)
+            if inspect.isawaitable(outcome):
+                await outcome
+        return await self._sense_async(world_state)
 
     # -- sync ------------------------------------------------------------
 
@@ -229,16 +271,16 @@ class Observation:
             if isinstance(raw, dict):
                 world_state.update(raw)
             # Raises on a task's first pass; returns the resume value after one.
-            interrupt(self._wait_payload(action))
-            if action.on_resume is not None:
-                outcome = action.on_resume(world_state)
-                if inspect.isawaitable(outcome):
-                    getattr(outcome, "close", lambda: None)()
-                    raise RuntimeError(
-                        f"Wait {action.name!r} has an async on_resume. Use "
-                        "GoapGraph.astart()/anotify() or compiled.ainvoke()."
-                    )
-            fresh = self._changed(action, world_state, self._sense_sync(world_state))
+            resumed = interrupt(self._wait_payload(action))
+            pre = self.presensed(resumed)
+            if pre is not None:  # the thread API looked already (#116)
+                for key in pre.get("removed", ()):
+                    world_state.pop(key, None)
+                world_state.update(pre["updates"])
+                sensed = pre["sensed"]
+            else:
+                sensed = self.look_sync(action, world_state)
+            fresh = self.changed(action, world_state, sensed)
             if fresh is None:
                 raise StillWaiting(action.name, world_state)
             world_state.update(fresh)
@@ -276,14 +318,16 @@ class Observation:
         if action.is_wait:
             if isinstance(raw, dict):
                 world_state.update(raw)
-            interrupt(self._wait_payload(action))
-            if action.on_resume is not None:
-                outcome = action.on_resume(world_state)
-                if inspect.isawaitable(outcome):
-                    await outcome
-            fresh = self._changed(
-                action, world_state, await self._sense_async(world_state)
-            )
+            resumed = interrupt(self._wait_payload(action))
+            pre = self.presensed(resumed)
+            if pre is not None:  # the thread API looked already (#116)
+                for key in pre.get("removed", ()):
+                    world_state.pop(key, None)
+                world_state.update(pre["updates"])
+                sensed = pre["sensed"]
+            else:
+                sensed = await self.look_async(action, world_state)
+            fresh = self.changed(action, world_state, sensed)
             if fresh is None:
                 raise StillWaiting(action.name, world_state)
             world_state.update(fresh)
