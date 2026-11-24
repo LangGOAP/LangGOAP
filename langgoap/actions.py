@@ -60,6 +60,14 @@ class ActionSpec:
             state keys the callable may produce.  Must be ``None`` for
             static effects.
         cost: Static cost or callable that computes cost from world state.
+        cost_keys: For a cost function, the state keys it reads (``()`` when
+            it reads nothing the search changes). The planner then asks it
+            once per distinct value of those keys in a planning call, keeps
+            the actions that write them, and treats a cost whose keys no
+            searched action writes as a constant its heuristic may use.
+            ``None`` (the default) declares nothing: the cost is asked at
+            every evaluation, an action whose only purpose is to lower it is
+            not searched, and the heuristic falls back to zero.
         execute: The function to call when the action is executed (sync).
         aexecute: Optional async execute callable. When set, the async
             executor will ``await`` this instead of calling ``execute``.
@@ -114,6 +122,7 @@ class ActionSpec:
     )
     effect_keys: frozenset[str] | None = None
     cost: float | CostFunction = 1.0
+    cost_keys: frozenset[str] | None = None
     execute: Callable[..., Any] | None = None
     aexecute: Callable[..., Any] | None = None
     effect_validator: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
@@ -152,6 +161,20 @@ class ActionSpec:
             )
         if not isinstance(self.observe, tuple):
             object.__setattr__(self, "observe", tuple(self.observe))
+        if isinstance(self.cost_keys, str):
+            raise TypeError(
+                "ActionSpec.cost_keys must be an iterable of state keys, not a "
+                f"string; did you mean cost_keys=({self.cost_keys!r},)?"
+            )
+        if self.cost_keys is not None:
+            if not callable(self.cost):
+                raise ValueError(
+                    f"ActionSpec {self.name!r} declares cost_keys="
+                    f"{sorted(self.cost_keys)!r} but its cost is the number "
+                    f"{self.cost!r}; cost_keys says what a cost function reads."
+                )
+            if not isinstance(self.cost_keys, frozenset):
+                object.__setattr__(self, "cost_keys", frozenset(self.cost_keys))
         if not self.is_wait and (
             self.on_resume is not None or self.wait_payload is not None
         ):
@@ -248,6 +271,7 @@ class ActionSpec:
                 sorted(self.effect_keys) if self.effect_keys is not None else None
             ),
             "cost": None if callable(self.cost) else self.cost,
+            "cost_keys": sorted(self.cost_keys) if self.cost_keys is not None else None,
             "max_retries": self.max_retries,
             "qos": self.qos.to_dict() if self.qos is not None else None,
             "can_rerun": self.can_rerun,
@@ -274,7 +298,7 @@ class ActionSpec:
         """Reconstruct a callable-free action from :meth:`to_dict` output.
 
         A ``None`` ``cost`` (the original was a cost function) becomes the
-        default ``1.0``; dynamic effects come back as the unresolved
+        default ``1.0`` and its ``cost_keys`` go with it; dynamic effects come back as the unresolved
         sentinel that :meth:`get_effects` reports clearly.  Prefer binding
         the stored name to the live :class:`ActionSpec` when one exists
         (see :meth:`langgoap.planner.types.Plan.from_dict`).
@@ -496,6 +520,7 @@ def goap_action(
     effects: Mapping[str, Any] | EffectFunction | None = None,
     effect_keys: frozenset[str] | set[str] | None = None,
     cost: float | CostFunction = 1.0,
+    cost_keys: Iterable[str] | None = None,
     name: str | None = None,
     max_retries: int = 0,
     qos: ActionQos | None = None,
@@ -560,6 +585,7 @@ def goap_action(
             effects=effects if effects is not None else {},
             effect_keys=frozenset(effect_keys) if effect_keys else None,
             cost=cost,
+            cost_keys=frozenset(cost_keys) if cost_keys is not None else None,
             # Async functions must NOT be stored in `execute` — the sync
             # executor would call them and receive a coroutine object that
             # is never awaited, silently losing runtime results and leaking
@@ -615,6 +641,8 @@ class GoapAction:
     effects: dict[str, Any] | EffectFunction = {}
     #: Keys a callable :attr:`effects` may write; required with callable effects.
     effect_keys: frozenset[str] | set[str] | None = None
+    #: Keys a :meth:`cost` override reads; see ``ActionSpec.cost_keys``.
+    cost_keys: frozenset[str] | set[str] | None = None
     max_retries: int = 0
     qos: ActionQos | None = None
     can_rerun: bool = True
@@ -708,6 +736,12 @@ class GoapAction:
         if self.is_wait and type(self).on_resume is not GoapAction.on_resume:
             custom_on_resume = self.on_resume
 
+        # The default cost() is the constant 1.0: hand the planner the number,
+        # not a callable, so class-based actions keep its heuristic (#118).
+        cost: float | CostFunction = (
+            self.cost if type(self).cost is not GoapAction.cost else 1.0
+        )
+
         effects: Mapping[str, Any] | EffectFunction
         if callable(self.effects) and not isinstance(self.effects, Mapping):
             effects = self.effects
@@ -718,7 +752,10 @@ class GoapAction:
             preconditions=dict(self.preconditions),
             effects=effects,
             effect_keys=frozenset(self.effect_keys) if self.effect_keys else None,
-            cost=self.cost,
+            cost=cost,
+            cost_keys=(
+                frozenset(self.cost_keys) if self.cost_keys is not None else None
+            ),
             execute=self.execute,
             aexecute=custom_aexecute,
             effect_validator=custom_validator,
