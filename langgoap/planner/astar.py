@@ -4,8 +4,9 @@ Forward-chaining A* search over GOAP state space. Includes:
 - Reachability pre-check (fast early exit when a goal condition has no
   producing action)
 - An admissible, consistent heuristic (unsatisfied goal conditions scaled
-  by the largest per-action goal coverage and the smallest static cost),
+  by the largest per-action goal coverage and the smallest action cost),
   so the first goal state popped is cost-optimal
+- Dynamic costs asked once per distinct input for the whole planning call
 - Action specificity tie-breaking
 - Two-pass plan optimization: backward relevance + forward simulation
 """
@@ -22,6 +23,7 @@ from typing import Any, cast
 
 from langgoap.actions import ActionSpec
 from langgoap.goals import GoalSpec
+from langgoap.planner.costs import CostMemo
 from langgoap.planner.types import Plan, PlanMetadata
 from langgoap.score import SimpleScore
 from langgoap.state import PlanningState
@@ -70,7 +72,11 @@ class _SearchNode:
 
 
 def _heuristic_scale(
-    goal_conditions: Mapping[str, Any], actions: list[ActionSpec]
+    goal_conditions: Mapping[str, Any],
+    actions: list[ActionSpec],
+    *,
+    start: PlanningState | None = None,
+    memo: CostMemo | None = None,
 ) -> tuple[int, float]:
     """Return ``(max_goal_effects_per_action, min_action_cost)`` for ``actions``.
 
@@ -81,15 +87,20 @@ def _heuristic_scale(
       ``(key, value)`` pairs any single action can establish.  For
       dynamic-effect actions only the declared ``effect_keys`` are known,
       so every goal key they list counts.  Never below 1.
-    * ``min_action_cost`` is the smallest static cost in the action set.
-      A callable cost has no static lower bound, so its presence forces
-      the bound to ``0.0`` (the search then degrades gracefully to
+    * ``min_action_cost`` is the smallest action cost in the set.  A cost
+      function whose declared ``cost_keys`` no action in the set writes is
+      constant for the search, so its value at ``start`` counts (asked
+      through ``memo``, once).  Any other callable cost has no lower bound
+      and forces ``0.0`` (the search then degrades gracefully to
       uniform-cost search, which is still optimal).
     """
     goal_items = set(goal_conditions.items())
     goal_keys = set(goal_conditions)
     per_action = 1
-    min_cost: float | None = None
+    floor: float | None = None
+    unbounded = False
+    written: frozenset[str] | None = None
+    start_dict: dict[str, Any] | None = None
     for a in actions:
         if a.has_dynamic_effects:
             n = len((a.effect_keys or frozenset()) & goal_keys)
@@ -98,13 +109,26 @@ def _heuristic_scale(
             n = len([kv for kv in static_effects.items() if kv in goal_items])
         if n > per_action:
             per_action = n
-        if callable(a.cost):
-            min_cost = 0.0
-        elif min_cost is None or a.cost < min_cost:
-            min_cost = float(a.cost)
-    if min_cost is None or min_cost < 0.0:
-        min_cost = 0.0
-    return per_action, min_cost
+        if unbounded:
+            continue
+        cost: Any = a.cost
+        if callable(cost):
+            if start is None or memo is None or a.cost_keys is None:
+                unbounded = True
+                continue
+            if written is None:
+                written = frozenset().union(*(x.effect_key_set() for x in actions))
+            if a.cost_keys & written:
+                unbounded = True
+                continue
+            if start_dict is None:
+                start_dict = start.as_context()
+            cost = memo.cost(a, start, start_dict)
+        if floor is None or cost < floor:
+            floor = float(cost)
+    if unbounded or floor is None or floor < 0.0:
+        floor = 0.0
+    return per_action, floor
 
 
 def _heuristic(
@@ -186,7 +210,8 @@ def relevant_actions(
     """Drop the actions that cannot contribute to ``goal_conditions``.
 
     A key is relevant when the goal reads it or when an action that writes a
-    relevant key reads it in a precondition (a backward closure over keys).
+    relevant key reads it in a precondition or in its declared ``cost_keys``
+    (a backward closure over keys).
     An action is kept when it writes at least one relevant key; dynamic
     effects count through their declared ``effect_keys``, and when a relevant
     action has dynamic effects nothing is dropped at all, because such an
@@ -211,6 +236,8 @@ def relevant_actions(
             if written & frontier:
                 kept.append(action)
                 newly.update(k for k in action.preconditions if k not in relevant)
+                if action.cost_keys:
+                    newly.update(k for k in action.cost_keys if k not in relevant)
             else:
                 still.append((action, written))
         relevant |= newly
@@ -234,13 +261,15 @@ def relevant_actions(
 def _backward_optimization(
     actions: tuple[ActionSpec, ...],
     goal_conditions: Mapping[str, Any],
+    start: PlanningState | None = None,
 ) -> tuple[ActionSpec, ...]:
     """Backward pass: keep only actions whose effects are needed.
 
     Walk the plan backward. Track which conditions are still needed
     (starting from goal conditions). An action is kept only if at least
     one of its effects is needed. Its preconditions then become needed
-    for earlier actions.
+    for earlier actions, and so do the values its declared ``cost_keys``
+    had when the plan reached it (#119), which takes ``start`` to replay.
 
     Dynamic-effect actions read arbitrary state at execution time; the
     backward pass has no static way to know which keys they depend on,
@@ -258,16 +287,27 @@ def _backward_optimization(
         )
         return actions
 
+    pre_states: list[PlanningState] = []
+    if start is not None and any(a.cost_keys for a in actions):
+        sim = start
+        for action in actions:
+            pre_states.append(sim)
+            sim = sim.apply(action.get_effects(sim.as_context()))
+
     needed: set[tuple[str, Any]] = set(goal_conditions.items())
     kept: list[ActionSpec] = []
 
-    for action in reversed(actions):
+    for index in range(len(actions) - 1, -1, -1):
+        action = actions[index]
         effect_items = set(action.effects.items())  # type: ignore[union-attr]
         if effect_items & needed:
             kept.append(action)
             # Remove satisfied conditions, add preconditions as new needs
             needed -= effect_items
             needed |= set(action.preconditions.items())
+            if pre_states and action.cost_keys:
+                pre = pre_states[index]
+                needed |= {(k, pre.get(k)) for k in action.cost_keys if k in pre}
 
     kept.reverse()
     return tuple(kept)
@@ -322,6 +362,7 @@ def _search(
     record_expansions: bool = False,
     attempt: int = 1,
     weight: float = 1.0,
+    memo: CostMemo | None = None,
 ) -> tuple[Plan | None, int]:
     """Core A* search loop.
 
@@ -359,6 +400,8 @@ def _search(
     # skip at each call site — this is the "zero overhead when silent"
     # path guaranteed by the public API.
     record = tracer is not None and record_expansions
+    if memo is None:
+        memo = CostMemo()
     on_expand = getattr(tracer, "on_search_expand", None) if record else None
     on_dead_end = getattr(tracer, "on_search_dead_end", None) if record else None
 
@@ -389,7 +432,9 @@ def _search(
     # across calls.
     counter = [0]
 
-    per_action, min_cost = _heuristic_scale(goal_conditions, sorted_actions)
+    per_action, min_cost = _heuristic_scale(
+        goal_conditions, sorted_actions, start=start, memo=memo
+    )
     h0 = _heuristic(start, goal_conditions, per_action=per_action, min_cost=min_cost)
     root = _SearchNode(
         f_score=weight * h0, g_score=0.0, counter=counter[0], state=start
@@ -425,7 +470,7 @@ def _search(
             # first goal popped is optimal; with ``weight > 1`` it is a
             # complete plan whose cost is at most ``weight`` times optimal.
             built = _build_plan_from_node(
-                current, start, goal_conditions, nodes_explored, t0
+                current, start, goal_conditions, nodes_explored, t0, memo
             )
             return built, nodes_explored
 
@@ -444,6 +489,7 @@ def _search(
             per_action=per_action,
             min_cost=min_cost,
             weight=weight,
+            memo=memo,
         )
 
     # Open list exhausted without reaching the goal — reachability pre-check
@@ -456,29 +502,44 @@ def _search(
     return None, nodes_explored  # No path found
 
 
+def _simulate(
+    actions: tuple[ActionSpec, ...], start: PlanningState, memo: CostMemo
+) -> tuple[list[PlanningState], float]:
+    """The expected states and the total cost of *actions* from *start*."""
+    expected: list[PlanningState] = []
+    sim_state = start
+    total_cost = 0.0
+    for a in actions:
+        sim_dict = sim_state.as_context()
+        total_cost += memo.cost(a, sim_state, sim_dict)
+        sim_state = sim_state.apply(a.get_effects(sim_dict))
+        expected.append(sim_state)
+    return expected, total_cost
+
+
 def _build_plan_from_node(
     node: _SearchNode,
     start: PlanningState,
     goal_conditions: Mapping[str, Any],
     nodes_explored: int,
     t0: float,
+    memo: CostMemo | None = None,
 ) -> Plan:
     """Materialize a :class:`Plan` from a goal-satisfying search node."""
+    if memo is None:
+        memo = CostMemo()
     raw_actions = node.actions
     original_len = len(raw_actions)
     # Two-pass optimization
-    optimized = _backward_optimization(raw_actions, goal_conditions)
+    optimized = _backward_optimization(raw_actions, goal_conditions, start)
     optimized = _forward_optimization(optimized, start, goal_conditions)
+    expected, total_cost = _simulate(optimized, start, memo)
+    if len(optimized) != original_len and total_cost > node.g_score + 1e-9:
+        # The shortener dropped an action a later dynamic cost relied on
+        # (#119): the path A* found stands.
+        optimized = raw_actions
+        expected, total_cost = _simulate(optimized, start, memo)
     actions_pruned = original_len - len(optimized)
-
-    expected: list[PlanningState] = []
-    sim_state = start
-    total_cost = 0.0
-    for a in optimized:
-        sim_dict = sim_state.as_context()
-        total_cost += a.get_cost(sim_dict)
-        sim_state = sim_state.apply(a.get_effects(sim_dict))
-        expected.append(sim_state)
 
     elapsed_ms = (_clock() - t0) * 1000
     return Plan(
@@ -506,6 +567,7 @@ def _expand_neighbors(
     per_action: int = 1,
     min_cost: float = 1.0,
     weight: float = 1.0,
+    memo: CostMemo | None = None,
 ) -> None:
     """Push every improving neighbour of ``current`` onto the open list.
 
@@ -535,7 +597,14 @@ def _expand_neighbors(
         new_state = current.state.apply(effects)
         if new_state == current.state:
             continue  # no-op transition
-        cost = action.get_cost(current_dict)
+        cost = action.cost
+        if callable(cost):
+            # Declared keys go through the memo; an undeclared cost is asked
+            # as it always was, with no lookup in between.
+            if memo is None or action.cost_keys is None:
+                cost = action.get_cost(current_dict)
+            else:
+                cost = memo.cost(action, current.state, current_dict)
         tentative_g = current.g_score + cost
         if tentative_g >= best_g.get(new_state, float("inf")):
             continue
@@ -577,6 +646,7 @@ def _run_search(
     tracer: Any,
     record_expansions: bool,
     attempt: int,
+    memo: CostMemo | None = None,
 ) -> tuple[Plan | None, int]:
     """One logical search: plain A* without a deadline, anytime A* with one.
 
@@ -597,6 +667,7 @@ def _run_search(
             tracer=tracer,
             record_expansions=record_expansions,
             attempt=attempt,
+            memo=memo,
         )
     best: Plan | None = None
     total = 0
@@ -613,6 +684,7 @@ def _run_search(
             record_expansions=record_expansions,
             attempt=attempt,
             weight=weight,
+            memo=memo,
         )
         total += n
         if result is None:
@@ -672,6 +744,7 @@ def plan(
         start = PlanningState.from_dict(start)
     t0 = _clock()
     goal_conditions = goal.conditions
+    memo = CostMemo()  # one planning call: each dynamic cost once per input (#118)
     deadline = (t0 + time_budget_ms / 1000.0) if time_budget_ms is not None else None
 
     # Single owner of ``on_search_complete`` — see :func:`_search` for
@@ -718,6 +791,7 @@ def plan(
             tracer=tracer,
             record_expansions=record_expansions,
             attempt=1,
+            memo=memo,
         )
         if result is not None or not blacklist_fallback:
             _emit_complete(result is not None, n1)
@@ -734,6 +808,7 @@ def plan(
             tracer=tracer,
             record_expansions=record_expansions,
             attempt=2,
+            memo=memo,
         )
         _emit_complete(result is not None, n1 + n2)
         # Report the whole planning effort, not just the second search
@@ -749,6 +824,7 @@ def plan(
         tracer=tracer,
         record_expansions=record_expansions,
         attempt=1,
+        memo=memo,
     )
     _emit_complete(result is not None, n)
     return result

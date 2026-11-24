@@ -22,9 +22,17 @@ and stopping when the goal conditions hold. The heuristic is admissible
 and consistent — `ceil(unsatisfied goal conditions / most goal
 conditions any single action establishes) × cheapest static action
 cost` — so the first plan A\* returns is a cheapest plan. `CostFunction`
-is a `Protocol`, so users can supply dynamic, state-dependent costs;
-when any cost is dynamic the heuristic falls back to zero (plain
-Dijkstra) rather than risk overestimating.
+is a `Protocol`, so users can supply dynamic, state-dependent costs. A
+cost function declares the state keys it reads in `cost_keys` (`()`
+when it reads nothing the search changes); the planner asks it once per
+distinct value of those keys in a planning call, keeps the actions that
+write them, and when no searched action writes any of them treats the
+cost as a constant the heuristic may use. Without the declaration the
+cost is asked at every evaluation, an action whose only purpose is to
+lower that cost is not searched, and the heuristic falls back to zero
+(plain Dijkstra) rather than risk overestimating. A plan the shortening
+passes would make dearer than the path A\* found is returned as that
+path.
 
 With a `time_budget_ms`, planning is *anytime*: weighted A\* runs with a
 tightening weight schedule, so a complete (bounded-suboptimal) plan is

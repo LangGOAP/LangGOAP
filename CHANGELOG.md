@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `ActionSpec.cost_keys` (also on `goap_action` and `GoapAction`): the state
+  keys a cost function reads, `()` when it reads nothing the search changes.
+  Declared like `effect_keys`; carried by `to_dict`, dropped by `from_dict`
+  together with the function (#118).
+
 ### Performance
 
 - A notify that changes nothing no longer runs the graph (#116). The thread
@@ -25,6 +32,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ends the wait 7.7 ms before, 4.6 ms after.
   One visible difference: the execute of a wait is no longer replayed by an
   unchanged notify, only by the run that ends the wait.
+- A cost function that declares `cost_keys` is asked once per distinct value
+  of those keys in a planning call, anytime iterations and plan building
+  included; one whose keys no searched action writes is constant for the
+  search and its value feeds the heuristic instead of forcing it to zero. A
+  `GoapAction` subclass that does not override `cost()` now gets a static
+  cost of 1.0 instead of a callable, so class-based actions keep the
+  heuristic by default. An undeclared cost is called at every evaluation as
+  before, with no lookup in between; the static path is unchanged (#118).
+  Measured (`tests/benchmarks/test_dynamic_cost_bench.py`, eight steps and
+  seven optional flags, both sources under one interpreter, interleaved,
+  minimum of two runs of 20+ rounds): costs reading a constant context key,
+  577 nodes and 2824 calls per plan at 16.4 ms before, 9 nodes and 15 calls
+  at 0.63 ms after with `cost_keys=()`; costs reading a key the search
+  changes, 2809 calls before and 22 after with `cost_keys=("g0",)`, at the
+  same 569 nodes and 16.5 versus 17.6 ms for a trivial function (the lookup
+  costs about what a trivial function does; declare keys for a cost worth
+  remembering, or `()`); under the anytime schedule 11236 calls before and
+  22 after. Static and undeclared costs within two percent: 0.54 versus
+  0.55 ms and 16.6 versus 16.8 ms.
+
+### Fixed
+
+- The plan shortener could return a plan dearer than the path A* found when
+  a later action's cost depended on an earlier action's effect (`discount`
+  then `buy` at 2 came back as `buy` at 10). A shortened plan that costs
+  more than the path is now replaced by the path. With `cost_keys` declared
+  the relevance filter keeps the actions that write those keys and the
+  backward pass keeps them as needs, so the enabler is searched and kept
+  (#119).
 
 ## [0.3.3] — 2026-11-22
 
